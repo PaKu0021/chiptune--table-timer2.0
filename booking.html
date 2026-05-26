@@ -9,24 +9,39 @@
 
 <body>
 
-<h2>预约系统</h2>
-<button onclick="location.href='index.html'">返回</button>
+<div class="page-shell">
 
-<div style="margin:20px 0;">
-  <input id="name" placeholder="姓名">
-  <input id="phone" placeholder="手机号">
-  <input id="time" placeholder="到店时间（例如 18:30）">
+  <div class="app-header">
+    <div class="app-title">
+      <h1>预约系统</h1>
+      <p>录入客人信息 / 指定桌位 / 调整座位</p>
+    </div>
+
+    <div class="header-actions">
+      <button onclick="location.href='./index.html'">返回首页</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>新增预约</h2>
+
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+      <input id="name" placeholder="客人姓名">
+      <input id="phone" placeholder="手机号">
+      <input id="time" placeholder="到店时间，例如 18:30">
+      <select id="tableSelect"></select>
+    </div>
+
+    <button class="btn-main" onclick="createBooking()">创建预约</button>
+  </div>
+
+  <div class="panel">
+    <h2>预约列表</h2>
+    <div id="list"></div>
+  </div>
+
 </div>
-
-<div>
-  <select id="tableSelect"></select>
-  <button onclick="createBooking()">创建预约</button>
-</div>
-
-<h3>预约列表</h3>
-<div id="list"></div>
 
 <script type="module" src="./js/booking.js"></script>
-
 </body>
 </html>
