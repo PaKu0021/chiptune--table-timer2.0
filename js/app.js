@@ -1,6 +1,5 @@
 import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-messaging.js";
 import { formatTime } from "./common.js";
 
 const ref = doc(db, "shop", "main");
@@ -8,8 +7,6 @@ const RATE = 0.044;
 
 // 这里填 Firebase Cloud Messaging 的 Web Push certificates 公钥
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
-
-const messaging = getMessaging();
 
 let state = null;
 let checkoutIndex = null;
@@ -273,6 +270,12 @@ async function initPush(){
       return;
     }
 
+    const { getMessaging, getToken } = await import(
+      "https://www.gstatic.com/firebasejs/12.13.0/firebase-messaging.js"
+    );
+
+    const messaging = getMessaging();
+
     const registration = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
 
     const token = await getToken(messaging,{
@@ -280,16 +283,11 @@ async function initPush(){
       serviceWorkerRegistration: registration
     });
 
-    if(!token){
-      alert("没有取得推送Token");
-      return;
-    }
-
     await setDoc(doc(db,"devices",token),{
       token,
-      userAgent: navigator.userAgent,
-      createdAt: Date.now(),
-      enabled: true
+      userAgent:navigator.userAgent,
+      createdAt:Date.now(),
+      enabled:true
     });
 
     alert("锁屏提醒已开启 ✅");
@@ -297,7 +295,7 @@ async function initPush(){
 
   }catch(e){
     console.error(e);
-    alert("推送开启失败，请检查 VAPID Key 和 firebase-messaging-sw.js");
+    alert("推送开启失败，但计时系统不会受影响");
   }
 }
 
