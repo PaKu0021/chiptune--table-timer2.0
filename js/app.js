@@ -291,7 +291,7 @@ async function initPush(){
     });
 
     alert("锁屏提醒已开启 ✅");
-    console.log("FCM Token:",token);
+    alert("Token: " + token);
 
   }catch(e){
     console.error(e);
