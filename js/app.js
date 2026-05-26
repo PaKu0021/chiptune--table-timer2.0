@@ -276,7 +276,11 @@ async function initPush(){
 
     const messaging = getMessaging();
 
-    const registration = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
+    const swPath = location.pathname.includes("/chiptune--table-timer2.0/")
+  ? "/chiptune--table-timer2.0/firebase-messaging-sw.js"
+  : "./firebase-messaging-sw.js";
+
+const registration = await navigator.serviceWorker.register(swPath);
 
     const token = await getToken(messaging,{
       vapidKey: VAPID_KEY,
