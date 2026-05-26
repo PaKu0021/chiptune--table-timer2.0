@@ -98,7 +98,12 @@ function getOriginalJPY(t){
 function roundJPY(jpy){
   const base = Math.floor(jpy / 1000) * 1000;
   const rest = jpy - base;
-  return rest <= 500 ? base : base + 500;
+
+  if(rest <= 500){
+    return base;
+  }
+
+  return base + 500;
 }
 
 function getRMB(jpy){
