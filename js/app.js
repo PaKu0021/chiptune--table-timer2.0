@@ -235,7 +235,6 @@ function render(){
 
       <button class="btn-success full" onclick="openCheckout(${i})">结账</button>
 
-      <canvas id="qr-${i}" width="120" height="120"></canvas>
     `;
 
     box.appendChild(div);
