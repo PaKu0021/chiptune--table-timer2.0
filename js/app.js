@@ -254,19 +254,24 @@ function ensurePushButton(){
 async function initPush(){
   try{
     if(!("Notification" in window)){
-      alert("这个浏览器不支持通知");
+      alert("失败原因：这个浏览器不支持 Notification");
       return;
     }
 
     if(!("serviceWorker" in navigator)){
-      alert("这个浏览器不支持 Service Worker");
+      alert("失败原因：这个浏览器不支持 Service Worker");
+      return;
+    }
+
+    if(!VAPID_KEY || VAPID_KEY.includes("这里填")){
+      alert("失败原因：VAPID_KEY 还没有填");
       return;
     }
 
     const permission = await Notification.requestPermission();
 
     if(permission !== "granted"){
-      alert("请允许通知权限");
+      alert("失败原因：你没有允许通知权限");
       return;
     }
 
@@ -277,11 +282,8 @@ async function initPush(){
     const messaging = getMessaging();
 
     onMessage(messaging,(payload)=>{
-      console.log("Foreground message:",payload);
-
       const title = payload.notification?.title || "Chiptune提醒";
       const body = payload.notification?.body || "";
-
       notifyLocal(title,body);
     });
 
@@ -296,6 +298,11 @@ async function initPush(){
       serviceWorkerRegistration: registration
     });
 
+    if(!token){
+      alert("失败原因：Firebase 没有返回 token");
+      return;
+    }
+
     await setDoc(doc(db,"devices",token),{
       token,
       userAgent:navigator.userAgent,
@@ -308,7 +315,7 @@ async function initPush(){
 
   }catch(e){
     console.error(e);
-    alert("推送开启失败，但计时系统不会受影响");
+    alert("推送失败原因：" + (e.code || e.name || "") + "\n" + (e.message || e));
   }
 }
 
