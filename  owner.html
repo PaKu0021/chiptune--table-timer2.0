@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>老板模式</title>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+
+<h2>老板模式</h2>
+<button onclick="location.href='index.html'">返回</button>
+
+<div class="panel">
+  <button id="filter-today" onclick="setFilter('today')">今天</button>
+  <button id="filter-week" onclick="setFilter('week')">本周</button>
+  <button id="filter-month" onclick="setFilter('month')">本月</button>
+  <button id="filter-year" onclick="setFilter('year')">本年</button>
+  <button id="filter-all" onclick="setFilter('all')">全部</button>
+</div>
+
+<div class="panel">
+  <button id="currency-jpy" onclick="setChartCurrency('JPY')">日元</button>
+  <button id="currency-rmb" onclick="setChartCurrency('RMB')">人民币</button>
+</div>
+
+<div class="panel">
+  <h3 id="summary">统计加载中...</h3>
+  <div id="payStats"></div>
+</div>
+
+<div class="panel">
+  <h3>收入折线图</h3>
+  <canvas id="incomeChart" width="900" height="320"></canvas>
+</div>
+
+<div class="panel">
+  <button onclick="exportCSV()">导出当前筛选 CSV</button>
+</div>
+
+<div class="panel">
+  <h3>收银记录</h3>
+  <div id="records"></div>
+</div>
+
+<script type="module" src="./js/owner.js"></script>
+
+</body>
+</html>

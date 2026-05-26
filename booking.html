@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>预约系统</title>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+
+<h2>预约系统</h2>
+<button onclick="location.href='index.html'">返回</button>
+
+<div style="margin:20px 0;">
+  <input id="name" placeholder="姓名">
+  <input id="phone" placeholder="手机号">
+  <input id="time" placeholder="到店时间（例如 18:30）">
+</div>
+
+<div>
+  <select id="tableSelect"></select>
+  <button onclick="createBooking()">创建预约</button>
+</div>
+
+<h3>预约列表</h3>
+<div id="list"></div>
+
+<script type="module" src="./js/booking.js"></script>
+
+</body>
+</html>

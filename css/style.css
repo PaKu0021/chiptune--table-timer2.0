@@ -1,0 +1,39 @@
+body{
+  margin:0;
+  font-family:-apple-system;
+  background:#f7f3ea;
+}
+
+button{
+  padding:8px 12px;
+  border:none;
+  border-radius:10px;
+  margin:4px;
+}
+
+.card{
+  border-radius:14px;
+  padding:12px;
+  margin:10px;
+  display:inline-block;
+  width:260px;
+}
+
+/* 状态颜色系统 */
+.card.idle{
+  background:#f0f0f0;
+}
+
+.card.using{
+  background:#fff7d6;
+}
+
+.card.warning{
+  background:#ffe7b3;
+  border:2px solid #ff9800;
+}
+
+.card.overtime{
+  background:#ffe5e5;
+  border:2px solid #e85d5d;
+}
