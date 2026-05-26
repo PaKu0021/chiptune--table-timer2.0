@@ -4,8 +4,6 @@ import { formatTime } from "./common.js";
 
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
-
-// 这里填 Firebase Cloud Messaging 的 Web Push certificates 公钥
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
 
 let state = null;
@@ -32,11 +30,12 @@ function newTable(i){
 
 const defaultState = {
   packages:[
+    {name:"1小时", minutes:60, price:1500, extensionPrice:900, unlimited:false},
     {name:"3小时", minutes:180, price:3300, extensionPrice:900, unlimited:false},
     {name:"6小时", minutes:360, price:5500, extensionPrice:800, unlimited:false},
     {name:"不限时", minutes:0, price:5500, extensionPrice:0, unlimited:true}
   ],
-  tables: Array.from({length:6},(_,i)=>newTable(i+1)),
+  tables: Array.from({length:8},(_,i)=>newTable(i+1)),
   records:[],
   bookings:[]
 };
@@ -150,7 +149,6 @@ function render(){
     if(status === "warning" && !remindLocks[i]){
       remindLocks[i] = true;
       setTimeout(()=>{ remindLocks[i] = false; },60000);
-
       notifyLocal("续费提醒", t.name + " 剩余10分钟，建议提醒续费");
     }
 
@@ -181,11 +179,11 @@ function render(){
         `).join("")}
       </select>
 
-      <div style="font-size:22px;margin:10px 0;color:${status==="overtime" ? "#e85d5d" : status==="warning" ? "#ff9800" : "#333"};">
+      <div class="timer" style="color:${status==="overtime" ? "#e85d5d" : status==="warning" ? "#ff9800" : "#333"};">
         ${timeText}
       </div>
 
-      <div>
+      <div class="info">
         类型：${t.type || "-"}<br>
         客人：${t.customer.name || "-"} ${t.customer.phoneLast4 || ""}<br>
         当前日元：¥${originalJPY.toLocaleString()}<br>
@@ -193,19 +191,26 @@ function render(){
         人民币参考：¥${getRMB(originalJPY).toLocaleString()}
       </div>
 
-      <input placeholder="姓名" id="name-${i}" value="${t.customer.name || ""}">
-      <input placeholder="手机后4位" id="phone-${i}" value="${t.customer.phoneLast4 || ""}">
+      <div class="row">
+        <input placeholder="姓名" id="name-${i}" value="${t.customer.name || ""}">
+        <input placeholder="手机后4位" id="phone-${i}" value="${t.customer.phoneLast4 || ""}">
+      </div>
 
-      <button onclick="setWalkin(${i})">Walk-in</button>
-      <button onclick="setBooking(${i})">预约</button>
+      <div class="action-row">
+        <button class="btn-blue" onclick="setWalkin(${i})">Walk-in</button>
+        <button class="btn-blue" onclick="setBooking(${i})">预约</button>
+      </div>
 
       <input placeholder="提前分钟" id="pre-${i}">
-      <button onclick="start(${i})">开始</button>
-      <button onclick="pause(${i})">暂停</button>
-      <button onclick="resume(${i})">继续</button>
+
+      <div class="action-row">
+        <button class="btn-main" onclick="start(${i})">开始</button>
+        <button class="btn-ghost" onclick="pause(${i})">暂停</button>
+        <button class="btn-ghost" onclick="resume(${i})">继续</button>
+      </div>
 
       ${p.unlimited ? "" : `
-        <button style="${status==="warning" ? "background:#ff9800;color:#fff;" : ""}" onclick="addHour(${i})">
+        <button class="${status==="warning" ? "btn-warn" : "btn-main"} full" onclick="addHour(${i})">
           +1小时 ¥${p.extensionPrice}
         </button>
       `}
@@ -223,7 +228,7 @@ function render(){
         <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
       </select>
 
-      <button onclick="openCheckout(${i})">结账</button>
+      <button class="btn-success full" onclick="openCheckout(${i})">结账</button>
 
       <canvas id="qr-${i}" width="120" height="120"></canvas>
     `;
@@ -325,21 +330,17 @@ function setPackage(i,v){
 
 function setWalkin(i){
   const t = state.tables[i];
-
   t.type = "walkin";
   t.customer.name = document.getElementById("name-"+i).value;
   t.customer.phoneLast4 = document.getElementById("phone-"+i).value;
-
   save();
 }
 
 function setBooking(i){
   const t = state.tables[i];
-
   t.type = "booking";
   t.customer.name = document.getElementById("name-"+i).value;
   t.customer.phoneLast4 = document.getElementById("phone-"+i).value;
-
   save();
 }
 
@@ -475,24 +476,18 @@ function confirmCheckout(){
   state.records.push({
     timestamp: now.getTime(),
     time: now.toLocaleString(),
-
     tableName: t.name,
-
     customerName: t.customer?.name || "",
     phoneLast4: t.customer?.phoneLast4 || "",
     customerType: t.type || "walkin",
-
     packageName: p.name,
     packageMinutes: p.unlimited ? "不限时" : p.minutes,
     packagePrice: p.price,
-
     extraMinutes: Math.floor(Number(t.extra || 0) / 60000),
     extensionAmount: (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0),
-
     originalJPY,
     totalJPY: finalJPY,
     totalRMB,
-
     pay: t.pay,
     currency: t.currency || "日元",
     roundRule: useRound ? "500抹零" : "不抹零"
@@ -551,31 +546,20 @@ function playBeep(){
   }catch(e){}
 }
 
-function requestNotify(){
-  initPush();
-}
-
-function notifyOvertime(tableName){
-  notifyLocal("Chiptune 超时提醒", tableName + " 已超时");
-}
-
 function startAlertLoop(i){
   if(alertLoops[i]) return;
   if(!state || !state.tables[i]) return;
 
   playBeep();
-  notifyOvertime(state.tables[i].name);
+  notifyLocal("Chiptune 超时提醒", state.tables[i].name + " 已超时");
 
   const soundLoop = setInterval(()=>{
     playBeep();
-    if(navigator.vibrate){
-      navigator.vibrate([200,100,200]);
-    }
   },3000);
 
   const notifyLoop = setInterval(()=>{
     if(state && state.tables[i]){
-      notifyOvertime(state.tables[i].name);
+      notifyLocal("Chiptune 超时提醒", state.tables[i].name + " 已超时");
     }
   },30000);
 
@@ -646,5 +630,4 @@ window.openCheckout = openCheckout;
 window.toggleRound = toggleRound;
 window.confirmCheckout = confirmCheckout;
 window.closeCheckout = closeCheckout;
-window.requestNotify = requestNotify;
 window.initPush = initPush;
