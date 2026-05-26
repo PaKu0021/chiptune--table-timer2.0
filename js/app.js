@@ -1,4 +1,4 @@
-import { db } from "./firebase.js";
+import { app, db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 import { formatTime } from "./common.js";
 
