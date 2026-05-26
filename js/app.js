@@ -270,17 +270,26 @@ async function initPush(){
       return;
     }
 
-    const { getMessaging, getToken } = await import(
+    const { getMessaging, getToken, onMessage } = await import(
       "https://www.gstatic.com/firebasejs/12.13.0/firebase-messaging.js"
     );
 
     const messaging = getMessaging();
 
-    const swPath = location.pathname.includes("/chiptune--table-timer2.0/")
-  ? "/chiptune--table-timer2.0/firebase-messaging-sw.js"
-  : "./firebase-messaging-sw.js";
+    onMessage(messaging,(payload)=>{
+      console.log("Foreground message:",payload);
 
-const registration = await navigator.serviceWorker.register(swPath);
+      const title = payload.notification?.title || "Chiptune提醒";
+      const body = payload.notification?.body || "";
+
+      notifyLocal(title,body);
+    });
+
+    const swPath = location.pathname.includes("/chiptune--table-timer2.0/")
+      ? "/chiptune--table-timer2.0/firebase-messaging-sw.js"
+      : "./firebase-messaging-sw.js";
+
+    const registration = await navigator.serviceWorker.register(swPath);
 
     const token = await getToken(messaging,{
       vapidKey: VAPID_KEY,
@@ -302,15 +311,6 @@ const registration = await navigator.serviceWorker.register(swPath);
     alert("推送开启失败，但计时系统不会受影响");
   }
 }
-
-onMessage(messaging,(payload)=>{
-  console.log("Foreground message:",payload);
-
-  const title = payload.notification?.title || "Chiptune提醒";
-  const body = payload.notification?.body || "";
-
-  notifyLocal(title,body);
-});
 
 function notifyLocal(title,body){
   try{
