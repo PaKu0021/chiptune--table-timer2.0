@@ -279,7 +279,7 @@ async function initPush(){
       "https://www.gstatic.com/firebasejs/12.13.0/firebase-messaging.js"
     );
 
-    const messaging = getMessaging();
+    const messaging = getMessaging(app);
 
     onMessage(messaging,(payload)=>{
       const title = payload.notification?.title || "Chiptune提醒";
