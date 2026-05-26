@@ -2,19 +2,41 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chiptune 系统入口</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Chiptune 系统</title>
 <link rel="stylesheet" href="./css/style.css">
 </head>
 
-<body>
+<body class="home-page">
 
-<div class="center">
-  <h1>Chiptune 系统</h1>
+<div class="home-shell">
+  <div class="brand-card">
+    <div class="logo-dot">C</div>
+    <div>
+      <h1>Chiptune</h1>
+      <p>桌位计时・预约・收银管理系统</p>
+    </div>
+  </div>
 
-  <button onclick="go('app.html')">进入计时系统</button>
-  <button onclick="goOwner()">老板模式</button>
-  <button onclick="go('booking.html')">预约系统</button>
+  <div class="home-grid">
+    <button class="home-card primary" onclick="go('./app.html')">
+      <span class="emoji">⏱️</span>
+      <strong>进入计时系统</strong>
+      <small>桌位计时 / 结账 / 二维码</small>
+    </button>
+
+    <button class="home-card" onclick="goOwner()">
+      <span class="emoji">📊</span>
+      <strong>老板模式</strong>
+      <small>收入统计 / 报表 / CSV导出</small>
+    </button>
+
+    <button class="home-card" onclick="go('./booking.html')">
+      <span class="emoji">📅</span>
+      <strong>预约系统</strong>
+      <small>客人预约 / 调整桌位</small>
+    </button>
+  </div>
 </div>
 
 <script>
@@ -23,7 +45,7 @@ function go(page){
 }
 
 function goOwner(){
-  const pw = prompt("输入老板密码");
+  const pw = prompt("请输入老板密码");
   if(pw !== "admin123"){
     alert("密码错误");
     return;
