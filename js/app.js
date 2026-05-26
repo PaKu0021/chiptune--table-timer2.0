@@ -123,8 +123,6 @@ function getStatus(t){
 function render(){
   if(!state) return;
 
-  ensurePushButton();
-
   const box = document.getElementById("tables");
   box.innerHTML = "";
 
@@ -235,20 +233,6 @@ function render(){
   });
 
   renderAlarmPanel();
-}
-
-function ensurePushButton(){
-  if(document.getElementById("pushButton")) return;
-
-  const btn = document.createElement("button");
-  btn.id = "pushButton";
-  btn.textContent = "开启锁屏提醒";
-  btn.onclick = initPush;
-
-  const target = document.getElementById("tables");
-  if(target && target.parentNode){
-    target.parentNode.insertBefore(btn,target);
-  }
 }
 
 async function initPush(){
@@ -639,7 +623,15 @@ function renderAlarmPanel(){
   }).join("");
 }
 
-setInterval(render,1000);
+setInterval(()=>{
+  const active = document.activeElement;
+
+  if(active && (active.tagName === "SELECT" || active.tagName === "INPUT")){
+    return;
+  }
+
+  render();
+},1000);
 
 window.setPackage = setPackage;
 window.setWalkin = setWalkin;
