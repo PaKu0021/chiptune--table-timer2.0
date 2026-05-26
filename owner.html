@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>老板模式</title>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+
+<div class="page-shell">
+
+  <!-- 顶部 -->
+  <div class="app-header">
+    <div class="app-title">
+      <h1>老板模式</h1>
+      <p>收入统计 / 报表 / 导出</p>
+    </div>
+
+    <div class="header-actions">
+      <button onclick="location.href='./index.html'">返回首页</button>
+      <button onclick="exportCSV()" class="btn-main">导出全部CSV</button>
+      <button onclick="exportFilteredCSV()">导出当前筛选</button>
+    </div>
+  </div>
+
+  <!-- 筛选 -->
+  <div class="panel">
+    <div style="display:flex; gap:8px; flex-wrap:wrap">
+      <button onclick="setFilter('today')" id="f_today">今天</button>
+      <button onclick="setFilter('week')" id="f_week">本周</button>
+      <button onclick="setFilter('month')" id="f_month">本月</button>
+      <button onclick="setFilter('year')" id="f_year">本年</button>
+      <button onclick="setFilter('all')" id="f_all">全部</button>
+    </div>
+
+    <h2 id="summary">加载中...</h2>
+  </div>
+
+  <!-- 折线图 -->
+  <div class="panel">
+    <h3>收入折线图</h3>
+    <canvas id="chart" height="120"></canvas>
+  </div>
+
+  <!-- 记录 -->
+  <div class="panel">
+    <h3>收银记录</h3>
+    <table class="record-table">
+      <thead>
+        <tr>
+          <th>桌位</th>
+          <th>姓名</th>
+          <th>类型</th>
+          <th>日元</th>
+          <th>人民币</th>
+          <th>支付</th>
+          <th>时间</th>
+        </tr>
+      </thead>
+      <tbody id="records"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script type="module" src="./js/owner.js"></script>
+</body>
+</html>
