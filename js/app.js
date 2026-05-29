@@ -125,8 +125,9 @@ function getStatus(t){
 }
 
 function render(){
-  if(!state) return;
+  try{
 
+  if(!state) return;
   const box = document.getElementById("tables");
   box.innerHTML = "";
 
@@ -242,6 +243,17 @@ function render(){
   });
 
   renderAlarmPanel();
+
+  }catch(e){
+    alert(
+      "render错误:\n" +
+      e.message +
+      "\n行号:" +
+      (e.lineNumber || "")
+    );
+    console.error(e);
+  }
+
 }
 
 async function initPush(){
