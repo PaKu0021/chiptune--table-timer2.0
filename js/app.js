@@ -327,12 +327,6 @@ if (!("Notification" in window)) {
   return;
 }
 
-const permission = await Notification.requestPermission();
-
-if (permission !== "granted") {
-  alert("失败原因：你没有允许通知权限");
-  return;
-}
 
 localStorage.setItem("chiptuneNotifyEnabled", "1");
 alert("锁屏提醒已开启");
