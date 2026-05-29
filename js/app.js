@@ -215,28 +215,18 @@ function render(){
         <input placeholder="手机后4位" id="phone-${i}" value="${t.customer.phoneLast4 || ""}" onchange="updateCustomer(${i})">
       </div>
 
-<<<<<<< HEAD
-      <button class="btn-blue ${t.type==="walkin" ? "choice-active" : ""}" onclick="setWalkin(${i})">Walk-in</button>
-<button class="btn-blue ${t.type==="booking" ? "choice-active" : ""}" onclick="setBooking(${i})">预约</button>
+<div class="action-row">
+  <button class="btn-ghost ${t.type==="walkin" ? "btn-yellow" : ""}" onclick="setWalkin(${i})">Walk-in</button>
+  <button class="btn-ghost ${t.type==="booking" ? "btn-yellow" : ""}" onclick="setBooking(${i})">预约</button>
+</div>
 
-      <input placeholder="提前分钟" id="pre-${i}">
-      <button class="btn-ghost ${t.start && !t.pausedAt ? "btn-active" : ""}" onclick="start(${i})">开始</button>
-<button class="btn-ghost ${t.pausedAt ? "btn-active" : ""}" onclick="pause(${i})">暂停</button>
-<button class="btn-ghost ${t.start && !t.pausedAt ? "" : ""}" onclick="resume(${i})">继续</button>
-=======
-      <div class="action-row">
-        <button class="btn-blue ${t.type==="walkin" ? "choice-active selected-pop" : ""}" onclick="setWalkin(${i})">Walk-in</button>
-        <button class="btn-blue ${t.type==="booking" ? "choice-active selected-pop" : ""}" onclick="setBooking(${i})">预约</button>
-      </div>
+<input placeholder="提前分钟" id="pre-${i}">
 
-      <input placeholder="提前分钟" id="pre-${i}">
-
-      <div class="action-row">
-        <button class="btn-main ${t.start && !t.pausedAt ? "btn-start-active selected-pop" : ""}" onclick="start(${i})">开始</button>
-        <button class="btn-ghost ${t.pausedAt ? "btn-pause-active selected-pop" : ""}" onclick="pause(${i})">暂停</button>
-        <button class="btn-ghost ${t.start && !t.pausedAt ? "btn-success-active selected-pop" : ""}" onclick="resume(${i})">继续</button>
-      </div>
->>>>>>> 4d6bfd4ccd264efd165234bd6408f7846a00246a
+<div class="action-row">
+  <button class="btn-ghost ${t.lastAction==="start" ? "btn-yellow" : ""}" onclick="start(${i})">开始</button>
+  <button class="btn-ghost ${t.lastAction==="pause" ? "btn-yellow" : ""}" onclick="pause(${i})">暂停</button>
+  <button class="btn-ghost ${t.lastAction==="resume" ? "btn-yellow" : ""}" onclick="resume(${i})">继续</button>
+</div>
 
       ${p.unlimited ? "" : `
         <button class="${status==="warning" ? "btn-warn" : "btn-main"} full" onclick="addHour(${i})">
