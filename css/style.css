@@ -521,6 +521,12 @@ button.selected-pop{
 .table-grid .table-item:nth-child(12){
   grid-column:4;
 }
-
+.choice-active,
+.btn-active{
+  background:#f2c94c !important;
+  color:#332d24 !important;
+  border-color:#d8a900 !important;
+  box-shadow:0 3px 8px rgba(216,169,0,.25) !important;
+}
   
 }
