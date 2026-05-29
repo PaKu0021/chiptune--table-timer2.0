@@ -389,11 +389,17 @@ function start(i){
   t.alerting = false;
 
   // 如果这桌是预约客人，自动把预约标记为已入桌
-  if(t.type === "booking" && state.bookings){
+  if(t.type === "booking" && Array.isArray(state.bookings)){
   const booking = state.bookings.find(b=>{
-    const tableIndexes = b.tableIndexes || [b.tableIndex];
+    const raw = Array.isArray(b.tableIndexes)
+      ? b.tableIndexes
+      : [b.tableIndex];
 
-    return tableIndexes.map(Number).includes(i) &&
+    const tableIndexes = raw
+      .filter(v => v !== undefined && v !== null && v !== "")
+      .map(v => Number(v));
+
+    return tableIndexes.includes(i) &&
            !b.checkedIn &&
            (!b.name || b.name === t.customer.name);
   });
@@ -404,7 +410,6 @@ function start(i){
     booking.checkInTimeText = new Date(startTime).toLocaleString();
   }
 }
-
   save();
 }
 
