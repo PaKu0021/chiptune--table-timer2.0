@@ -351,13 +351,29 @@ function setBooking(i){
 function start(i){
   const pre = Number(document.getElementById("pre-"+i).value || 0);
   const t = state.tables[i];
+  const startTime = Date.now() - pre * 60000;
 
   stopAlertLoop(i);
 
-  t.start = Date.now() - pre * 60000;
+  t.start = startTime;
   t.pausedAt = null;
   t.alerted = false;
   t.alerting = false;
+
+  // 如果这桌是预约客人，自动把预约标记为已入桌
+  if(t.type === "booking" && state.bookings){
+    const booking = state.bookings.find(b=>{
+      return Number(b.tableIndex) === i &&
+             !b.checkedIn &&
+             (!b.name || b.name === t.customer.name);
+    });
+
+    if(booking){
+      booking.checkedIn = true;
+      booking.checkInTime = startTime;
+      booking.checkInTimeText = new Date(startTime).toLocaleString();
+    }
+  }
 
   save();
 }
