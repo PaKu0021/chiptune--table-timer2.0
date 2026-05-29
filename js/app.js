@@ -406,6 +406,7 @@ function start(i){
   t.pausedAt = null;
   t.alerted = false;
   t.alerting = false;
+  t.lastAction = "start";
 
   // 如果这桌是预约客人，自动把预约标记为已入桌
   if(t.type === "booking" && Array.isArray(state.bookings)){
@@ -440,7 +441,7 @@ function pause(i){
 
   t.pausedAt = Date.now();
   t.alerting = false;
-
+  t.lastAction = "pause";
   save();
 }
 
@@ -453,6 +454,7 @@ function resume(i){
   t.pausedAt = null;
   t.alerted = false;
   t.alerting = false;
+  t.lastAction = "resume";
 
   save();
 }
