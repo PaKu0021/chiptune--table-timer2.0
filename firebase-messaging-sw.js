@@ -11,16 +11,19 @@ firebase.initializeApp({
   measurementId: "G-68TF8QWDT9"
 });
 
-const messaging = firebase.messaging();
+try {
+  const messaging = firebase.messaging();
 
-messaging.onBackgroundMessage(function(payload) {
-  const title = payload.notification?.title || "Chiptune 提醒";
-  const options = {
-    body: payload.notification?.body || "",
-    icon: "./icon.png",
-    badge: "./icon.png",
-    vibrate: [300, 100, 300]
-  };
+  messaging.onBackgroundMessage(function(payload) {
+    const title = payload.notification?.title || "Chiptune 提醒";
+    const options = {
+      body: payload.notification?.body || "桌位时间提醒",
+      icon: "./icon.png",
+      badge: "./icon.png"
+    };
 
-  self.registration.showNotification(title, options);
-});
+    self.registration.showNotification(title, options);
+  });
+} catch (e) {
+  console.error("Firebase Messaging SW 初始化失败：", e);
+}
