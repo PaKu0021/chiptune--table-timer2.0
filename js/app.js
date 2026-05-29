@@ -197,21 +197,21 @@ function render(){
       </div>
 
       <div class="row">
-        <input placeholder="姓名" id="name-${i}" value="${t.customer.name || ""}">
-        <input placeholder="手机后4位" id="phone-${i}" value="${t.customer.phoneLast4 || ""}">
+        <input placeholder="姓名" id="name-${i}" value="${t.customer.name || ""}" onchange="updateCustomer(${i})">
+        <input placeholder="手机后4位" id="phone-${i}" value="${t.customer.phoneLast4 || ""}" onchange="updateCustomer(${i})">
       </div>
 
       <div class="action-row">
-        <button class="btn-blue" onclick="setWalkin(${i})">Walk-in</button>
-        <button class="btn-blue" onclick="setBooking(${i})">预约</button>
+        <button class="btn-blue ${t.type==="walkin" ? "choice-active selected-pop" : ""}" onclick="setWalkin(${i})">Walk-in</button>
+        <button class="btn-blue ${t.type==="booking" ? "choice-active selected-pop" : ""}" onclick="setBooking(${i})">预约</button>
       </div>
 
       <input placeholder="提前分钟" id="pre-${i}">
 
       <div class="action-row">
-        <button class="btn-main" onclick="start(${i})">开始</button>
-        <button class="btn-ghost" onclick="pause(${i})">暂停</button>
-        <button class="btn-ghost" onclick="resume(${i})">继续</button>
+        <button class="btn-main ${t.start && !t.pausedAt ? "btn-start-active selected-pop" : ""}" onclick="start(${i})">开始</button>
+        <button class="btn-ghost ${t.pausedAt ? "btn-pause-active selected-pop" : ""}" onclick="pause(${i})">暂停</button>
+        <button class="btn-ghost ${t.start && !t.pausedAt ? "btn-success-active selected-pop" : ""}" onclick="resume(${i})">继续</button>
       </div>
 
       ${p.unlimited ? "" : `
@@ -348,6 +348,18 @@ function setBooking(i){
   save();
 }
 
+function updateCustomer(i){
+  const t = state.tables[i];
+
+  const nameInput = document.getElementById("name-"+i);
+  const phoneInput = document.getElementById("phone-"+i);
+
+  if(nameInput) t.customer.name = nameInput.value;
+  if(phoneInput) t.customer.phoneLast4 = phoneInput.value;
+
+  save();
+}
+
 function start(i){
   const pre = Number(document.getElementById("pre-"+i).value || 0);
   const t = state.tables[i];
@@ -416,6 +428,7 @@ function addHour(i){
 }
 
 function setPay(i,v){
+  updateCustomer(i);
   state.tables[i].pay = v;
   save();
 }
@@ -651,3 +664,4 @@ window.toggleRound = toggleRound;
 window.confirmCheckout = confirmCheckout;
 window.closeCheckout = closeCheckout;
 window.initPush = initPush;
+window.updateCustomer = updateCustomer;
