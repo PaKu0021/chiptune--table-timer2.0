@@ -420,5 +420,34 @@ button.selected-pop{
   box-shadow:0 0 0 3px rgba(43,111,201,.18);
 }
 
+.table-check-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
+  gap:10px;
+  margin:12px 0;
+}
+
+.table-check-card{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  min-height:52px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:#fff;
+  font-weight:800;
+  color:var(--text);
+}
+
+.table-check-card input{
+  width:auto;
+  margin:0;
+}
+
+.table-check-card:has(input:checked){
+  background:var(--main);
+  border-color:var(--main-dark);
+}
   
 }
