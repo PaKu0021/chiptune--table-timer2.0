@@ -36,7 +36,8 @@ function createBooking(){
   const name = document.getElementById("name").value;
   const phone = document.getElementById("phone").value;
   const time = document.getElementById("time").value;
-  const tableIndex = Number(document.getElementById("tableSelect").value);
+  const tableIndexes = [...document.querySelectorAll(".table-check:checked")]
+  .map(el => Number(el.value));
 
   if(!name || !phone){
     alert("请填写完整信息");
@@ -50,14 +51,16 @@ function createBooking(){
     name,
     phone,
     time,
-    tableIndex
+    tableIndexes
   });
 
   // 👉 同步到桌位（标记为预约）
-  let t = state.tables[tableIndex];
+  tableIndexes.forEach(idx=>{
+  let t = state.tables[idx];
   t.type = "booking";
   t.customer.name = name;
   t.customer.phoneLast4 = phone.slice(-4);
+});
 
   save();
 }
@@ -75,7 +78,10 @@ function renderList(){
  <div style="border:1px solid #ccc;padding:10px;margin:5px;border-radius:12px;background:${b.checkedIn ? "#e9f7ed" : "#fff"}">
   <b>${b.checkedIn ? "✅ " : ""}${b.name}</b> (${b.phone})
   <br>时间：${b.time}
-  <br>桌位：${state.tables[b.tableIndex]?.name || "-"}
+  <br>桌位：桌位：${(b.tableIndexes || [b.tableIndex])
+  .map(idx => state.tables[idx]?.name)
+  .filter(Boolean)
+  .join("、")}
   <br>状态：${b.checkedIn ? "已入桌" : "未入桌"}
   ${b.checkInTimeText ? `<br>开始时间：${b.checkInTimeText}` : ""}
 
