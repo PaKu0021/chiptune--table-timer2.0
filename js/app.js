@@ -268,7 +268,7 @@ async function initPush(){
       return;
     }
 
-    const { getMessaging, getToken, onMessage } = await import(
+  /*const { getMessaging, getToken, onMessage } = await import(
   "https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging.js"
 );
 
@@ -291,18 +291,34 @@ async function initPush(){
       serviceWorkerRegistration: registration
     });
 
+    
     if(!token){
       alert("失败原因：Firebase 没有返回 token");
       return;
     }
+*/
+if (!("Notification" in window)) {
+  alert("失败原因：当前设备不支持通知提醒");
+  return;
+}
 
-    await setDoc(doc(db,"devices",token),{
+const permission = await Notification.requestPermission();
+
+if (permission !== "granted") {
+  alert("失败原因：你没有允许通知权限");
+  return;
+}
+
+localStorage.setItem("chiptuneNotifyEnabled", "1");
+alert("锁屏提醒已开启");
+    
+    /*await setDoc(doc(db,"devices",token),{
       token,
       userAgent:navigator.userAgent,
       createdAt:Date.now(),
       enabled:true
     });
-
+*/
     alert("锁屏提醒已开启 ✅");
     alert("Token: " + token);
 
