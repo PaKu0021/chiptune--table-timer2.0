@@ -390,18 +390,20 @@ function start(i){
 
   // 如果这桌是预约客人，自动把预约标记为已入桌
   if(t.type === "booking" && state.bookings){
-    const booking = state.bookings.find(b=>{
-      return Number(b.tableIndex) === i &&
-             !b.checkedIn &&
-             (!b.name || b.name === t.customer.name);
-    });
+  const booking = state.bookings.find(b=>{
+    const tableIndexes = b.tableIndexes || [b.tableIndex];
 
-    if(booking){
-      booking.checkedIn = true;
-      booking.checkInTime = startTime;
-      booking.checkInTimeText = new Date(startTime).toLocaleString();
-    }
+    return tableIndexes.map(Number).includes(i) &&
+           !b.checkedIn &&
+           (!b.name || b.name === t.customer.name);
+  });
+
+  if(booking){
+    booking.checkedIn = true;
+    booking.checkInTime = startTime;
+    booking.checkInTimeText = new Date(startTime).toLocaleString();
   }
+}
 
   save();
 }
