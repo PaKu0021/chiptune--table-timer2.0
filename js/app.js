@@ -1,3 +1,4 @@
+alert("app.js 已加载");
 import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 import { formatTime } from "./common.js";
