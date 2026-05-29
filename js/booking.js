@@ -72,22 +72,24 @@ function renderList(){
     let div = document.createElement("div");
 
     div.innerHTML = `
-      <div style="border:1px solid #ccc;padding:10px;margin:5px">
-        <b>${b.name}</b> (${b.phone})
-        <br>时间：${b.time}
-        <br>桌位：${state.tables[b.tableIndex].name}
+ <div style="border:1px solid #ccc;padding:10px;margin:5px;border-radius:12px;background:${b.checkedIn ? "#e9f7ed" : "#fff"}">
+  <b>${b.checkedIn ? "✅ " : ""}${b.name}</b> (${b.phone})
+  <br>时间：${b.time}
+  <br>桌位：${state.tables[b.tableIndex]?.name || "-"}
+  <br>状态：${b.checkedIn ? "已入桌" : "未入桌"}
+  ${b.checkInTimeText ? `<br>开始时间：${b.checkInTimeText}` : ""}
 
-        <br>
-        <select onchange="changeTable(${i},this.value)">
-          ${state.tables.map((t,idx)=>`
-            <option value="${idx}" ${idx===b.tableIndex?"selected":""}>
-              ${t.name}
-            </option>
-          `).join("")}
-        </select>
+  <br>
+  <select onchange="changeTable(${i},this.value)" ${b.checkedIn ? "disabled" : ""}>
+    ${state.tables.map((t,idx)=>`
+      <option value="${idx}" ${idx===b.tableIndex?"selected":""}>
+        ${t.name}
+      </option>
+    `).join("")}
+  </select>
 
-        <button onclick="deleteBooking(${i})">删除</button>
-      </div>
+  <button onclick="deleteBooking(${i})">删除</button>
+</div>
     `;
 
     box.appendChild(div);
