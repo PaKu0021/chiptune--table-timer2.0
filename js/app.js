@@ -269,8 +269,8 @@ async function initPush(){
     }
 
     const { getMessaging, getToken, onMessage } = await import(
-      "https://www.gstatic.com/firebasejs/12.13.0/firebase-messaging.js"
-    );
+  "https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging.js"
+);
 
     const messaging = getMessaging(app);
 
