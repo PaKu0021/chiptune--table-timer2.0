@@ -318,10 +318,10 @@ alert("锁屏提醒已开启");
       createdAt:Date.now(),
       enabled:true
     });
-*/
+
     alert("锁屏提醒已开启 ✅");
     alert("Token: " + token);
-
+*/
   }catch(e){
     console.error(e);
     alert("推送失败原因：" + (e.code || e.name || "") + "\n" + (e.message || e));
