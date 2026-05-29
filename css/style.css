@@ -391,4 +391,34 @@ button:active{
   .tables{
     grid-template-columns:1fr;
   }
+
+.choice-active{
+  background:#2b6fc9 !important;
+  color:#fff !important;
+  border-color:#2b6fc9 !important;
+}
+
+.btn-start-active{
+  background:#f2c94c !important;
+  color:#332d24 !important;
+  border-color:#d8a900 !important;
+}
+
+.btn-pause-active{
+  background:#ff9800 !important;
+  color:#fff !important;
+  border-color:#ff9800 !important;
+}
+
+.btn-success-active{
+  background:#54a66b !important;
+  color:#fff !important;
+  border-color:#54a66b !important;
+}
+
+button.selected-pop{
+  box-shadow:0 0 0 3px rgba(43,111,201,.18);
+}
+
+  
 }
