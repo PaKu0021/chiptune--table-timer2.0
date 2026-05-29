@@ -2,12 +2,15 @@ import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const ref = doc(db, "shop", "main");
-
 let state = null;
 
-onSnapshot(ref, snap=>{
-  if(!snap.exists()) return;
+onSnapshot(ref, snap => {
+  if (!snap.exists()) return;
   state = snap.data();
+
+  if (!state.bookings) state.bookings = [];
+  if (!state.tables) state.tables = [];
+
   render();
 });
 
@@ -21,72 +24,123 @@ function render(){
 }
 
 function renderTableOptions(){
-  const sel = document.getElementById("tableSelect");
-  sel.innerHTML = "";
+  const box = document.getElementById("tableChecks");
+  box.innerHTML = "";
+  box.className = "table-grid";
 
   state.tables.forEach((t,i)=>{
-    let opt = document.createElement("option");
-    opt.value = i;
-    opt.innerText = t.name;
-    sel.appendChild(opt);
+    const label = document.createElement("label");
+    label.className = "table-item";
+
+    const tableNumber = t.name.replace("号桌","");
+
+    label.innerHTML = `
+      <input type="checkbox" class="table-check" value="${i}">
+      <span class="num">${tableNumber}</span>
+      <span class="sub">号桌</span>
+    `;
+
+    box.appendChild(label);
   });
 }
 
 function createBooking(){
-  const name = document.getElementById("name").value;
-  const phone = document.getElementById("phone").value;
-  const time = document.getElementById("time").value;
-  const tableIndex = Number(document.getElementById("tableSelect").value);
+  const name = document.getElementById("name").value.trim();
+  const phone = document.getElementById("phone").value.trim();
+  const time = document.getElementById("time").value.trim();
+
+  const tableIndexes = [...document.querySelectorAll(".table-check:checked")]
+    .map(el => Number(el.value));
 
   if(!name || !phone){
-    alert("请填写完整信息");
+    alert("请填写姓名和手机号");
     return;
   }
 
-  if(!state.bookings) state.bookings = [];
+  if(tableIndexes.length === 0){
+    alert("请选择至少一张桌");
+    return;
+  }
 
-  state.bookings.push({
+  const booking = {
     id: Date.now(),
     name,
     phone,
     time,
-    tableIndex
+    tableIndexes,
+    checkedIn:false,
+    checkInTime:null,
+    checkInTimeText:""
+  };
+
+  state.bookings.push(booking);
+
+  tableIndexes.forEach(idx=>{
+    const t = state.tables[idx];
+    if(!t) return;
+
+    t.type = "booking";
+    t.customer = {
+      name,
+      phoneLast4: phone.slice(-4)
+    };
   });
 
-  // 👉 同步到桌位（标记为预约）
-  let t = state.tables[tableIndex];
-  t.type = "booking";
-  t.customer.name = name;
-  t.customer.phoneLast4 = phone.slice(-4);
-
   save();
+
+  document.getElementById("name").value = "";
+  document.getElementById("phone").value = "";
+  document.getElementById("time").value = "";
 }
 
 function renderList(){
   const box = document.getElementById("list");
   box.innerHTML = "";
 
-  if(!state.bookings) return;
+  if(!state.bookings.length){
+    box.innerHTML = `<p style="color:#8a8174;">暂无预约</p>`;
+    return;
+  }
 
   state.bookings.forEach((b,i)=>{
-    let div = document.createElement("div");
+    const tableIndexes = b.tableIndexes || [b.tableIndex];
+
+    const div = document.createElement("div");
+    div.className = "panel";
+    div.style.background = b.checkedIn ? "#e9f7ed" : "#fffaf2";
 
     div.innerHTML = `
-      <div style="border:1px solid #ccc;padding:10px;margin:5px">
-        <b>${b.name}</b> (${b.phone})
-        <br>时间：${b.time}
-        <br>桌位：${state.tables[b.tableIndex].name}
+      <h3>${b.checkedIn ? "✅ " : ""}${b.name}</h3>
+      <p>
+        手机：${b.phone}<br>
+        到店时间：${b.time || "-"}<br>
+        当前桌位：${tableIndexes.map(idx=>state.tables[idx]?.name).filter(Boolean).join("、") || "-"}<br>
+        状态：${b.checkedIn ? "已入桌" : "未入桌"}
+        ${b.checkInTimeText ? `<br>开始时间：${b.checkInTimeText}` : ""}
+      </p>
 
-        <br>
-        <select onchange="changeTable(${i},this.value)">
-          ${state.tables.map((t,idx)=>`
-            <option value="${idx}" ${idx===b.tableIndex?"selected":""}>
-              ${t.name}
-            </option>
-          `).join("")}
-        </select>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr));">
+        ${state.tables.map((t,idx)=>`
+          <label style="display:flex;gap:6px;align-items:center;">
+            <input 
+              type="checkbox" 
+              class="edit-table-${i}" 
+              value="${idx}"
+              ${tableIndexes.map(Number).includes(idx) ? "checked" : ""}
+              ${b.checkedIn ? "disabled" : ""}
+            >
+            ${t.name}
+          </label>
+        `).join("")}
+      </div>
 
-        <button onclick="deleteBooking(${i})">删除</button>
+      <div class="action-row">
+        <button class="btn-main" onclick="changeBookingTables(${i})" ${b.checkedIn ? "disabled" : ""}>
+          保存桌位修改
+        </button>
+        <button class="btn-danger" onclick="deleteBooking(${i})">
+          删除预约
+        </button>
       </div>
     `;
 
@@ -94,36 +148,88 @@ function renderList(){
   });
 }
 
-function changeTable(i,newIndex){
-  let b = state.bookings[i];
+function changeBookingTables(i){
+  const b = state.bookings[i];
+  if(!b || b.checkedIn) return;
 
-  // 清旧桌
-  let oldTable = state.tables[b.tableIndex];
-  oldTable.type = "";
-  oldTable.customer = {name:"",phoneLast4:""};
+  const oldIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v => v !== undefined && v !== null)
+    .map(Number);
 
-  // 新桌
-  let newTable = state.tables[newIndex];
-  newTable.type = "booking";
-  newTable.customer.name = b.name;
-  newTable.customer.phoneLast4 = b.phone.slice(-4);
+  const newIndexes = [...document.querySelectorAll(`.edit-table-${i}:checked`)]
+    .map(el => Number(el.value));
 
-  b.tableIndex = Number(newIndex);
+  if(newIndexes.length === 0){
+    alert("至少选择一张桌");
+    return;
+  }
+
+  oldIndexes.forEach(idx=>{
+    const t = state.tables[idx];
+    if(!t) return;
+
+    if(
+      !t.start &&
+      t.type === "booking" &&
+      t.customer?.name === b.name &&
+      t.customer?.phoneLast4 === b.phone.slice(-4)
+    ){
+      t.type = "";
+      t.customer = {name:"", phoneLast4:""};
+    }
+  });
+
+  newIndexes.forEach(idx=>{
+    const t = state.tables[idx];
+    if(!t) return;
+
+    if(t.start){
+      alert(`${t.name} 正在使用中，不能分配预约`);
+      return;
+    }
+
+    t.type = "booking";
+    t.customer = {
+      name: b.name,
+      phoneLast4: b.phone.slice(-4)
+    };
+  });
+
+  b.tableIndexes = newIndexes;
+  delete b.tableIndex;
 
   save();
 }
 
 function deleteBooking(i){
-  let b = state.bookings[i];
+  const b = state.bookings[i];
+  if(!b) return;
 
-  let t = state.tables[b.tableIndex];
-  t.type = "";
-  t.customer = {name:"",phoneLast4:""};
+  if(!confirm("确定删除这个预约吗？")) return;
+
+  const tableIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v => v !== undefined && v !== null)
+    .map(Number);
+
+  tableIndexes.forEach(idx=>{
+    const t = state.tables[idx];
+    if(!t) return;
+
+    if(
+      !t.start &&
+      t.type === "booking" &&
+      t.customer?.name === b.name &&
+      t.customer?.phoneLast4 === b.phone.slice(-4)
+    ){
+      t.type = "";
+      t.customer = {name:"", phoneLast4:""};
+    }
+  });
 
   state.bookings.splice(i,1);
   save();
 }
 
 window.createBooking = createBooking;
-window.changeTable = changeTable;
+window.changeBookingTables = changeBookingTables;
 window.deleteBooking = deleteBooking;

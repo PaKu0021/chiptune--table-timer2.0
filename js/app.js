@@ -1,15 +1,21 @@
+/*alert("app.js 已加载");*/
 import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-messaging.js";
-import { formatTime } from "./common.js";
+/*import { formatTime } from "./common.js";*/
 
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
-
-// 这里填 Firebase Cloud Messaging 的 Web Push certificates 公钥
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
+function formatTime(ms){
+  ms = Math.max(0, ms);
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
 
-const messaging = getMessaging();
+  return `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+
 
 let state = null;
 let checkoutIndex = null;
@@ -35,11 +41,12 @@ function newTable(i){
 
 const defaultState = {
   packages:[
+    {name:"1小时", minutes:60, price:1500, extensionPrice:900, unlimited:false},
     {name:"3小时", minutes:180, price:3300, extensionPrice:900, unlimited:false},
     {name:"6小时", minutes:360, price:5500, extensionPrice:800, unlimited:false},
     {name:"不限时", minutes:0, price:5500, extensionPrice:0, unlimited:true}
   ],
-  tables: Array.from({length:6},(_,i)=>newTable(i+1)),
+  tables: Array.from({length:8},(_,i)=>newTable(i+1)),
   records:[],
   bookings:[]
 };
@@ -47,7 +54,8 @@ const defaultState = {
 onSnapshot(ref, snap=>{
   if(snap.exists()){
     state = snap.data();
-
+/*alert("Firestore已读取");*/
+    
     if(!state.packages) state.packages = defaultState.packages;
     if(!state.records) state.records = [];
     if(!state.bookings) state.bookings = [];
@@ -66,6 +74,7 @@ onSnapshot(ref, snap=>{
       if(t.type === undefined) t.type = "";
     });
 
+    /*alert("准备render");*/
     render();
   }else{
     state = defaultState;
@@ -102,7 +111,12 @@ function getOriginalJPY(t){
 function roundJPY(jpy){
   const base = Math.floor(jpy / 1000) * 1000;
   const rest = jpy - base;
-  return rest <= 500 ? base : base + 500;
+
+  if(rest <= 500){
+    return base;
+  }
+
+  return base + 500;
 }
 
 function getRMB(jpy){
@@ -124,10 +138,9 @@ function getStatus(t){
 }
 
 function render(){
+  try{
+
   if(!state) return;
-
-  ensurePushButton();
-
   const box = document.getElementById("tables");
   box.innerHTML = "";
 
@@ -155,7 +168,6 @@ function render(){
     if(status === "warning" && !remindLocks[i]){
       remindLocks[i] = true;
       setTimeout(()=>{ remindLocks[i] = false; },60000);
-
       notifyLocal("续费提醒", t.name + " 剩余10分钟，建议提醒续费");
     }
 
@@ -186,11 +198,11 @@ function render(){
         `).join("")}
       </select>
 
-      <div style="font-size:22px;margin:10px 0;color:${status==="overtime" ? "#e85d5d" : status==="warning" ? "#ff9800" : "#333"};">
+      <div class="timer" style="color:${status==="overtime" ? "#e85d5d" : status==="warning" ? "#ff9800" : "#333"};">
         ${timeText}
       </div>
 
-      <div>
+      <div class="info">
         类型：${t.type || "-"}<br>
         客人：${t.customer.name || "-"} ${t.customer.phoneLast4 || ""}<br>
         当前日元：¥${originalJPY.toLocaleString()}<br>
@@ -198,9 +210,12 @@ function render(){
         人民币参考：¥${getRMB(originalJPY).toLocaleString()}
       </div>
 
-      <input placeholder="姓名" id="name-${i}" value="${t.customer.name || ""}">
-      <input placeholder="手机后4位" id="phone-${i}" value="${t.customer.phoneLast4 || ""}">
+      <div class="row">
+        <input placeholder="姓名" id="name-${i}" value="${t.customer.name || ""}" onchange="updateCustomer(${i})">
+        <input placeholder="手机后4位" id="phone-${i}" value="${t.customer.phoneLast4 || ""}" onchange="updateCustomer(${i})">
+      </div>
 
+<<<<<<< HEAD
       <button class="btn-blue ${t.type==="walkin" ? "choice-active" : ""}" onclick="setWalkin(${i})">Walk-in</button>
 <button class="btn-blue ${t.type==="booking" ? "choice-active" : ""}" onclick="setBooking(${i})">预约</button>
 
@@ -208,9 +223,23 @@ function render(){
       <button class="btn-ghost ${t.start && !t.pausedAt ? "btn-active" : ""}" onclick="start(${i})">开始</button>
 <button class="btn-ghost ${t.pausedAt ? "btn-active" : ""}" onclick="pause(${i})">暂停</button>
 <button class="btn-ghost ${t.start && !t.pausedAt ? "" : ""}" onclick="resume(${i})">继续</button>
+=======
+      <div class="action-row">
+        <button class="btn-blue ${t.type==="walkin" ? "choice-active selected-pop" : ""}" onclick="setWalkin(${i})">Walk-in</button>
+        <button class="btn-blue ${t.type==="booking" ? "choice-active selected-pop" : ""}" onclick="setBooking(${i})">预约</button>
+      </div>
+
+      <input placeholder="提前分钟" id="pre-${i}">
+
+      <div class="action-row">
+        <button class="btn-main ${t.start && !t.pausedAt ? "btn-start-active selected-pop" : ""}" onclick="start(${i})">开始</button>
+        <button class="btn-ghost ${t.pausedAt ? "btn-pause-active selected-pop" : ""}" onclick="pause(${i})">暂停</button>
+        <button class="btn-ghost ${t.start && !t.pausedAt ? "btn-success-active selected-pop" : ""}" onclick="resume(${i})">继续</button>
+      </div>
+>>>>>>> 4d6bfd4ccd264efd165234bd6408f7846a00246a
 
       ${p.unlimited ? "" : `
-        <button style="${status==="warning" ? "background:#ff9800;color:#fff;" : ""}" onclick="addHour(${i})">
+        <button class="${status==="warning" ? "btn-warn" : "btn-main"} full" onclick="addHour(${i})">
           +1小时 ¥${p.extensionPrice}
         </button>
       `}
@@ -228,9 +257,8 @@ function render(){
         <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
       </select>
 
-      <button onclick="openCheckout(${i})">结账</button>
+      <button class="btn-success full" onclick="openCheckout(${i})">结账</button>
 
-      <canvas id="qr-${i}" width="120" height="120"></canvas>
     `;
 
     box.appendChild(div);
@@ -238,77 +266,96 @@ function render(){
   });
 
   renderAlarmPanel();
-}
 
-function ensurePushButton(){
-  if(document.getElementById("pushButton")) return;
-
-  const btn = document.createElement("button");
-  btn.id = "pushButton";
-  btn.textContent = "开启锁屏提醒";
-  btn.onclick = initPush;
-
-  const target = document.getElementById("tables");
-  if(target && target.parentNode){
-    target.parentNode.insertBefore(btn,target);
+  }catch(e){
+    alert(
+      "render错误:\n" +
+      e.message +
+      "\n行号:" +
+      (e.lineNumber || "")
+    );
+    console.error(e);
   }
+
 }
 
 async function initPush(){
   try{
     if(!("Notification" in window)){
-      alert("这个浏览器不支持通知");
+      alert("失败原因：这个浏览器不支持 Notification");
       return;
     }
 
     if(!("serviceWorker" in navigator)){
-      alert("这个浏览器不支持 Service Worker");
+      alert("失败原因：这个浏览器不支持 Service Worker");
+      return;
+    }
+
+    if(!VAPID_KEY || VAPID_KEY.includes("这里填")){
+      alert("失败原因：VAPID_KEY 还没有填");
       return;
     }
 
     const permission = await Notification.requestPermission();
 
     if(permission !== "granted"){
-      alert("请允许通知权限");
+      alert("失败原因：你没有允许通知权限");
       return;
     }
 
-    const registration = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
+  /*const { getMessaging, getToken, onMessage } = await import(
+  "https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging.js"
+);
+
+    const messaging = getMessaging(app);
+
+    onMessage(messaging,(payload)=>{
+      const title = payload.notification?.title || "Chiptune提醒";
+      const body = payload.notification?.body || "";
+      notifyLocal(title,body);
+    });
+
+    const swPath = location.pathname.includes("/chiptune--table-timer2.0/")
+      ? "/chiptune--table-timer2.0/firebase-messaging-sw.js"
+      : "./firebase-messaging-sw.js";
+
+    const registration = await navigator.serviceWorker.register(swPath);
 
     const token = await getToken(messaging,{
       vapidKey: VAPID_KEY,
       serviceWorkerRegistration: registration
     });
 
+    
     if(!token){
-      alert("没有取得推送Token");
+      alert("失败原因：Firebase 没有返回 token");
       return;
     }
+*/
+if (!("Notification" in window)) {
+  alert("失败原因：当前设备不支持通知提醒");
+  return;
+}
 
-    await setDoc(doc(db,"devices",token),{
+
+localStorage.setItem("chiptuneNotifyEnabled", "1");
+alert("锁屏提醒已开启");
+    
+    /*await setDoc(doc(db,"devices",token),{
       token,
-      userAgent: navigator.userAgent,
-      createdAt: Date.now(),
-      enabled: true
+      userAgent:navigator.userAgent,
+      createdAt:Date.now(),
+      enabled:true
     });
 
     alert("锁屏提醒已开启 ✅");
-    console.log("FCM Token:",token);
-
+    alert("Token: " + token);
+*/
   }catch(e){
     console.error(e);
-    alert("推送开启失败，请检查 VAPID Key 和 firebase-messaging-sw.js");
+    alert("推送失败原因：" + (e.code || e.name || "") + "\n" + (e.message || e));
   }
 }
-
-onMessage(messaging,(payload)=>{
-  console.log("Foreground message:",payload);
-
-  const title = payload.notification?.title || "Chiptune提醒";
-  const body = payload.notification?.body || "";
-
-  notifyLocal(title,body);
-});
 
 function notifyLocal(title,body){
   try{
@@ -332,20 +379,28 @@ function setPackage(i,v){
 
 function setWalkin(i){
   const t = state.tables[i];
-
   t.type = "walkin";
   t.customer.name = document.getElementById("name-"+i).value;
   t.customer.phoneLast4 = document.getElementById("phone-"+i).value;
-
   save();
 }
 
 function setBooking(i){
   const t = state.tables[i];
-
   t.type = "booking";
   t.customer.name = document.getElementById("name-"+i).value;
   t.customer.phoneLast4 = document.getElementById("phone-"+i).value;
+  save();
+}
+
+function updateCustomer(i){
+  const t = state.tables[i];
+
+  const nameInput = document.getElementById("name-"+i);
+  const phoneInput = document.getElementById("phone-"+i);
+
+  if(nameInput) t.customer.name = nameInput.value;
+  if(phoneInput) t.customer.phoneLast4 = phoneInput.value;
 
   save();
 }
@@ -353,14 +408,37 @@ function setBooking(i){
 function start(i){
   const pre = Number(document.getElementById("pre-"+i).value || 0);
   const t = state.tables[i];
+  const startTime = Date.now() - pre * 60000;
 
   stopAlertLoop(i);
 
-  t.start = Date.now() - pre * 60000;
+  t.start = startTime;
   t.pausedAt = null;
   t.alerted = false;
   t.alerting = false;
 
+  // 如果这桌是预约客人，自动把预约标记为已入桌
+  if(t.type === "booking" && Array.isArray(state.bookings)){
+  const booking = state.bookings.find(b=>{
+    const raw = Array.isArray(b.tableIndexes)
+      ? b.tableIndexes
+      : [b.tableIndex];
+
+    const tableIndexes = raw
+      .filter(v => v !== undefined && v !== null && v !== "")
+      .map(v => Number(v));
+
+    return tableIndexes.includes(i) &&
+           !b.checkedIn &&
+           (!b.name || b.name === t.customer.name);
+  });
+
+  if(booking){
+    booking.checkedIn = true;
+    booking.checkInTime = startTime;
+    booking.checkInTimeText = new Date(startTime).toLocaleString();
+  }
+}
   save();
 }
 
@@ -402,6 +480,7 @@ function addHour(i){
 }
 
 function setPay(i,v){
+  updateCustomer(i);
   state.tables[i].pay = v;
   save();
 }
@@ -482,24 +561,18 @@ function confirmCheckout(){
   state.records.push({
     timestamp: now.getTime(),
     time: now.toLocaleString(),
-
     tableName: t.name,
-
     customerName: t.customer?.name || "",
     phoneLast4: t.customer?.phoneLast4 || "",
     customerType: t.type || "walkin",
-
     packageName: p.name,
     packageMinutes: p.unlimited ? "不限时" : p.minutes,
     packagePrice: p.price,
-
     extraMinutes: Math.floor(Number(t.extra || 0) / 60000),
     extensionAmount: (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0),
-
     originalJPY,
     totalJPY: finalJPY,
     totalRMB,
-
     pay: t.pay,
     currency: t.currency || "日元",
     roundRule: useRound ? "500抹零" : "不抹零"
@@ -558,31 +631,20 @@ function playBeep(){
   }catch(e){}
 }
 
-function requestNotify(){
-  initPush();
-}
-
-function notifyOvertime(tableName){
-  notifyLocal("Chiptune 超时提醒", tableName + " 已超时");
-}
-
 function startAlertLoop(i){
   if(alertLoops[i]) return;
   if(!state || !state.tables[i]) return;
 
   playBeep();
-  notifyOvertime(state.tables[i].name);
+  notifyLocal("Chiptune 超时提醒", state.tables[i].name + " 已超时");
 
   const soundLoop = setInterval(()=>{
     playBeep();
-    if(navigator.vibrate){
-      navigator.vibrate([200,100,200]);
-    }
   },3000);
 
   const notifyLoop = setInterval(()=>{
     if(state && state.tables[i]){
-      notifyOvertime(state.tables[i].name);
+      notifyLocal("Chiptune 超时提醒", state.tables[i].name + " 已超时");
     }
   },30000);
 
@@ -630,7 +692,15 @@ function renderAlarmPanel(){
   }).join("");
 }
 
-setInterval(render,1000);
+setInterval(()=>{
+  const active = document.activeElement;
+
+  if(active && (active.tagName === "SELECT" || active.tagName === "INPUT")){
+    return;
+  }
+
+  render();
+},1000);
 
 window.setPackage = setPackage;
 window.setWalkin = setWalkin;
@@ -645,5 +715,5 @@ window.openCheckout = openCheckout;
 window.toggleRound = toggleRound;
 window.confirmCheckout = confirmCheckout;
 window.closeCheckout = closeCheckout;
-window.requestNotify = requestNotify;
 window.initPush = initPush;
+window.updateCustomer = updateCustomer;

@@ -2,61 +2,33 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>桌位计时</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>桌位计时系统</title>
 <link rel="stylesheet" href="./css/style.css">
-<style>
-.modal-bg{
-  display:none;
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,.35);
-  z-index:999;
-}
-.modal{
-  position:absolute;
-  left:0;
-  right:0;
-  bottom:0;
-  background:white;
-  border-radius:20px 20px 0 0;
-  padding:20px;
-}
-.active{
-  background:#f2c94c;
-}
-.alarm-panel{
-  display:none;
-  background:#ffe5e5;
-  border:1px solid #e85d5d;
-  padding:12px;
-  margin:12px 0;
-  border-radius:12px;
-}
-.alarm-panel h3{
-  margin:0 0 8px;
-  color:#e85d5d;
-}
-.alarm-item{
-  font-weight:bold;
-  color:#e85d5d;
-  padding:4px 0;
-}
-</style>
 </head>
 
 <body>
 
-<h2>桌位计时系统</h2>
-<button onclick="location.href='index.html'">返回</button>
+<div class="page-shell">
+  <div class="app-header">
+    <div class="app-title">
+      <h1>桌位计时系统</h1>
+      <p>实时计时 / 收银 / 超时提醒</p>
+    </div>
 
-<div id="alarmPanel" class="alarm-panel">
-  <h3>超时提醒</h3>
-  <div id="alarmList"></div>
-  <button onclick="requestNotify()">开启通知权限</button>
+    <div class="header-actions">
+      <button class="btn-ghost" onclick="location.href='./index.html'">返回</button>
+      <button class="btn-main" onclick="initPush()">开启锁屏提醒</button>
+    </div>
+  </div>
+
+  <div id="alarmPanel" class="alarm-panel">
+    <h3>⚠️ 超时提醒</h3>
+    <div id="alarmList"></div>
+  </div>
+
+  <div id="tables" class="tables"></div>
 </div>
-
-<div id="tables"></div>
 
 <div id="checkoutModalBg" class="modal-bg">
   <div class="modal">
@@ -64,13 +36,21 @@
     <div id="checkoutInfo"></div>
     <h3 id="checkoutAmount"></h3>
 
-    <button id="roundButton" onclick="toggleRound()">抹零</button>
-    <button onclick="confirmCheckout()">确认结账</button>
-    <button onclick="closeCheckout()">取消</button>
+    <button id="roundButton" class="btn-ghost full" onclick="toggleRound()">抹零</button>
+    <button class="btn-success full" onclick="confirmCheckout()">确认结账</button>
+    <button class="btn-ghost full" onclick="closeCheckout()">取消</button>
   </div>
 </div>
 
-<script type="module" src="./js/app.js"></script>
-
+<script type="module">
+  import("./js/app.js?v=debug001")
+    .then(() => {
+      /*alert("app.js 加载成功");*/
+    })
+    .catch(e => {
+      alert("app.js 加载失败：\n" + e.message);
+      console.error(e);
+    });
+</script>
 </body>
 </html>

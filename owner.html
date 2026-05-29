@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>老板模式</title>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+
+<div class="page-shell">
+
+  <div class="app-header">
+    <div class="app-title">
+      <h1>老板模式</h1>
+      <p>收入统计 / 套餐设置 / 桌位数量 / 收银记录</p>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn-ghost" onclick="location.href='./index.html'">返回首页</button>
+      <button class="btn-main" onclick="exportCSV()">导出当前筛选CSV</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="action-row">
+      <button id="f_today" onclick="setFilter('today')">今天</button>
+      <button id="f_week" onclick="setFilter('week')">本周</button>
+      <button id="f_month" onclick="setFilter('month')">本月</button>
+      <button id="f_year" onclick="setFilter('year')">本年</button>
+      <button id="f_all" onclick="setFilter('all')">全部</button>
+    </div>
+
+    <div class="action-row">
+      <button id="c_jpy" onclick="setCurrencyMode('JPY')">日元显示</button>
+      <button id="c_rmb" onclick="setCurrencyMode('RMB')">人民币显示</button>
+    </div>
+
+    <h2 id="summary">加载中...</h2>
+    <div id="payStats"></div>
+  </div>
+
+  <div class="panel">
+    <h2>收入折线图</h2>
+    <canvas id="chart" width="1000" height="320"></canvas>
+  </div>
+
+  <div class="panel">
+    <h2>桌位数量</h2>
+    <div class="action-row">
+      <input id="tableCount" type="number" min="1" max="50" style="max-width:100px;">
+      <button class="btn-main" onclick="saveTableCount()">保存桌位数量</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>套餐设置</h2>
+    <p style="color:#8a8174;">分钟填 0 = 不限时。续费金额按每小时计算。</p>
+
+    <div id="packageBox"></div>
+
+    <div class="action-row">
+      <button class="btn-main" onclick="addPackage()">＋ 添加套餐</button>
+      <button class="btn-main" onclick="savePackages()">保存套餐设置</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>收银记录</h2>
+    <div style="overflow:auto;">
+      <table class="record-table">
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>桌位</th>
+            <th>客人</th>
+            <th>类型</th>
+            <th>套餐</th>
+            <th>续费</th>
+            <th>原价</th>
+            <th>结账</th>
+            <th>人民币</th>
+            <th>渠道</th>
+            <th>币种</th>
+            <th>抹零</th>
+          </tr>
+        </thead>
+        <tbody id="records"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script type="module" src="./js/owner.js"></script>
+</body>
+</html>

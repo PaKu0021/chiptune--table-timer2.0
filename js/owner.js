@@ -1,55 +1,83 @@
 import { db } from "./firebase.js";
-import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
-const ref = doc(db, "shop", "main");
-
+const ref = doc(db,"shop","main");
 const RATE = 0.044;
 
 let state = null;
 let currentFilter = "today";
-let chartCurrency = "JPY";
+let currencyMode = "JPY";
 
-onSnapshot(ref, snap => {
-  if (!snap.exists()) return;
+function newTable(i){
+  return {
+    name:i+"号桌",
+    start:null,
+    extra:0,
+    packageIndex:0,
+    type:"",
+    pay:"",
+    currency:"日元",
+    customer:{name:"",phoneLast4:""},
+    alerted:false,
+    alerting:false,
+    pausedAt:null
+  };
+}
+
+onSnapshot(ref,snap=>{
+  if(!snap.exists()) return;
+
   state = snap.data();
-  if (!state.records) state.records = [];
+
+  if(!state.records) state.records = [];
+  if(!state.packages) state.packages = [];
+  if(!state.tables) state.tables = [];
+
   render();
 });
+
+function save(){
+  return setDoc(ref,state);
+}
 
 function dateKey(ts){
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
+function getRecordTime(r){
+  return r.timestamp || r.time || r.date || Date.now();
+}
+
 function getFilteredRecords(){
   const now = new Date();
 
-  return state.records.filter(r => {
-    const d = new Date(r.timestamp || r.time || r.date);
-    if (isNaN(d.getTime())) return currentFilter === "all";
+  return state.records.filter(r=>{
+    const d = new Date(getRecordTime(r));
+    if(isNaN(d.getTime())) return currentFilter === "all";
 
-    if (currentFilter === "today") {
+    if(currentFilter === "today"){
       return dateKey(d.getTime()) === dateKey(Date.now());
     }
 
-    if (currentFilter === "week") {
-      const nowDay = now.getDay() || 7;
+    if(currentFilter === "week"){
+      const day = now.getDay() || 7;
       const monday = new Date(now);
-      monday.setDate(now.getDate() - nowDay + 1);
+      monday.setDate(now.getDate() - day + 1);
       monday.setHours(0,0,0,0);
 
       const nextMonday = new Date(monday);
-      nextMonday.setDate(monday.getDate() + 7);
+      nextMonday.setDate(monday.getDate()+7);
 
       return d >= monday && d < nextMonday;
     }
 
-    if (currentFilter === "month") {
+    if(currentFilter === "month"){
       return d.getFullYear() === now.getFullYear() &&
              d.getMonth() === now.getMonth();
     }
 
-    if (currentFilter === "year") {
+    if(currentFilter === "year"){
       return d.getFullYear() === now.getFullYear();
     }
 
@@ -58,30 +86,56 @@ function getFilteredRecords(){
 }
 
 function toJPY(r){
-  if (r.currency === "人民币") {
-    return Number(r.totalRMB || 0) / RATE;
-  }
-  return Number(r.totalJPY || 0);
+  if(r.totalJPY !== undefined) return Number(r.totalJPY || 0);
+  if(r.jpy !== undefined) return Number(r.jpy || 0);
+  if(r.currency === "人民币") return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+  return 0;
 }
 
 function toRMB(r){
-  if (r.currency === "人民币") {
-    return Number(r.totalRMB || 0);
-  }
-  return Math.floor(Number(r.totalJPY || 0) * RATE);
+  if(r.totalRMB !== undefined) return Number(r.totalRMB || 0);
+  if(r.rmb !== undefined) return Number(r.rmb || 0);
+  return Math.floor(toJPY(r) * RATE);
+}
+
+function filterName(){
+  if(currentFilter === "today") return "今天";
+  if(currentFilter === "week") return "本周";
+  if(currentFilter === "month") return "本月";
+  if(currentFilter === "year") return "本年";
+  return "全部";
 }
 
 function render(){
-  updateButtons();
+  renderButtons();
+  renderSummary();
+  renderChart();
+  renderPackages();
+  renderRecords();
 
-  const records = getFilteredRecords();
+  const tableInput = document.getElementById("tableCount");
+  if(tableInput) tableInput.value = state.tables.length || 0;
+}
+
+function renderButtons(){
+  ["today","week","month","year","all"].forEach(k=>{
+    const btn = document.getElementById("f_"+k);
+    if(btn) btn.classList.toggle("active",currentFilter === k);
+  });
+
+  document.getElementById("c_jpy")?.classList.toggle("active",currencyMode === "JPY");
+  document.getElementById("c_rmb")?.classList.toggle("active",currencyMode === "RMB");
+}
+
+function renderSummary(){
+  const list = getFilteredRecords();
 
   let totalJPY = 0;
   let totalRMB = 0;
-  const payStats = {};
-  const typeStats = { walkin:0, booking:0 };
+  let payStats = {};
+  let typeStats = {walkin:0, booking:0};
 
-  records.forEach(r => {
+  list.forEach(r=>{
     totalJPY += toJPY(r);
     totalRMB += toRMB(r);
 
@@ -93,48 +147,24 @@ function render(){
   });
 
   document.getElementById("summary").innerHTML =
-    `筛选：${filterName(currentFilter)}｜` +
-    `日元总值：¥${Math.floor(totalJPY).toLocaleString()}｜` +
-    `人民币总值：¥${Math.floor(totalRMB).toLocaleString()}｜` +
-    `笔数：${records.length}`;
+    `${filterName()}｜日元总值：¥${Math.floor(totalJPY).toLocaleString()}｜人民币总值：¥${Math.floor(totalRMB).toLocaleString()}｜笔数：${list.length}`;
 
   document.getElementById("payStats").innerHTML =
-    `付款渠道：${Object.keys(payStats).map(k=>`${k} ${payStats[k]}笔`).join(" / ") || "暂无"}<br>` +
-    `客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔`;
-
-  renderChart(records);
-  renderRecords(records);
+    `付款渠道：${Object.keys(payStats).map(k=>`${k} ${payStats[k]}笔`).join(" / ") || "暂无"}<br>
+     客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔`;
 }
 
-function filterName(mode){
-  if (mode === "today") return "今天";
-  if (mode === "week") return "本周";
-  if (mode === "month") return "本月";
-  if (mode === "year") return "本年";
-  return "全部";
-}
-
-function updateButtons(){
-  ["today","week","month","year","all"].forEach(mode=>{
-    const btn = document.getElementById(`filter-${mode}`);
-    if(btn) btn.classList.toggle("active", mode === currentFilter);
-  });
-
-  document.getElementById("currency-jpy").classList.toggle("active", chartCurrency === "JPY");
-  document.getElementById("currency-rmb").classList.toggle("active", chartCurrency === "RMB");
-}
-
-function renderChart(records){
-  const canvas = document.getElementById("incomeChart");
+function renderChart(){
+  const canvas = document.getElementById("chart");
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
+  const list = getFilteredRecords();
   const grouped = {};
 
-  records.forEach(r=>{
-    const ts = r.timestamp || r.time || r.date;
-    const key = dateKey(ts);
-    const value = chartCurrency === "JPY" ? toJPY(r) : toRMB(r);
+  list.forEach(r=>{
+    const key = dateKey(getRecordTime(r));
+    const value = currencyMode === "JPY" ? toJPY(r) : toRMB(r);
     grouped[key] = (grouped[key] || 0) + value;
   });
 
@@ -143,21 +173,21 @@ function renderChart(records){
 
   const padL = 70;
   const padR = 25;
-  const padT = 30;
+  const padT = 35;
   const padB = 55;
 
-  const chartW = canvas.width - padL - padR;
-  const chartH = canvas.height - padT - padB;
+  const w = canvas.width - padL - padR;
+  const h = canvas.height - padT - padB;
 
   ctx.font = "14px -apple-system";
   ctx.fillStyle = "#8a8174";
 
   if(!labels.length){
-    ctx.fillText("暂无数据", padL, 60);
+    ctx.fillText("暂无数据",padL,60);
     return;
   }
 
-  const maxValue = Math.max(...values, 1);
+  const maxValue = Math.max(...values,1);
   const yMax = Math.ceil(maxValue / 1000) * 1000 || 1000;
   const steps = 5;
 
@@ -165,23 +195,23 @@ function renderChart(records){
   ctx.lineWidth = 1;
 
   for(let i=0;i<=steps;i++){
-    const y = padT + chartH - (i/steps)*chartH;
+    const y = padT + h - (i/steps)*h;
     const value = Math.round((yMax/steps)*i);
 
     ctx.beginPath();
     ctx.moveTo(padL,y);
-    ctx.lineTo(padL+chartW,y);
+    ctx.lineTo(padL+w,y);
     ctx.stroke();
 
     ctx.fillStyle = "#8a8174";
-    ctx.fillText(value.toLocaleString(), 8, y+4);
+    ctx.fillText(value.toLocaleString(),8,y+4);
   }
 
   ctx.strokeStyle = "#332d24";
   ctx.beginPath();
   ctx.moveTo(padL,padT);
-  ctx.lineTo(padL,padT+chartH);
-  ctx.lineTo(padL+chartW,padT+chartH);
+  ctx.lineTo(padL,padT+h);
+  ctx.lineTo(padL+w,padT+h);
   ctx.stroke();
 
   ctx.strokeStyle = "#d8a900";
@@ -189,8 +219,8 @@ function renderChart(records){
   ctx.beginPath();
 
   labels.forEach((label,i)=>{
-    const x = labels.length === 1 ? padL + chartW/2 : padL + i*(chartW/(labels.length-1));
-    const y = padT + chartH - (values[i]/yMax)*chartH;
+    const x = labels.length === 1 ? padL + w/2 : padL + i*(w/(labels.length-1));
+    const y = padT + h - (values[i]/yMax)*h;
 
     if(i===0) ctx.moveTo(x,y);
     else ctx.lineTo(x,y);
@@ -199,8 +229,8 @@ function renderChart(records){
   ctx.stroke();
 
   labels.forEach((label,i)=>{
-    const x = labels.length === 1 ? padL + chartW/2 : padL + i*(chartW/(labels.length-1));
-    const y = padT + chartH - (values[i]/yMax)*chartH;
+    const x = labels.length === 1 ? padL + w/2 : padL + i*(w/(labels.length-1));
+    const y = padT + h - (values[i]/yMax)*h;
 
     ctx.fillStyle = "#332d24";
     ctx.beginPath();
@@ -208,75 +238,190 @@ function renderChart(records){
     ctx.fill();
 
     ctx.font = "13px -apple-system";
-    ctx.fillText(Math.floor(values[i]).toLocaleString(), x-20, y-12);
+    ctx.fillText(Math.floor(values[i]).toLocaleString(),x-18,y-12);
 
     ctx.fillStyle = "#8a8174";
-    ctx.fillText(label.slice(5), x-22, padT+chartH+25);
+    ctx.fillText(label.slice(5),x-22,padT+h+25);
   });
 
   ctx.fillStyle = "#332d24";
   ctx.font = "15px -apple-system";
-  ctx.fillText(chartCurrency === "JPY" ? "单位：日元" : "单位：人民币", padL, 20);
+  ctx.fillText(currencyMode === "JPY" ? "单位：日元" : "单位：人民币",padL,22);
 }
 
-function renderRecords(records){
-  const rows = [...records].reverse();
+function renderPackages(){
+  const box = document.getElementById("packageBox");
+  box.innerHTML = "";
 
-  document.getElementById("records").innerHTML = `
-    <table class="record-table">
-      <thead>
-        <tr>
-          <th>时间</th>
-          <th>桌位</th>
-          <th>客人</th>
-          <th>类型</th>
-          <th>套餐</th>
-          <th>日元</th>
-          <th>人民币</th>
-          <th>付款</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map(r=>`
-          <tr>
-            <td>${r.time || ""}</td>
-            <td>${r.tableName || ""}</td>
-            <td>${r.customerName || ""} ${r.phoneLast4 ? "(" + r.phoneLast4 + ")" : ""}</td>
-            <td>${r.customerType === "booking" ? "预约" : "Walk-in"}</td>
-            <td>${r.packageName || ""}</td>
-            <td>¥${Number(r.totalJPY || 0).toLocaleString()}</td>
-            <td>¥${Number(r.totalRMB || 0).toLocaleString()}</td>
-            <td>${r.pay || ""}</td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
-  `;
+  state.packages.forEach((p,i)=>{
+    const row = document.createElement("div");
+    row.className = "grid";
+    row.style.gridTemplateColumns = "1fr 1fr 1fr 1fr auto";
+    row.style.gap = "8px";
+    row.style.marginBottom = "8px";
+
+    row.innerHTML = `
+      <div>
+        <small>套餐名</small>
+        <input data-pkg-name="${i}" value="${p.name || ""}">
+      </div>
+
+      <div>
+        <small>分钟 0=不限时</small>
+        <input type="number" data-pkg-minutes="${i}" value="${p.minutes || 0}">
+      </div>
+
+      <div>
+        <small>套餐金额</small>
+        <input type="number" data-pkg-price="${i}" value="${p.price || 0}">
+      </div>
+
+      <div>
+        <small>续费1小时金额</small>
+        <input type="number" data-pkg-extension="${i}" value="${p.extensionPrice || 0}">
+      </div>
+
+      <button class="btn-danger" onclick="removePackage(${i})">删除</button>
+    `;
+
+    box.appendChild(row);
+  });
+}
+
+function renderRecords(){
+  const rows = [...getFilteredRecords()].reverse();
+
+  document.getElementById("records").innerHTML = rows.map(r=>{
+    const table = r.tableName || r.table || "";
+    const name = r.customerName || r.name || "";
+    const phone = r.phoneLast4 || "";
+    const type = (r.customerType || r.type) === "booking" ? "预约" : "Walk-in";
+    const packageName = r.packageName || "";
+    const extra = r.extraMinutes || 0;
+    const original = r.originalJPY || r.totalJPY || r.jpy || 0;
+    const jpy = toJPY(r);
+    const rmb = toRMB(r);
+
+    return `
+      <tr>
+        <td>${r.time || ""}</td>
+        <td>${table}</td>
+        <td>${name}${phone ? "("+phone+")" : ""}</td>
+        <td>${type}</td>
+        <td>${packageName}</td>
+        <td>${extra}分</td>
+        <td>¥${Number(original).toLocaleString()}</td>
+        <td>¥${Number(jpy).toLocaleString()}</td>
+        <td>¥${Number(rmb).toLocaleString()}</td>
+        <td>${r.pay || ""}</td>
+        <td>${r.currency || ""}</td>
+        <td>${r.roundRule || ""}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function addPackage(){
+  state.packages.push({
+    name:"新套餐",
+    minutes:60,
+    price:0,
+    extensionPrice:0,
+    unlimited:false
+  });
+
+  renderPackages();
+}
+
+function removePackage(i){
+  if(state.packages.length <= 1){
+    alert("至少保留一个套餐");
+    return;
+  }
+
+  if(!confirm("确定删除这个套餐吗？")) return;
+
+  state.packages.splice(i,1);
+
+  state.tables.forEach(t=>{
+    if(t.packageIndex >= state.packages.length){
+      t.packageIndex = 0;
+    }
+  });
+
+  save();
+}
+
+function savePackages(){
+  state.packages = state.packages.map((p,i)=>{
+    const name = document.querySelector(`[data-pkg-name="${i}"]`).value || "未命名套餐";
+    const minutes = Number(document.querySelector(`[data-pkg-minutes="${i}"]`).value || 0);
+    const price = Number(document.querySelector(`[data-pkg-price="${i}"]`).value || 0);
+    const extensionPrice = Number(document.querySelector(`[data-pkg-extension="${i}"]`).value || 0);
+
+    return {
+      name,
+      minutes,
+      price,
+      extensionPrice,
+      unlimited: minutes === 0
+    };
+  });
+
+  save();
+  alert("套餐设置已保存");
+}
+
+function saveTableCount(){
+  const count = Number(document.getElementById("tableCount").value || state.tables.length);
+
+  if(count < 1) return alert("桌位数量至少为1");
+
+  if(count > state.tables.length){
+    for(let i=state.tables.length;i<count;i++){
+      state.tables.push(newTable(i+1));
+    }
+  }else if(count < state.tables.length){
+    const deleting = state.tables.slice(count);
+    const hasRunning = deleting.some(t=>t.start);
+
+    if(hasRunning && !confirm("删除范围内有正在计时桌位，确定删除吗？")){
+      return;
+    }
+
+    state.tables = state.tables.slice(0,count);
+  }
+
+  save();
+  alert("桌位数量已保存");
 }
 
 function exportCSV(){
-  const records = getFilteredRecords();
+  const rows = getFilteredRecords();
 
   const headers = [
     "时间","桌位","客人姓名","手机尾号","类型","套餐",
-    "日元","人民币","付款渠道","币种"
+    "续费分钟","原价日元","结账日元","人民币","付款渠道","币种","抹零规则"
   ];
 
-  const rows = records.map(r=>[
+  const body = rows.map(r=>[
     r.time || "",
-    r.tableName || "",
-    r.customerName || "",
+    r.tableName || r.table || "",
+    r.customerName || r.name || "",
     r.phoneLast4 || "",
-    r.customerType === "booking" ? "预约" : "Walk-in",
+    (r.customerType || r.type) === "booking" ? "预约" : "Walk-in",
     r.packageName || "",
-    r.totalJPY || 0,
-    r.totalRMB || 0,
+    r.extraMinutes || 0,
+    r.originalJPY || r.totalJPY || r.jpy || 0,
+    toJPY(r),
+    toRMB(r),
     r.pay || "",
-    r.currency || ""
+    r.currency || "",
+    r.roundRule || ""
   ]);
 
-  const csv = [headers,...rows]
-    .map(row=>row.map(cell=>`"${String(cell).replace(/"/g,'""')}"`).join(","))
+  const csv = [headers,...body]
+    .map(row=>row.map(cell=>`"${String(cell ?? "").replace(/"/g,'""')}"`).join(","))
     .join("\n");
 
   const blob = new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
@@ -286,16 +431,20 @@ function exportCSV(){
   a.click();
 }
 
-function setFilter(mode){
-  currentFilter = mode;
+function setFilter(v){
+  currentFilter = v;
   render();
 }
 
-function setChartCurrency(currency){
-  chartCurrency = currency;
+function setCurrencyMode(v){
+  currencyMode = v;
   render();
 }
 
 window.setFilter = setFilter;
-window.setChartCurrency = setChartCurrency;
+window.setCurrencyMode = setCurrencyMode;
+window.addPackage = addPackage;
+window.removePackage = removePackage;
+window.savePackages = savePackages;
+window.saveTableCount = saveTableCount;
 window.exportCSV = exportCSV;
