@@ -201,13 +201,13 @@ function render(){
       <input placeholder="姓名" id="name-${i}" value="${t.customer.name || ""}">
       <input placeholder="手机后4位" id="phone-${i}" value="${t.customer.phoneLast4 || ""}">
 
-      <button onclick="setWalkin(${i})">Walk-in</button>
-      <button onclick="setBooking(${i})">预约</button>
+      <button class="btn-blue ${t.type==="walkin" ? "choice-active" : ""}" onclick="setWalkin(${i})">Walk-in</button>
+<button class="btn-blue ${t.type==="booking" ? "choice-active" : ""}" onclick="setBooking(${i})">预约</button>
 
       <input placeholder="提前分钟" id="pre-${i}">
-      <button onclick="start(${i})">开始</button>
-      <button onclick="pause(${i})">暂停</button>
-      <button onclick="resume(${i})">继续</button>
+      <button class="btn-ghost ${t.start && !t.pausedAt ? "btn-active" : ""}" onclick="start(${i})">开始</button>
+<button class="btn-ghost ${t.pausedAt ? "btn-active" : ""}" onclick="pause(${i})">暂停</button>
+<button class="btn-ghost ${t.start && !t.pausedAt ? "" : ""}" onclick="resume(${i})">继续</button>
 
       ${p.unlimited ? "" : `
         <button style="${status==="warning" ? "background:#ff9800;color:#fff;" : ""}" onclick="addHour(${i})">
