@@ -1,4 +1,4 @@
-alert("app.js 已加载");
+/*alert("app.js 已加载");*/
 import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 /*import { formatTime } from "./common.js";*/
@@ -54,7 +54,7 @@ const defaultState = {
 onSnapshot(ref, snap=>{
   if(snap.exists()){
     state = snap.data();
-alert("Firestore已读取");
+/*alert("Firestore已读取");*/
     
     if(!state.packages) state.packages = defaultState.packages;
     if(!state.records) state.records = [];
@@ -74,7 +74,7 @@ alert("Firestore已读取");
       if(t.type === undefined) t.type = "";
     });
 
-    alert("准备render");
+    /*alert("准备render");*/
     render();
   }else{
     state = defaultState;
