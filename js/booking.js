@@ -21,14 +21,21 @@ function render(){
 }
 
 function renderTableOptions(){
-  const sel = document.getElementById("tableSelect");
-  sel.innerHTML = "";
+  const box = document.getElementById("tableChecks");
+  box.innerHTML = "";
 
   state.tables.forEach((t,i)=>{
-    let opt = document.createElement("option");
-    opt.value = i;
-    opt.innerText = t.name;
-    sel.appendChild(opt);
+    const label = document.createElement("label");
+    label.style.display = "flex";
+    label.style.gap = "6px";
+    label.style.alignItems = "center";
+
+    label.innerHTML = `
+      <input type="checkbox" class="table-check" value="${i}">
+      ${t.name}
+    `;
+
+    box.appendChild(label);
   });
 }
 
@@ -39,6 +46,11 @@ function createBooking(){
   const tableIndexes = [...document.querySelectorAll(".table-check:checked")]
   .map(el => Number(el.value));
 
+if(tableIndexes.length === 0){
+  alert("请选择至少一张桌");
+  return;
+}
+
   if(!name || !phone){
     alert("请填写完整信息");
     return;
@@ -47,12 +59,15 @@ function createBooking(){
   if(!state.bookings) state.bookings = [];
 
   state.bookings.push({
-    id: Date.now(),
-    name,
-    phone,
-    time,
-    tableIndexes
-  });
+  id: Date.now(),
+  name,
+  phone,
+  time,
+  tableIndexes,
+  checkedIn:false,
+  checkInTime:null,
+  checkInTimeText:""
+});
 
   // 👉 同步到桌位（标记为预约）
   tableIndexes.forEach(idx=>{
@@ -123,10 +138,19 @@ function changeTable(i,newIndex){
 
 function deleteBooking(i){
   let b = state.bookings[i];
+  const tableIndexes = b.tableIndexes || [b.tableIndex];
 
-  let t = state.tables[b.tableIndex];
-  t.type = "";
-  t.customer = {name:"",phoneLast4:""};
+  tableIndexes.forEach(idx=>{
+    let t = state.tables[idx];
+    if(t){
+      t.type = "";
+      t.customer = {name:"",phoneLast4:""};
+    }
+  });
+
+  state.bookings.splice(i,1);
+  save();
+}
 
   state.bookings.splice(i,1);
   save();
