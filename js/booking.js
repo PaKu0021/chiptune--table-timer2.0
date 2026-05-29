@@ -26,16 +26,15 @@ function render(){
 function renderTableOptions(){
   const box = document.getElementById("tableChecks");
   box.innerHTML = "";
+  box.className = "table-check-grid";
 
   state.tables.forEach((t,i)=>{
     const label = document.createElement("label");
-    label.style.display = "flex";
-    label.style.gap = "6px";
-    label.style.alignItems = "center";
+    label.className = "table-check-card";
 
     label.innerHTML = `
       <input type="checkbox" class="table-check" value="${i}">
-      ${t.name}
+      <span>${t.name}</span>
     `;
 
     box.appendChild(label);
