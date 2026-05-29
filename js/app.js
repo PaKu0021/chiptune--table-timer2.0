@@ -44,7 +44,8 @@ const defaultState = {
 onSnapshot(ref, snap=>{
   if(snap.exists()){
     state = snap.data();
-
+alert("Firestore已读取");
+    
     if(!state.packages) state.packages = defaultState.packages;
     if(!state.records) state.records = [];
     if(!state.bookings) state.bookings = [];
@@ -63,6 +64,7 @@ onSnapshot(ref, snap=>{
       if(t.type === undefined) t.type = "";
     });
 
+    alert("准备render");
     render();
   }else{
     state = defaultState;
