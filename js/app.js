@@ -412,7 +412,6 @@ function updateCustomer(i){
 function start(i){
   const pre = Number(document.getElementById("pre-"+i).value || 0);
   const t = state.tables[i];
-  t.lastAction = "pause";
   const startTime = Date.now() - pre * 60000;
 
   stopAlertLoop(i);
