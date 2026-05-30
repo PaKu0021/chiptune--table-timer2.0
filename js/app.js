@@ -369,17 +369,31 @@ function setPackage(i,v){
 
 function setWalkin(i){
   const t = state.tables[i];
+
   t.type = "walkin";
-  t.customer.name = document.getElementById("name-"+i).value;
-  t.customer.phoneLast4 = document.getElementById("phone-"+i).value;
+
+  t.customer.name =
+    document.getElementById("name-"+i).value;
+
+  t.customer.phoneLast4 =
+    document.getElementById("phone-"+i).value;
+
+  render();
   save();
 }
 
 function setBooking(i){
   const t = state.tables[i];
+
   t.type = "booking";
-  t.customer.name = document.getElementById("name-"+i).value;
-  t.customer.phoneLast4 = document.getElementById("phone-"+i).value;
+
+  t.customer.name =
+    document.getElementById("name-"+i).value;
+
+  t.customer.phoneLast4 =
+    document.getElementById("phone-"+i).value;
+
+  render();
   save();
 }
 
