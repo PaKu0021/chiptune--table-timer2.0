@@ -179,10 +179,32 @@ const filteredTables = state.tables
     return true;
       })
 
-  .sort((a,b)=>{
+.sort((a,b)=>{
+  const ta = a.t;
+  const tb = b.t;
 
-    return sortOrder === "desc" ? b.i - a.i : a.i - b.i;
-  });
+  const getSortTime = (t)=>{
+    const status = getStatus(t);
+
+    if(!t.start) return Infinity;
+
+    const elapsed = getElapsedMs(t);
+    const limit = getLimitMs(t);
+
+    // 已超时：按超时时长排序，越早/越久超时数值越大
+    if(status === "overtime"){
+      return elapsed - limit;
+    }
+
+    // 即将超时/使用中：按剩余时间排序，越快到时间数值越小
+    return limit - elapsed;
+  };
+
+  const va = getSortTime(ta);
+  const vb = getSortTime(tb);
+
+  return sortOrder === "desc" ? vb - va : va - vb;
+});
 
 filteredTables.forEach(({t,i})=>{
     const p = getPackage(t);
