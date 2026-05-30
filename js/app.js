@@ -224,8 +224,8 @@ function render(){
       </div>
 
 <div class="action-row">
-  <button class="btn-ghost" style="${t.type==="walkin" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="setWalkin(${i})">Walk-in</button>
-  <button class="btn-ghost" style="${t.type==="booking" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="setBooking(${i})">预约</button>
+<button class="btn-ghost" style="${t.type==="walkin" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="toggleType(${i},'walkin')">Walk-in</button>
+<button class="btn-ghost" style="${t.type==="booking" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="toggleType(${i},'booking')">预约</button>
 </div>
 
 <input placeholder="提前分钟" id="pre-${i}">
@@ -372,6 +372,25 @@ function notifyLocal(title,body){
 
 function setPackage(i,v){
   state.tables[i].packageIndex = Number(v);
+  save();
+}
+
+function toggleType(i,type){
+  const t = state.tables[i];
+
+  if(t.type === type){
+    t.type = "";
+  }else{
+    t.type = type;
+  }
+
+  const nameInput = document.getElementById("name-"+i);
+  const phoneInput = document.getElementById("phone-"+i);
+
+  if(nameInput) t.customer.name = nameInput.value;
+  if(phoneInput) t.customer.phoneLast4 = phoneInput.value;
+
+  render();
   save();
 }
 
@@ -733,3 +752,4 @@ window.confirmCheckout = confirmCheckout;
 window.closeCheckout = closeCheckout;
 window.initPush = initPush;
 window.updateCustomer = updateCustomer;
+window.toggleType = toggleType;
