@@ -906,8 +906,11 @@ function openBatchStart(){
     </option>
   `).join("");
 
-  tableBox.innerHTML = state.tables.map((t,i)=>`
-    <label class="table-item">
+tableBox.innerHTML = state.tables
+  .map((t,i)=>({t,i}))
+  .filter(({t})=>!t.start)
+  .map(({t,i})=>`
+      <label class="table-item">
       <input type="checkbox" class="batch-table-check" value="${i}" ${t.start ? "disabled" : ""}>
       <span class="num">${t.name.replace("号桌","")}</span>
       <span class="sub">${t.start ? "使用中" : "可开始"}</span>
