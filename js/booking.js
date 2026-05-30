@@ -9,7 +9,11 @@ onSnapshot(ref, snap => {
   state = snap.data();
 
   if (!state.bookings) state.bookings = [];
-  if (!state.tables) state.tables = [];
+  if (!Array.isArray(state.tables) || state.tables.length === 0) {
+  state.tables = Array.from({length:12},(_,i)=>({
+    name:(i+1)+"号桌"
+  }));
+}
 
   render();
 });
@@ -89,6 +93,9 @@ function createBooking(){
   document.getElementById("name").value = "";
   document.getElementById("phone").value = "";
   document.getElementById("time").value = "";
+  document.querySelectorAll(".table-check:checked").forEach(el=>{
+  el.checked = false;
+});
 }
 
 function renderList(){

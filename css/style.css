@@ -452,16 +452,11 @@ button.selected-pop{
 
 .table-grid{
   display:grid;
-  grid-template-columns:repeat(4, minmax(0, 1fr));
+  grid-template-columns:repeat(4,1fr);
   gap:14px;
-  margin:16px 0 12px;
+  margin:16px 0;
 }
 
-  .table-grid::after{
-    content:"";
-    grid-column: span 2;
-  }
-  
 .table-item{
   display:flex;
   flex-direction:column;
@@ -536,4 +531,33 @@ button.selected-pop{
   border:1px solid #d8a900 !important;
   box-shadow:0 3px 8px rgba(216,169,0,.25) !important;
 }
+.table-grid{
+  display:grid !important;
+  grid-template-columns:repeat(4, 1fr) !important;
+  gap:14px !important;
+  margin:16px 0 12px !important;
+  max-width:720px !important;
+}
+
+.table-grid .table-item:nth-child(9),
+.table-grid .table-item:nth-child(11){
+  grid-column:3 !important;
+}
+
+.table-grid .table-item:nth-child(10),
+.table-grid .table-item:nth-child(12){
+  grid-column:4 !important;
+}
+
+.table-grid{
+  display:grid !important;
+  grid-template-columns:repeat(4, 150px) !important;
+  gap:14px !important;
+  margin:16px 0 12px !important;
+}
+
+.table-item{
+  min-height:92px !important;
+}
+
 
