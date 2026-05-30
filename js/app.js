@@ -215,19 +215,18 @@ function render(){
         <input placeholder="手机后4位" id="phone-${i}" value="${t.customer.phoneLast4 || ""}" onchange="updateCustomer(${i})">
       </div>
 
-      <div class="action-row">
-        <button class="btn-ghost" style="${String(t.type).trim()==="walkin" ? "background:#f2c94c!important;color:#332d24!important;border-color:#d8a900!important;" : ""}" onclick="setWalkin(${i})">Walk-in</button>
-        <button class="btn-ghost" style="${String(t.type).trim()==="booking" ? "background:#f2c94c!important;color:#332d24!important;border-color:#d8a900!important;" : ""}" onclick="setBooking(${i})">预约</button>
-      </div>
+<div class="action-row">
+  <button class="btn-ghost" style="${t.type==="walkin" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="setWalkin(${i})">Walk-in</button>
+  <button class="btn-ghost" style="${t.type==="booking" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="setBooking(${i})">预约</button>
+</div>
 
-      <input placeholder="提前分钟" id="pre-${i}">
+<input placeholder="提前分钟" id="pre-${i}">
 
-      <div class="action-row">
-        <button class="btn-ghost" style="${String(t.lastAction).trim()==="start" ? "background:#f2c94c!important;color:#332d24!important;border-color:#d8a900!important;" : ""}" onclick="start(${i})">开始</button>
-<button class="btn-ghost" style="${String(t.lastAction).trim()==="pause" ? "background:#f2c94c!important;color:#332d24!important;border-color:#d8a900!important;" : ""}" onclick="pause(${i})">暂停</button>
-<button class="btn-ghost" style="${String(t.lastAction).trim()==="resume" ? "background:#f2c94c!important;color:#332d24!important;border-color:#d8a900!important;" : ""}" onclick="resume(${i})">继续</button>
-      </div>
-
+<div class="action-row">
+  <button class="btn-ghost" style="${t.lastAction==="start" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="start(${i})">开始</button>
+  <button class="btn-ghost" style="${t.lastAction==="pause" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="pause(${i})">暂停</button>
+  <button class="btn-ghost" style="${t.lastAction==="resume" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="resume(${i})">继续</button>
+</div>
 
       ${p.unlimited ? "" : `
         <button class="${status==="warning" ? "btn-warn" : "btn-main"} full" onclick="addHour(${i})">
@@ -370,17 +369,31 @@ function setPackage(i,v){
 
 function setWalkin(i){
   const t = state.tables[i];
+
   t.type = "walkin";
-  t.customer.name = document.getElementById("name-"+i).value;
-  t.customer.phoneLast4 = document.getElementById("phone-"+i).value;
+
+  t.customer.name =
+    document.getElementById("name-"+i).value;
+
+  t.customer.phoneLast4 =
+    document.getElementById("phone-"+i).value;
+
+  render();
   save();
 }
 
 function setBooking(i){
   const t = state.tables[i];
+
   t.type = "booking";
-  t.customer.name = document.getElementById("name-"+i).value;
-  t.customer.phoneLast4 = document.getElementById("phone-"+i).value;
+
+  t.customer.name =
+    document.getElementById("name-"+i).value;
+
+  t.customer.phoneLast4 =
+    document.getElementById("phone-"+i).value;
+
+  render();
   save();
 }
 
@@ -407,6 +420,7 @@ function start(i){
   t.pausedAt = null;
   t.alerted = false;
   t.alerting = false;
+  t.lastAction = "start";
 
   // 如果这桌是预约客人，自动把预约标记为已入桌
   if(t.type === "booking" && Array.isArray(state.bookings)){
@@ -435,18 +449,20 @@ function start(i){
 
 function pause(i){
   const t = state.tables[i];
+  t.lastAction = "pause";
   if(!t.start || t.pausedAt) return;
 
   stopAlertLoop(i);
 
   t.pausedAt = Date.now();
   t.alerting = false;
-
+  t.lastAction = "pause";
   save();
 }
 
 function resume(i){
   const t = state.tables[i];
+  t.lastAction = "resume"; 
   if(!t.pausedAt) return;
 
   const pausedMs = Date.now() - t.pausedAt;
@@ -454,6 +470,7 @@ function resume(i){
   t.pausedAt = null;
   t.alerted = false;
   t.alerting = false;
+  t.lastAction = "resume";
 
   save();
 }

@@ -23,25 +23,22 @@ function render(){
   renderList();
 }
 
-function renderTableOptions(){
-  const box = document.getElementById("tableChecks");
+function renderTableOptions (){
+  const box = document.getElementById("tableChecks") ;
   box.innerHTML = "";
-  box.className = "table-grid";
+  box. className ="table-grid";
+  
+  state. tables. forEach( (t,i) =>{
+  const label = document. createElement ("label") ;
+  label. className = "table-item";
+  label. innerHTML =
+    <input type="checkbox" value="${i}">
+    <span class="num" >$｛t.name.replace（"号桌”，""）｝</span>
+    <span class="sub">$*</span>`;
+  `;
+  box.appendChild( label);
+});
 
-  state.tables.forEach((t,i)=>{
-    const label = document.createElement("label");
-    label.className = "table-item";
-
-    const tableNumber = t.name.replace("号桌","");
-
-    label.innerHTML = `
-      <input type="checkbox" class="table-check" value="${i}">
-      <span class="num">${tableNumber}</span>
-      <span class="sub">号桌</span>
-    `;
-
-    box.appendChild(label);
-  });
 }
 
 function createBooking(){

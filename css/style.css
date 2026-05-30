@@ -457,19 +457,23 @@ button.selected-pop{
   margin:16px 0 12px;
 }
 
+  .table-grid::after{
+    content:"";
+    grid-column: span 2;
+  }
+  
 .table-item{
   display:flex;
   flex-direction:column;
   align-items:center;
   justify-content:center;
-  min-height:86px;
   padding:12px 8px;
-  background:#fff;
   border:1px solid var(--line);
   border-radius:16px;
+  background:#fff;
   cursor:pointer;
+  transition:all .15s ease;
   user-select:none;
-  transition:.15s ease;
 }
 
 .table-item input{
@@ -495,14 +499,12 @@ button.selected-pop{
   background:#fff7e6;
 }
 
-.table-item:has(input:checked){
-  background:var(--main);
-  border-color:var(--main-dark);
-  color:#fff;
+.table-item input:checked + .num{
+  color: var(--main);
 }
 
-.table-item:has(input:checked) .sub{
-  color:rgba(255,255,255,.9);
+.table-item input:checked ~ .sub{
+  color: var(--main);
 }
 
 /* 让 9、10、11、12 靠右排列 */
@@ -528,5 +530,11 @@ button.selected-pop{
   border-color:#d8a900 !important;
   box-shadow:0 3px 8px rgba(216,169,0,.25) !important;
 }
-  
+.btn-yellow{
+  background:#f2c94c !important;
+  color:#332d24 !important;
+  border:1px solid #d8a900 !important;
+  box-shadow:0 3px 8px rgba(216,169,0,.25) !important;
+}
+
 }
