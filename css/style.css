@@ -533,7 +533,8 @@ button.selected-pop{
 .btn-yellow{
   background:#f2c94c !important;
   color:#332d24 !important;
-  border-color:#d8a900 !important;
+  border:1px solid #d8a900 !important;
+  box-shadow:0 3px 8px rgba(216,169,0,.25) !important;
 }
 
 }
