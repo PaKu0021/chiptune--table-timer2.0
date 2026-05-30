@@ -39,7 +39,7 @@
   <h2>批量操作</h2>
   <div class="action-row">
     <button class="btn-main" onclick="openBatchStart()">批量开始</button>
-    <button class="btn-success" onclick="batchCheckout()">批量结账</button>
+    <button class="btn-success" onclick="openBatchCheckout()">批量结账</button>
     <button class="btn-ghost" onclick="clearBatchSelection()">取消选择</button>
   </div>
 </div>
@@ -83,6 +83,17 @@
 
     <button class="btn-main full" onclick="confirmBatchStart()">确认开始</button>
     <button class="btn-ghost full" onclick="closeBatchStart()">取消</button>
+  </div>
+</div>
+
+<div id="batchCheckoutModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>批量结账</h2>
+
+    <div id="batchCheckoutTableChecks" class="table-grid"></div>
+
+    <button class="btn-success full" onclick="confirmBatchCheckout()">确认批量结账</button>
+    <button class="btn-ghost full" onclick="closeBatchCheckout()">取消</button>
   </div>
 </div>
 

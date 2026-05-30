@@ -952,9 +952,110 @@ function confirmBatchStart(){
   render();
 }
 
+function openBatchCheckout(){
+  const box = document.getElementById("batchCheckoutTableChecks");
+
+  box.innerHTML = state.tables
+    .map((t,i)=>({t,i}))
+    .filter(({t})=>t.start)
+    .map(({t,i})=>`
+      <label class="table-item">
+        <input type="checkbox" class="batch-checkout-table" value="${i}">
+        <span class="num">${t.name.replace("号桌","")}</span>
+        <span class="sub">${t.pay || "未选支付"}</span>
+      </label>
+    `).join("");
+
+  if(!box.innerHTML){
+    box.innerHTML = `<p style="color:#8a8174;">没有正在使用的桌位</p>`;
+  }
+
+  document.getElementById("batchCheckoutModalBg").style.display = "block";
+}
+
+function closeBatchCheckout(){
+  document.getElementById("batchCheckoutModalBg").style.display = "none";
+}
+
+function confirmBatchCheckout(){
+  const indexes = [...document.querySelectorAll(".batch-checkout-table:checked")]
+    .map(el=>Number(el.value));
+
+  if(indexes.length === 0){
+    alert("请选择至少一张桌");
+    return;
+  }
+
+  const noPay = indexes.filter(i=>!state.tables[i].pay);
+
+  if(noPay.length){
+    alert("以下桌位还没有选择付款方式：\n" + noPay.map(i=>state.tables[i].name).join("、"));
+    return;
+  }
+
+  if(!confirm(`确认批量结账 ${indexes.length} 桌吗？`)) return;
+
+  indexes.forEach(i=>{
+    checkoutIndex = i;
+    useRound = false;
+
+    const t = state.tables[i];
+    const p = getPackage(t);
+
+    const originalJPY = getOriginalJPY(t);
+    const finalJPY = originalJPY;
+    const totalRMB = getRMB(finalJPY);
+    const now = new Date();
+
+    stopAlertLoop(i);
+
+    state.records.push({
+      timestamp: now.getTime(),
+      time: now.toLocaleString(),
+      tableName: t.name,
+      customerName: t.customer?.name || "",
+      phoneLast4: t.customer?.phoneLast4 || "",
+      customerType: t.type || "walkin",
+      packageName: p.name,
+      packageMinutes: p.unlimited ? "不限时" : p.minutes,
+      packagePrice: p.price,
+      extraMinutes: Math.floor(Number(t.extra || 0) / 60000),
+      extensionAmount: (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0),
+      originalJPY,
+      totalJPY: finalJPY,
+      totalRMB,
+      pay: t.pay,
+      currency: t.currency || "日元",
+      roundRule: "不抹零"
+    });
+
+    state.tables[i] = {
+      name: t.name,
+      start: null,
+      extra: 0,
+      packageIndex: 0,
+      type: "",
+      pay: "",
+      currency: "日元",
+      customer:{ name:"", phoneLast4:"" },
+      alerted:false,
+      alerting:false,
+      pausedAt:null,
+      lastAction:""
+    };
+  });
+
+  save();
+  closeBatchCheckout();
+  render();
+}
 
 
 
+
+window.openBatchCheckout = openBatchCheckout;
+window.closeBatchCheckout = closeBatchCheckout;
+window.confirmBatchCheckout = confirmBatchCheckout;
 window.openBatchStart = openBatchStart;
 window.closeBatchStart = closeBatchStart;
 window.confirmBatchStart = confirmBatchStart;
