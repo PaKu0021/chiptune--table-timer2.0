@@ -531,4 +531,20 @@ button.selected-pop{
   border:1px solid #d8a900 !important;
   box-shadow:0 3px 8px rgba(216,169,0,.25) !important;
 }
+.table-grid{
+  display:grid !important;
+  grid-template-columns:repeat(4, 1fr) !important;
+  gap:14px !important;
+  margin:16px 0 12px !important;
+  max-width:720px !important;
+}
 
+.table-grid .table-item:nth-child(9),
+.table-grid .table-item:nth-child(11){
+  grid-column:3 !important;
+}
+
+.table-grid .table-item:nth-child(10),
+.table-grid .table-item:nth-child(12){
+  grid-column:4 !important;
+}
