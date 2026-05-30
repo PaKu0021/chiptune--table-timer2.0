@@ -62,17 +62,18 @@ onSnapshot(ref, snap=>{
     if(!state.tables) state.tables = defaultState.tables;
 
     state.tables.forEach((t,i)=>{
-      if(!t.name) t.name = (i+1) + "号桌";
-      if(t.packageIndex === undefined) t.packageIndex = 0;
-      if(!t.customer) t.customer = {name:"", phoneLast4:""};
-      if(t.currency === undefined) t.currency = "日元";
-      if(t.alerted === undefined) t.alerted = false;
-      if(t.alerting === undefined) t.alerting = false;
-      if(t.extra === undefined) t.extra = 0;
-      if(t.pausedAt === undefined) t.pausedAt = null;
-      if(t.pay === undefined) t.pay = "";
-      if(t.type === undefined) t.type = "";
-    });
+  if(!t.name) t.name = (i+1) + "号桌";
+  if(t.packageIndex === undefined) t.packageIndex = 0;
+  if(!t.customer) t.customer = {name:"", phoneLast4:""};
+  if(t.currency === undefined) t.currency = "日元";
+  if(t.alerted === undefined) t.alerted = false;
+  if(t.alerting === undefined) t.alerting = false;
+  if(t.extra === undefined) t.extra = 0;
+  if(t.pausedAt === undefined) t.pausedAt = null;
+  if(t.pay === undefined) t.pay = "";
+  if(t.type === undefined) t.type = "";
+  if(t.lastAction === undefined) t.lastAction = "";
+});
 
     /*alert("准备render");*/
     render();
