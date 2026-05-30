@@ -26,6 +26,7 @@ let searchKeyword = "";
 let statusFilter = "";
 let typeFilter = "";
 let payFilter = "";
+let sortOrder = "asc";
 
 function newTable(i){
   return {
@@ -176,6 +177,11 @@ const filteredTables = state.tables
     if(payFilter && t.pay !== payFilter) return false;
 
     return true;
+      })
+
+  .sort((a,b)=>{
+
+    return sortOrder === "desc" ? b.i - a.i : a.i - b.i;
   });
 
 filteredTables.forEach(({t,i})=>{
@@ -789,11 +795,19 @@ function setPayFilter(v){
   render();
 }
 
+
+function setSortOrder(v){
+  sortOrder = v;
+  render();
+}
+
+
+
+window.setSortOrder = setSortOrder;
 window.setSearchKeyword = setSearchKeyword;
 window.setStatusFilter = setStatusFilter;
 window.setTypeFilter = setTypeFilter;
 window.setPayFilter = setPayFilter;
-
 window.setPackage = setPackage;
 window.setWalkin = setWalkin;
 window.setBooking = setBooking;
