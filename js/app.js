@@ -896,10 +896,65 @@ function batchCheckout(){
   render();
 }
 
+function openBatchStart(){
+  const pkgBox = document.getElementById("batchPackageSelect");
+  const tableBox = document.getElementById("batchTableChecks");
+
+  pkgBox.innerHTML = state.packages.map((p,i)=>`
+    <option value="${i}">
+      ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
+    </option>
+  `).join("");
+
+  tableBox.innerHTML = state.tables.map((t,i)=>`
+    <label class="table-item">
+      <input type="checkbox" class="batch-table-check" value="${i}" ${t.start ? "disabled" : ""}>
+      <span class="num">${t.name.replace("号桌","")}</span>
+      <span class="sub">${t.start ? "使用中" : "可开始"}</span>
+    </label>
+  `).join("");
+
+  document.getElementById("batchStartModalBg").style.display = "block";
+}
+
+function closeBatchStart(){
+  document.getElementById("batchStartModalBg").style.display = "none";
+}
+
+function confirmBatchStart(){
+  const packageIndex = Number(document.getElementById("batchPackageSelect").value);
+
+  const indexes = [...document.querySelectorAll(".batch-table-check:checked")]
+    .map(el=>Number(el.value));
+
+  if(indexes.length === 0){
+    alert("请选择至少一张桌");
+    return;
+  }
+
+  indexes.forEach(i=>{
+    const t = state.tables[i];
+    if(!t || t.start) return;
+
+    t.packageIndex = packageIndex;
+    t.start = Date.now();
+    t.pausedAt = null;
+    t.alerted = false;
+    t.alerting = false;
+    t.lastAction = "start";
+  });
+
+  save();
+  closeBatchStart();
+  render();
+}
 
 
 
 
+window.openBatchStart = openBatchStart;
+window.closeBatchStart = closeBatchStart;
+window.confirmBatchStart = confirmBatchStart;
 window.toggleTableSelect = toggleTableSelect;
 window.clearBatchSelection = clearBatchSelection;
 window.batchStart = batchStart;

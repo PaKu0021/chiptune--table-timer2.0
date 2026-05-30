@@ -38,7 +38,7 @@
 <div class="panel">
   <h2>批量操作</h2>
   <div class="action-row">
-    <button class="btn-main" onclick="batchStart()">批量开始</button>
+    <button class="btn-main" onclick="openBatchStart()">批量开始</button>
     <button class="btn-success" onclick="batchCheckout()">批量结账</button>
     <button class="btn-ghost" onclick="clearBatchSelection()">取消选择</button>
   </div>
@@ -71,6 +71,19 @@
   </div>
 
   <div id="tables" class="tables"></div>
+</div>
+
+<div id="batchStartModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>批量开始</h2>
+
+    <select id="batchPackageSelect"></select>
+
+    <div id="batchTableChecks" class="table-grid"></div>
+
+    <button class="btn-main full" onclick="confirmBatchStart()">确认开始</button>
+    <button class="btn-ghost full" onclick="closeBatchStart()">取消</button>
+  </div>
 </div>
 
 <div id="checkoutModalBg" class="modal-bg">
