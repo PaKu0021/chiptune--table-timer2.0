@@ -22,6 +22,36 @@
     </div>
   </div>
 
+<div class="panel">
+  <h2>搜索 / 筛选</h2>
+  <div class="row">
+    <input id="searchInput" placeholder="搜索桌号 / 客人姓名 / 手机尾号" oninput="setSearchKeyword(this.value)">
+    <select id="statusFilter" onchange="setStatusFilter(this.value)">
+      <option value="">全部状态</option>
+      <option value="idle">未开始</option>
+      <option value="using">使用中</option>
+      <option value="warning">即将超时</option>
+      <option value="overtime">已超时</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <select id="typeFilter" onchange="setTypeFilter(this.value)">
+      <option value="">全部类型</option>
+      <option value="walkin">Walk-in</option>
+      <option value="booking">预约</option>
+    </select>
+
+    <select id="payFilter" onchange="setPayFilter(this.value)">
+      <option value="">全部付款方式</option>
+      <option value="现金">现金</option>
+      <option value="PayPay">PayPay</option>
+      <option value="微信">微信</option>
+      <option value="支付宝">支付宝</option>
+    </select>
+  </div>
+</div>
+
   <div id="alarmPanel" class="alarm-panel">
     <h3>⚠️ 超时提醒</h3>
     <div id="alarmList"></div>

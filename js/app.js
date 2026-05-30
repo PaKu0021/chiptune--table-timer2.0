@@ -22,6 +22,10 @@ let checkoutIndex = null;
 let useRound = false;
 let alertLoops = {};
 let remindLocks = {};
+let searchKeyword = "";
+let statusFilter = "";
+let typeFilter = "";
+let payFilter = "";
 
 function newTable(i){
   return {
@@ -152,7 +156,29 @@ function render(){
   const box = document.getElementById("tables");
   box.innerHTML = "";
 
-  state.tables.forEach((t,i)=>{
+const filteredTables = state.tables
+  .map((t,i)=>({t,i}))
+  .filter(({t})=>{
+    const status = getStatus(t);
+
+    const keyword = searchKeyword.trim().toLowerCase();
+    const text = [
+      t.name,
+      t.customer?.name,
+      t.customer?.phoneLast4,
+      t.type,
+      t.pay
+    ].join(" ").toLowerCase();
+
+    if(keyword && !text.includes(keyword)) return false;
+    if(statusFilter && status !== statusFilter) return false;
+    if(typeFilter && t.type !== typeFilter) return false;
+    if(payFilter && t.pay !== payFilter) return false;
+
+    return true;
+  });
+
+filteredTables.forEach(({t,i})=>{
     const p = getPackage(t);
     const elapsed = getElapsedMs(t);
     const remain = getLimitMs(t) - elapsed;
@@ -742,6 +768,31 @@ setInterval(()=>{
 
   render();
 },1000);
+
+function setSearchKeyword(v){
+  searchKeyword = v;
+  render();
+}
+
+function setStatusFilter(v){
+  statusFilter = v;
+  render();
+}
+
+function setTypeFilter(v){
+  typeFilter = v;
+  render();
+}
+
+function setPayFilter(v){
+  payFilter = v;
+  render();
+}
+
+window.setSearchKeyword = setSearchKeyword;
+window.setStatusFilter = setStatusFilter;
+window.setTypeFilter = setTypeFilter;
+window.setPayFilter = setPayFilter;
 
 window.setPackage = setPackage;
 window.setWalkin = setWalkin;
