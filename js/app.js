@@ -179,6 +179,7 @@ function render(){
       notifyLocal("续费提醒", t.name + " 剩余10分钟，建议提醒续费");
     }
 
+    const usedText = t.start ? "已用 " + formatTime(elapsed) : "";
     const timeText = !t.start
       ? "未开始"
       : t.pausedAt
@@ -206,10 +207,15 @@ function render(){
         `).join("")}
       </select>
 
-      <div class="timer" style="color:${status==="overtime" ? "#e85d5d" : status==="warning" ? "#ff9800" : "#333"};">
-        ${timeText}
-      </div>
+<div class="timer" style="color:${status==="overtime" ? "#e85d5d" : status==="warning" ? "#ff9800" : "#333"};">
+  ${timeText}
+</div>
 
+${t.start ? `
+  <div style="font-size:18px;font-weight:800;margin:-4px 0 10px;color:#8a8174;">
+    ${usedText}
+  </div>
+` : ""}
       <div class="info">
         类型：${t.type || "-"}<br>
         客人：${t.customer.name || "-"} ${t.customer.phoneLast4 || ""}<br>
