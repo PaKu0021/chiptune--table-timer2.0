@@ -116,10 +116,39 @@ function getElapsedMs(t){
   return Date.now() - t.start;
 }
 
+function calcPriceByTotalMinutes(totalMinutes){
+  const hours = Math.ceil(totalMinutes / 60);
+
+  if(hours <= 1) return 1500;
+  if(hours === 2) return 2800;
+  if(hours === 3) return 3300;
+  if(hours === 4) return 4200;
+  if(hours === 5) return 5100;
+  if(hours === 6) return 5500;
+
+  return 5500 + (hours - 6) * 800;
+}
+
+/*
 function getOriginalJPY(t){
   const p = getPackage(t);
   if(p.unlimited) return Number(p.price || 0);
   return Number(p.price || 0) + (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0);
+}
+*/
+
+function getOriginalJPY(t){
+  const p = getPackage(t);
+
+  if(p.unlimited){
+    return Number(p.price || 0);
+  }
+
+  const baseMinutes = Number(p.minutes || 0);
+  const extraMinutes = Math.floor(Number(t.extra || 0) / 60000);
+  const totalMinutes = baseMinutes + extraMinutes;
+
+  return calcPriceByTotalMinutes(totalMinutes);
 }
 
 function roundJPY(jpy){
@@ -307,7 +336,7 @@ ${t.start ? `
 
       ${p.unlimited ? "" : `
         <button class="${status==="warning" ? "btn-warn" : "btn-main"} full" onclick="addHour(${i})">
-          +1小时 ¥${p.extensionPrice}
+          +1小时 → ¥${calcPriceByTotalMinutes((Number(p.minutes || 0) + Math.floor(Number(t.extra || 0) / 60000) + 60)).toLocaleString()}
         </button>
       `}
 
@@ -673,7 +702,10 @@ function confirmCheckout(){
     packageMinutes: p.unlimited ? "不限时" : p.minutes,
     packagePrice: p.price,
     extraMinutes: Math.floor(Number(t.extra || 0) / 60000),
-    extensionAmount: (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0),
+
+    /*extensionAmount: (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0),*/
+    extensionAmount: Math.max(0, finalJPY - Number(p.price || 0)),
+
     originalJPY,
     totalJPY: finalJPY,
     totalRMB,
