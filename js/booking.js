@@ -89,6 +89,9 @@ function createBooking(){
   document.getElementById("name").value = "";
   document.getElementById("phone").value = "";
   document.getElementById("time").value = "";
+  document.querySelectorAll(".table-check:checked").forEach(el=>{
+  el.checked = false;
+});
 }
 
 function renderList(){
