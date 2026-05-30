@@ -548,3 +548,16 @@ button.selected-pop{
 .table-grid .table-item:nth-child(12){
   grid-column:4 !important;
 }
+
+.table-grid{
+  display:grid !important;
+  grid-template-columns:repeat(4, 150px) !important;
+  gap:14px !important;
+  margin:16px 0 12px !important;
+}
+
+.table-item{
+  min-height:92px !important;
+}
+
+
