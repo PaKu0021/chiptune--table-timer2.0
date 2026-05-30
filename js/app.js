@@ -87,7 +87,14 @@ function save(){
 }
 
 function getPackage(t){
-  return state.packages[t.packageIndex] || state.packages[0];
+  const idx = Number(t.packageIndex ?? 0);
+  return state.packages[idx] || state.packages[0] || {
+    name:"1小时",
+    minutes:60,
+    price:1500,
+    extensionPrice:900,
+    unlimited:false
+  };
 }
 
 function getLimitMs(t){
