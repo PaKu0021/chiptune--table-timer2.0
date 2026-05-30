@@ -321,6 +321,16 @@ function renderRecords(){
   }).join("");
 }
 
+function collectPackagesFromInputs(){
+  state.packages = state.packages.map((p,i)=>({
+    name: document.querySelector(`[data-pkg-name="${i}"]`)?.value || p.name || "新套餐",
+    minutes: Number(document.querySelector(`[data-pkg-minutes="${i}"]`)?.value || 0),
+    price: Number(document.querySelector(`[data-pkg-price="${i}"]`)?.value || 0),
+    extensionPrice: Number(document.querySelector(`[data-pkg-extension="${i}"]`)?.value || 0),
+    unlimited: Number(document.querySelector(`[data-pkg-minutes="${i}"]`)?.value || 0) === 0
+  }));
+}
+
 function addPackage(){
   collectPackagesFromInputs();
 
@@ -332,27 +342,16 @@ function addPackage(){
     unlimited:false
   });
 
-  save();
   render();
 }
 
-function collectPackagesFromInputs(){
-  state.packages = state.packages.map((p,i)=>({
-    name: document.getElementById("pkg-name-"+i)?.value || p.name || "新套餐",
-    minutes: Number(document.getElementById("pkg-minutes-"+i)?.value || 0),
-    price: Number(document.getElementById("pkg-price-"+i)?.value || 0),
-    extensionPrice: Number(document.getElementById("pkg-extension-"+i)?.value || 0),
-    unlimited: Number(document.getElementById("pkg-minutes-"+i)?.value || 0) === 0
-  }));
-}
-
 function removePackage(i){
+  collectPackagesFromInputs();
+
   if(state.packages.length <= 1){
     alert("至少保留一个套餐");
     return;
   }
-
-  if(!confirm("确定删除这个套餐吗？")) return;
 
   state.packages.splice(i,1);
 
@@ -362,7 +361,7 @@ function removePackage(i){
     }
   });
 
-  save();
+  render();
 }
 
 function savePackages(){
