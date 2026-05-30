@@ -216,16 +216,16 @@ function render(){
       </div>
 
 <div class="action-row">
-  <button class="btn-ghost ${t.type==="walkin" ? "btn-yellow" : ""}" onclick="setWalkin(${i})">Walk-in</button>
-  <button class="btn-ghost ${t.type==="booking" ? "btn-yellow" : ""}" onclick="setBooking(${i})">预约</button>
+<button class="btn-ghost ${t.type==="walkin" ? "btn-yellow" : ""}" onclick="setWalkin(${i})">Walk-in</button>
+<button class="btn-ghost ${t.type==="booking" ? "btn-yellow" : ""}" onclick="setBooking(${i})">预约</button>
 </div>
 
 <input placeholder="提前分钟" id="pre-${i}">
 
 <div class="action-row">
-  <button class="btn-ghost ${t.lastAction==="start" ? "btn-yellow" : ""}" onclick="start(${i})">开始</button>
-  <button class="btn-ghost ${t.lastAction==="pause" ? "btn-yellow" : ""}" onclick="pause(${i})">暂停</button>
-  <button class="btn-ghost ${t.lastAction==="resume" ? "btn-yellow" : ""}" onclick="resume(${i})">继续</button>
+<button class="btn-ghost ${t.lastAction==="start" ? "btn-yellow" : ""}" onclick="start(${i})">开始</button>
+<button class="btn-ghost ${t.lastAction==="pause" ? "btn-yellow" : ""}" onclick="pause(${i})">暂停</button>
+<button class="btn-ghost ${t.lastAction==="resume" ? "btn-yellow" : ""}" onclick="resume(${i})">继续</button>
 </div>
 
       ${p.unlimited ? "" : `
@@ -398,6 +398,7 @@ function updateCustomer(i){
 function start(i){
   const pre = Number(document.getElementById("pre-"+i).value || 0);
   const t = state.tables[i];
+  t.lastAction = "pause";
   const startTime = Date.now() - pre * 60000;
 
   stopAlertLoop(i);
@@ -435,6 +436,7 @@ function start(i){
 
 function pause(i){
   const t = state.tables[i];
+  t.lastAction = "pause";
   if(!t.start || t.pausedAt) return;
 
   stopAlertLoop(i);
@@ -447,6 +449,7 @@ function pause(i){
 
 function resume(i){
   const t = state.tables[i];
+  t.lastAction = "resume"; 
   if(!t.pausedAt) return;
 
   const pausedMs = Date.now() - t.pausedAt;
