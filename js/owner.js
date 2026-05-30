@@ -322,6 +322,8 @@ function renderRecords(){
 }
 
 function addPackage(){
+  collectPackagesFromInputs();
+
   state.packages.push({
     name:"新套餐",
     minutes:60,
@@ -330,7 +332,18 @@ function addPackage(){
     unlimited:false
   });
 
-  renderPackages();
+  save();
+  render();
+}
+
+function collectPackagesFromInputs(){
+  state.packages = state.packages.map((p,i)=>({
+    name: document.getElementById("pkg-name-"+i)?.value || p.name || "新套餐",
+    minutes: Number(document.getElementById("pkg-minutes-"+i)?.value || 0),
+    price: Number(document.getElementById("pkg-price-"+i)?.value || 0),
+    extensionPrice: Number(document.getElementById("pkg-extension-"+i)?.value || 0),
+    unlimited: Number(document.getElementById("pkg-minutes-"+i)?.value || 0) === 0
+  }));
 }
 
 function removePackage(i){
@@ -353,6 +366,7 @@ function removePackage(i){
 }
 
 function savePackages(){
+  collectPackagesFromInputs();
   state.packages = state.packages.map((p,i)=>{
     const name = document.querySelector(`[data-pkg-name="${i}"]`).value || "未命名套餐";
     const minutes = Number(document.querySelector(`[data-pkg-minutes="${i}"]`).value || 0);
