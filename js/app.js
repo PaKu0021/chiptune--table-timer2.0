@@ -27,6 +27,7 @@ let statusFilter = "";
 let typeFilter = "";
 let payFilter = "";
 let sortOrder = "asc";
+let selectedTables = [];
 
 function newTable(i){
   return {
@@ -252,6 +253,14 @@ filteredTables.forEach(({t,i})=>{
 
     div.innerHTML = `
       <h3>${t.name}</h3>
+
+      <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+        <input type="checkbox" 
+        ${selectedTables.includes(i) ? "checked" : ""}
+        onchange="toggleTableSelect(${i},this.checked)"
+         >
+         批量选择
+      </label>
 
       <select onchange="setPackage(${i},this.value)" ${t.start ? "disabled" : ""}>
         ${state.packages.map((pkg,idx)=>`
@@ -790,10 +799,11 @@ function renderAlarmPanel(){
 setInterval(()=>{
   const active = document.activeElement;
 
-  if(active && (active.tagName === "SELECT" || active.tagName === "INPUT")){
-    return;
-  }
+if(active && active.tagName === "INPUT"){
 
+    return;
+
+  }
   render();
 },1000);
 
@@ -804,27 +814,96 @@ function setSearchKeyword(v){
 
 function setStatusFilter(v){
   statusFilter = v;
+  document.activeElement.blur();
   render();
 }
 
 function setTypeFilter(v){
   typeFilter = v;
+  document.activeElement.blur();
   render();
 }
 
 function setPayFilter(v){
   payFilter = v;
+  document.activeElement.blur();
   render();
 }
 
 
 function setSortOrder(v){
   sortOrder = v;
+  document.activeElement.blur();
+  render();
+}
+
+function toggleTableSelect(i,checked){
+  if(checked){
+    if(!selectedTables.includes(i)) selectedTables.push(i);
+  }else{
+    selectedTables = selectedTables.filter(v=>v!==i);
+  }
+}
+
+function clearBatchSelection(){
+  selectedTables = [];
+  render();
+}
+
+function batchStart(){
+  if(selectedTables.length === 0){
+    alert("请先选择桌位");
+    return;
+  }
+
+  selectedTables.forEach(i=>{
+    const t = state.tables[i];
+    if(!t || t.start) return;
+
+    t.start = Date.now();
+    t.pausedAt = null;
+    t.alerted = false;
+    t.alerting = false;
+    t.lastAction = "start";
+  });
+
+  save();
+  render();
+}
+
+function batchCheckout(){
+  if(selectedTables.length === 0){
+    alert("请先选择桌位");
+    return;
+  }
+
+  const activeTables = selectedTables.filter(i=>state.tables[i]?.start);
+
+  if(activeTables.length === 0){
+    alert("选择的桌位没有正在计时的桌");
+    return;
+  }
+
+  if(!confirm(`确认批量结账 ${activeTables.length} 桌吗？`)) return;
+
+  activeTables.forEach(i=>{
+    checkoutIndex = i;
+    useRound = false;
+    confirmCheckout();
+  });
+
+  selectedTables = [];
   render();
 }
 
 
 
+
+
+window.toggleTableSelect = toggleTableSelect;
+window.clearBatchSelection = clearBatchSelection;
+window.batchStart = batchStart;
+window.batchCheckout = batchCheckout;
 window.setSortOrder = setSortOrder;
 window.setSearchKeyword = setSearchKeyword;
 window.setStatusFilter = setStatusFilter;
