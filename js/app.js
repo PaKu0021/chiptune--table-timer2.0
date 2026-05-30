@@ -283,13 +283,13 @@ filteredTables.forEach(({t,i})=>{
     div.innerHTML = `
       <h3>${t.name}</h3>
 
-      <select onchange="setPackage(${i},this.value)" ${t.start ? "disabled" : ""}>
-        ${state.packages.map((pkg,idx)=>`
-          <option value="${idx}" ${idx===t.packageIndex ? "selected" : ""}>
-            ${pkg.name}｜${pkg.unlimited ? "不限时" : pkg.minutes + "分钟"}｜¥${pkg.price}｜续费¥${pkg.extensionPrice}/小时
-          </option>
-        `).join("")}
-      </select>
+    <select onchange="setPackage(${i},this.value)" ${t.start ? "disabled" : ""}>
+  ${state.packages.map((pkg,idx)=>`
+    <option value="${idx}" ${idx===t.packageIndex ? "selected" : ""}>
+      ${pkg.name} | ${pkg.unlimited ? "不限时" : pkg.minutes + "分钟"} | ¥${pkg.price}
+    </option>
+  `).join("")}
+</select>
 
 <div class="timer" style="color:${status==="overtime" ? "#e85d5d" : status==="warning" ? "#ff9800" : "#333"};">
   ${timeText}
