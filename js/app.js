@@ -823,11 +823,18 @@ function renderAlarmPanel(){
 setInterval(()=>{
   const active = document.activeElement;
 
-if(active && active.tagName === "INPUT"){
-
+  if(
+    active &&
+    (
+      active.tagName === "INPUT" ||
+      active.tagName === "SELECT"
+    ) &&
+    !active.id?.includes("Filter") &&
+    active.id !== "sortOrder"
+  ){
     return;
-
   }
+
   render();
 },1000);
 
