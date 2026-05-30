@@ -283,14 +283,6 @@ filteredTables.forEach(({t,i})=>{
     div.innerHTML = `
       <h3>${t.name}</h3>
 
-      <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-        <input type="checkbox" 
-        ${selectedTables.includes(i) ? "checked" : ""}
-        onchange="toggleTableSelect(${i},this.checked)"
-         >
-         批量选择
-      </label>
-
       <select onchange="setPackage(${i},this.value)" ${t.start ? "disabled" : ""}>
         ${state.packages.map((pkg,idx)=>`
           <option value="${idx}" ${idx===t.packageIndex ? "selected" : ""}>
