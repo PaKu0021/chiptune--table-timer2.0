@@ -216,16 +216,16 @@ function render(){
       </div>
 
 <div class="action-row">
-<button class="btn-ghost ${t.type==="walkin" ? "btn-yellow" : ""}" onclick="setWalkin(${i})">Walk-in</button>
-<button class="btn-ghost ${t.type==="booking" ? "btn-yellow" : ""}" onclick="setBooking(${i})">预约</button>
+  <button class="btn-ghost" style="${t.type==="walkin" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="setWalkin(${i})">Walk-in</button>
+  <button class="btn-ghost" style="${t.type==="booking" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="setBooking(${i})">预约</button>
 </div>
 
 <input placeholder="提前分钟" id="pre-${i}">
 
 <div class="action-row">
-<button class="btn-ghost ${t.lastAction==="start" ? "btn-yellow" : ""}" onclick="start(${i})">开始</button>
-<button class="btn-ghost ${t.lastAction==="pause" ? "btn-yellow" : ""}" onclick="pause(${i})">暂停</button>
-<button class="btn-ghost ${t.lastAction==="resume" ? "btn-yellow" : ""}" onclick="resume(${i})">继续</button>
+  <button class="btn-ghost" style="${t.lastAction==="start" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="start(${i})">开始</button>
+  <button class="btn-ghost" style="${t.lastAction==="pause" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="pause(${i})">暂停</button>
+  <button class="btn-ghost" style="${t.lastAction==="resume" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="resume(${i})">继续</button>
 </div>
 
       ${p.unlimited ? "" : `
