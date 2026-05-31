@@ -12,6 +12,8 @@ onSnapshot(ref, snap=>{
   if(!state.bookings) state.bookings = [];
   if(!state.tables) state.tables = [];
 
+  currentBookingDate = getTodayDate();
+
   render();
   renderBookingGrid();
 });
@@ -66,9 +68,10 @@ function renderBookingGrid(){
             data-table="${tableIndex}"
             data-row="${rowIndex}"
             onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
-            onpointerenter="moveSelectSlot(event,${tableIndex},${rowIndex})"
+            onpointermove="moveSelectByPoint(event)"
             onpointerup="endSelectSlot(event)"
-          ></div>
+            onpointercancel="endSelectSlot(event)"
+            ></div>
         `).join("")}
       `).join("")}
     </div>
@@ -92,6 +95,21 @@ function startSelectSlot(e,tableIndex,rowIndex){
 
 function moveSelectSlot(e,tableIndex,rowIndex){
   if(!selecting || !selection) return;
+  if(tableIndex !== selection.tableIndex) return;
+
+  selection.endRow = rowIndex;
+  highlightSelection();
+}
+
+function moveSelectByPoint(e){
+  if(!selecting || !selection) return;
+
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+  if(!target || !target.classList.contains("slot-cell")) return;
+
+  const tableIndex = Number(target.dataset.table);
+  const rowIndex = Number(target.dataset.row);
+
   if(tableIndex !== selection.tableIndex) return;
 
   selection.endRow = rowIndex;
@@ -213,3 +231,4 @@ window.moveSelectSlot = moveSelectSlot;
 window.endSelectSlot = endSelectSlot;
 window.confirmGridBooking = confirmGridBooking;
 window.closeBookingModal = closeBookingModal;
+window.moveSelectByPoint = moveSelectByPoint;
