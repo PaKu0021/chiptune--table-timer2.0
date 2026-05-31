@@ -57,6 +57,18 @@
   </div>
 </div>
 
+<div id="bookingActionModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>预约操作</h2>
+    <div id="bookingActionInfo" style="margin-bottom:12px;font-weight:800;"></div>
+
+    <button class="btn-success full" onclick="checkInBooking()">到店并开始计时</button>
+    <button class="btn-main full" onclick="openChangeBookingTable()">更换桌位</button>
+    <button class="btn-danger full" onclick="cancelBooking()">取消预约</button>
+    <button class="btn-ghost full" onclick="closeBookingAction()">关闭</button>
+  </div>
+</div>
+
 <script type="module" src="./js/booking.js"></script>
 </body>
 </html>

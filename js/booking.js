@@ -3,6 +3,7 @@ import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.1
 
 const ref = doc(db, "shop", "main");
 let state = null;
+let activeBookingId = null;
 
 onSnapshot(ref, snap=>{
   if(!snap.exists()) return;
@@ -180,6 +181,7 @@ function confirmGridBooking(){
     checkedIn:false,
     checkInTime:null,
     checkInTimeText:""
+    cancelled:false,
   };
 
   state.bookings.push(booking);
@@ -220,7 +222,191 @@ function confirmDatePicker(){
   renderList();
 }
 
-function drawExistingBookings(){}
+function drawExistingBookings()
+{
+cell.onclick = ()=>{
+  openBookingAction(b.id);
+};
+}
+
+function getBookingById(id){
+  return state.bookings.find(b=>Number(b.id) === Number(id));
+}
+
+function openBookingAction(id){
+  const b = getBookingById(id);
+  if(!b) return;
+
+  activeBookingId = id;
+
+  const tables = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(idx=>state.tables[Number(idx)]?.name)
+    .filter(Boolean)
+    .join("、");
+
+  document.getElementById("bookingActionInfo").innerHTML = `
+    客人：${b.name}<br>
+    手机：${b.phone}<br>
+    时间：${b.startTime} - ${b.endTime}<br>
+    桌位：${tables || "-"}<br>
+    状态：${b.checkedIn ? "已到店" : "未到店"}
+  `;
+
+  document.getElementById("bookingActionModalBg").style.display = "block";
+}
+
+function closeBookingAction(){
+  document.getElementById("bookingActionModalBg").style.display = "none";
+  activeBookingId = null;
+}
+
+function checkInBooking(){
+  const b = getBookingById(activeBookingId);
+  if(!b) return;
+
+  if(b.checkedIn){
+    alert("这个预约已经到店了");
+    return;
+  }
+
+  const indexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+
+  const busy = indexes.filter(idx=>state.tables[idx]?.start);
+
+  if(busy.length){
+    alert("以下桌位正在使用中，不能直接到店：\n" + busy.map(i=>state.tables[i].name).join("、"));
+    return;
+  }
+
+  const now = Date.now();
+
+  indexes.forEach(idx=>{
+    const t = state.tables[idx];
+    if(!t) return;
+
+    t.type = "booking";
+    t.customer = {
+      name:b.name,
+      phoneLast4:String(b.phone || "").slice(-4)
+    };
+    t.start = now;
+    t.pausedAt = null;
+    t.alerted = false;
+    t.alerting = false;
+    t.lastAction = "start";
+  });
+
+  b.checkedIn = true;
+  b.checkInTime = now;
+  b.checkInTimeText = new Date(now).toLocaleString();
+
+  save();
+  closeBookingAction();
+  render();
+  renderBookingGrid();
+}
+
+function cancelBooking(){
+  const b = getBookingById(activeBookingId);
+  if(!b) return;
+
+  if(!confirm("确定取消这个预约吗？")) return;
+
+  const indexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+
+  indexes.forEach(idx=>{
+    const t = state.tables[idx];
+    if(!t) return;
+
+    if(
+      !t.start &&
+      t.type === "booking" &&
+      t.customer?.name === b.name &&
+      t.customer?.phoneLast4 === String(b.phone || "").slice(-4)
+    ){
+      t.type = "";
+      t.customer = {name:"", phoneLast4:""};
+    }
+  });
+
+  state.bookings = state.bookings.filter(x=>Number(x.id) !== Number(b.id));
+
+  save();
+  closeBookingAction();
+  render();
+  renderBookingGrid();
+}
+
+function openChangeBookingTable(){
+  const b = getBookingById(activeBookingId);
+  if(!b) return;
+
+  if(b.checkedIn){
+    alert("已到店的预约不能更换桌位");
+    return;
+  }
+
+  const input = prompt("请输入新桌号，例如 1 或 1,2：");
+  if(!input) return;
+
+  const newIndexes = input
+    .split(",")
+    .map(v=>Number(v.trim()) - 1)
+    .filter(v=>!isNaN(v) && v >= 0 && v < state.tables.length);
+
+  if(!newIndexes.length){
+    alert("桌号不正确");
+    return;
+  }
+
+  const busy = newIndexes.filter(idx=>state.tables[idx]?.start);
+  if(busy.length){
+    alert("以下桌位正在使用中：\n" + busy.map(i=>state.tables[i].name).join("、"));
+    return;
+  }
+
+  const oldIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+
+  oldIndexes.forEach(idx=>{
+    const t = state.tables[idx];
+    if(!t || t.start) return;
+
+    if(
+      t.type === "booking" &&
+      t.customer?.name === b.name &&
+      t.customer?.phoneLast4 === String(b.phone || "").slice(-4)
+    ){
+      t.type = "";
+      t.customer = {name:"", phoneLast4:""};
+    }
+  });
+
+  newIndexes.forEach(idx=>{
+    const t = state.tables[idx];
+    if(!t) return;
+
+    t.type = "booking";
+    t.customer = {
+      name:b.name,
+      phoneLast4:String(b.phone || "").slice(-4)
+    };
+  });
+
+  b.tableIndexes = newIndexes;
+  delete b.tableIndex;
+
+  save();
+  closeBookingAction();
+  render();
+  renderBookingGrid();
+}
 
 window.openDatePicker = openDatePicker;
 window.closeDatePicker = closeDatePicker;
@@ -232,3 +418,8 @@ window.endSelectSlot = endSelectSlot;
 window.confirmGridBooking = confirmGridBooking;
 window.closeBookingModal = closeBookingModal;
 window.moveSelectByPoint = moveSelectByPoint;
+window.openBookingAction = openBookingAction;
+window.closeBookingAction = closeBookingAction;
+window.checkInBooking = checkInBooking;
+window.cancelBooking = cancelBooking;
+window.openChangeBookingTable = openChangeBookingTable;
