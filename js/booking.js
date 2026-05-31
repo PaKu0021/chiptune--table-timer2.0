@@ -115,7 +115,39 @@ function renderBookingGrid(){
   drawExistingBookings();
 }
 
+function renderList(){
+  const box = document.getElementById("list");
+  if(!box) return;
 
+  const bookings = (state.bookings || []).filter(b=>{
+    return (b.date || currentBookingDate) === currentBookingDate;
+  });
+
+  if(bookings.length === 0){
+    box.innerHTML = `<p style="color:#8a8174;">暂无预约</p>`;
+    return;
+  }
+
+  box.innerHTML = bookings.map(b=>{
+    const tables = (b.tableIndexes || [b.tableIndex])
+      .filter(v=>v !== undefined && v !== null)
+      .map(idx=>state.tables[Number(idx)]?.name)
+      .filter(Boolean)
+      .join("、");
+
+    return `
+      <div class="panel">
+        <h3>${b.checkedIn ? "✅ " : ""}${b.name}</h3>
+        <p>
+          手机：${b.phone}<br>
+          时间：${b.startTime || "-"} - ${b.endTime || "-"}<br>
+          桌位：${tables || "-"}<br>
+          状态：${b.checkedIn ? "已到店" : "未到店"}
+        </p>
+      </div>
+    `;
+  }).join("");
+}
 
 
 function startSelectSlot(e,tableIndex,rowIndex){
