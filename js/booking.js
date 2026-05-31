@@ -16,6 +16,7 @@ onSnapshot(ref, snap => {
 }
 
   render();
+renderBookingGrid();
 });
 
 function save(){
@@ -235,6 +236,41 @@ function deleteBooking(i){
   save();
 
 }
+
+function openDatePicker(){
+  document.getElementById("datePickerInput").value = currentBookingDate;
+  document.getElementById("datePickerModalBg").style.display = "block";
+}
+
+function closeDatePicker(){
+  document.getElementById("datePickerModalBg").style.display = "none";
+}
+
+function confirmDatePicker(){
+  const v = document.getElementById("datePickerInput").value;
+  if(!v){
+    alert("请选择日期");
+    return;
+  }
+
+  currentBookingDate = v;
+  closeDatePicker();
+  renderBookingGrid();
+}
+const dayBookings = state.bookings.filter(b=>{
+  return (b.date || getTodayDate()) === currentBookingDate;
+});
+
+document.getElementById("bookingDateTitle").innerText =
+  currentBookingDate === getTodayDate()
+    ? `今日预约时间表（${currentBookingDate}）`
+    : `预约时间表（${currentBookingDate}）`;
+
+date: currentBookingDate,   
+
+window.openDatePicker = openDatePicker;
+window.closeDatePicker = closeDatePicker;
+window.confirmDatePicker = confirmDatePicker;
 
 window.createBooking = createBooking;
 window.changeBookingTables = changeBookingTables;
