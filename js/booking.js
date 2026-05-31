@@ -291,11 +291,51 @@ function confirmDatePicker(){
   renderList();
 }
 
-function drawExistingBookings()
-{
-cell.onclick = ()=>{
-  openBookingAction(b.id);
-};
+function drawExistingBookings(){
+  document.querySelectorAll(".slot-cell.booked").forEach(el=>{
+    el.classList.remove("booked");
+    el.innerHTML = "";
+    el.onclick = null;
+  });
+
+  const slots = getSlots();
+
+  const dayBookings = (state.bookings || []).filter(b=>{
+    return (b.date || currentBookingDate) === currentBookingDate;
+  });
+
+  dayBookings.forEach(b=>{
+    const tableIndexes = (b.tableIndexes || [b.tableIndex])
+      .filter(v=>v !== undefined && v !== null)
+      .map(Number);
+
+    const startRow = slots.indexOf(b.startTime);
+    const endRow = slots.indexOf(b.endTime);
+
+    if(startRow < 0) return;
+
+    const realEndRow = endRow > startRow ? endRow : startRow + 1;
+
+    tableIndexes.forEach(tableIndex=>{
+      for(let rowIndex=startRow; rowIndex<realEndRow; rowIndex++){
+        const cell = document.querySelector(
+          `.slot-cell[data-table="${tableIndex}"][data-row="${rowIndex}"]`
+        );
+
+        if(!cell) continue;
+
+        cell.classList.add("booked");
+
+        if(rowIndex === startRow){
+          cell.innerHTML = b.checkedIn ? `✅ ${b.name}` : b.name;
+        }
+
+        cell.onclick = ()=>{
+          openBookingAction(b.id);
+        };
+      }
+    });
+  });
 }
 
 function getBookingById(id){
