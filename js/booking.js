@@ -180,7 +180,7 @@ function confirmGridBooking(){
     endTime: slots[end] || `${CLOSE_HOUR}:00`,
     checkedIn:false,
     checkInTime:null,
-    checkInTimeText:""
+    checkInTimeText:"",
     cancelled:false,
   };
 
