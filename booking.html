@@ -19,16 +19,23 @@
 
     <div class="header-actions">
       <button onclick="location.href='./index.html'">返回首页</button>
+      <button class="btn-main" onclick="openDatePicker()">选择日期</button>
     </div>
   </div>
-
+  
   <div class="panel">
-  <h2>预约时间表</h2>
-  <div class="booking-toolbar">
-    <input id="bookingDate" type="date" onchange="renderBookingGrid()">
-  </div>
-
+  <div class="panel">
+  <h2 id="bookingDateTitle">今日预约时间表</h2>
   <div id="bookingGrid" class="booking-grid-wrap"></div>
+</div>
+
+<div id="datePickerModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>选择日期</h2>
+    <input id="datePickerInput" type="date">
+    <button class="btn-main full" onclick="confirmDatePicker()">查看这一天</button>
+    <button class="btn-ghost full" onclick="closeDatePicker()">取消</button>
+  </div>
 </div>
 
 <div id="bookingModalBg" class="modal-bg">

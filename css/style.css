@@ -560,4 +560,61 @@ button.selected-pop{
   min-height:92px !important;
 }
 
+.booking-grid-wrap{
+  width:100%;
+  overflow:auto;
+  border:1px solid var(--line);
+  border-radius:18px;
+  background:#fff;
+}
 
+.booking-grid{
+  display:grid;
+  min-width:900px;
+}
+
+.grid-head{
+  position:sticky;
+  top:0;
+  z-index:2;
+  background:#fffaf2;
+  border-bottom:1px solid var(--line);
+  border-right:1px solid var(--line);
+  padding:10px;
+  font-weight:900;
+  text-align:center;
+}
+
+.time-head{
+  left:0;
+  z-index:3;
+}
+
+.time-cell{
+  position:sticky;
+  left:0;
+  z-index:1;
+  background:#fffaf2;
+  border-right:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+  padding:10px;
+  font-size:13px;
+  color:var(--muted);
+}
+
+.slot-cell{
+  height:42px;
+  border-right:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+  background:#fff;
+  touch-action:none;
+}
+
+.slot-cell.selecting{
+  background:#f2c94c;
+}
+
+.slot-cell.booked{
+  background:#54a66b;
+  color:#fff;
+}
