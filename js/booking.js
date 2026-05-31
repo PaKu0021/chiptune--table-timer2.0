@@ -15,7 +15,7 @@ onSnapshot(ref, snap=>{
 
   currentBookingDate = getTodayDate();
 
-  render();
+  renderList();
   renderBookingGrid();
 });
 
