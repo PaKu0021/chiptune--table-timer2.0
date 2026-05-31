@@ -55,33 +55,54 @@
     </div>
   </div>
 
-  <div class="panel">
-  <h2>营业时间设置</h2>
+<div class="panel">
 
-  <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:10px;">
-    <div>
-      <small>周一到周五 开始</small>
-      <input id="weekdayOpen" type="number" min="0" max="23">
+  <button
+    class="btn-ghost full"
+    onclick="
+      const box=document.getElementById('businessHoursBox');
+      box.style.display=
+      box.style.display==='none'?'block':'none';
+    ">
+    营业时间设置 ▼
+  </button>
+
+  <div id="businessHoursBox" style="display:none;margin-top:16px;">
+
+    <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:10px;">
+
+      <div>
+        <small>周一～周五 开始</small>
+        <input id="weekdayOpen" type="number">
+      </div>
+
+      <div>
+        <small>周一～周五 结束</small>
+        <input id="weekdayClose" type="number">
+      </div>
+
+      <div>
+        <small>周六～周日 开始</small>
+        <input id="weekendOpen" type="number">
+      </div>
+
+      <div>
+        <small>周六～周日 结束</small>
+        <input id="weekendClose" type="number">
+      </div>
+
     </div>
 
-    <div>
-      <small>周一到周五 结束</small>
-      <input id="weekdayClose" type="number" min="0" max="24">
+    <div style="margin-top:12px;">
+      <button class="btn-main full" onclick="saveBusinessHours()">
+        保存营业时间
+      </button>
     </div>
 
-    <div>
-      <small>周六周日 开始</small>
-      <input id="weekendOpen" type="number" min="0" max="23">
-    </div>
-
-    <div>
-      <small>周六周日 结束</small>
-      <input id="weekendClose" type="number" min="0" max="24">
-    </div>
   </div>
 
-  <button class="btn-main full" onclick="saveBusinessHours()">保存营业时间</button>
-</div>
+</div>  
+
 
 <div class="panel">
   <div class="section-toggle" onclick="togglePackagePanel()">
@@ -93,7 +114,7 @@
     <button id="packageToggleBtn" class="btn-ghost" type="button">展开</button>
   </div>
 
-  <div id="packagePanelBody" style="display:none;margin-top:16px;">
+    <div id="packageBoxWrap" style="display:none;"></div>
     <div id="packageBox"></div>
 
     <div class="action-row">

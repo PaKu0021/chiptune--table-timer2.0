@@ -565,3 +565,4 @@ window.removePackage = removePackage;
 window.savePackages = savePackages;
 window.saveTableCount = saveTableCount;
 window.exportCSV = exportCSV;
+window.toggleBusinessHoursPanel = toggleBusinessHoursPanel;
