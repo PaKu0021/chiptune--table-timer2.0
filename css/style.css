@@ -618,3 +618,39 @@ button.selected-pop{
   background:#54a66b;
   color:#fff;
 }
+
+.brand-dashboard{
+  display:block !important;
+}
+
+.hero-top{
+  display:flex;
+  align-items:center;
+  gap:18px;
+  margin-bottom:24px;
+}
+
+.hero-stats{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:14px;
+}
+
+.stat-item{
+  background:#f8f5ee;
+  border:1px solid #ece3d2;
+  border-radius:16px;
+  padding:14px;
+}
+
+.stat-label{
+  font-size:14px;
+  color:#8a8174;
+  margin-bottom:6px;
+}
+
+.stat-value{
+  font-size:24px;
+  font-weight:900;
+  color:#332d24;
+}

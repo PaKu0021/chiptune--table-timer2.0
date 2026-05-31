@@ -10,14 +10,37 @@
 <body class="home-page">
 
 <div class="home-shell">
-  <div class="brand-card">
+<div class="brand-card brand-dashboard">
+  <div class="hero-top">
     <div class="logo-dot">C</div>
     <div>
       <h1>Chiptune</h1>
-      <p>桌位计时・预约・收银管理系统</p>
+      <p>池袋拼豆体验店管理系统</p>
     </div>
   </div>
 
+  <div class="hero-stats">
+    <div class="stat-item">
+      <div class="stat-label">使用中</div>
+      <div class="stat-value" id="homeUsingCount">0桌</div>
+    </div>
+
+    <div class="stat-item">
+      <div class="stat-label">空闲</div>
+      <div class="stat-value" id="homeFreeCount">0桌</div>
+    </div>
+
+    <div class="stat-item">
+      <div class="stat-label">今日预约</div>
+      <div class="stat-value" id="homeBookingCount">0组</div>
+    </div>
+
+    <div class="stat-item">
+      <div class="stat-label">今日营业额</div>
+      <div class="stat-value" id="homeRevenue">¥0</div>
+    </div>
+  </div>
+</div>
   <div class="home-grid">
     <button class="home-card primary" onclick="go('./app.html')">
       <span class="emoji">⏱️</span>

@@ -5,19 +5,31 @@ const ref = doc(db, "shop", "main");
 let state = null;
 let activeBookingId = null;
 
+
 onSnapshot(ref, snap=>{
   if(!snap.exists()) return;
 
   state = snap.data();
 
   if(!state.bookings) state.bookings = [];
-  if(!state.tables) state.tables = [];
+
+  if(!Array.isArray(state.tables) || state.tables.length === 0){
+    state.tables = Array.from({length:12},(_,i)=>({
+      name:(i+1)+"号桌"
+    }));
+  }
 
   currentBookingDate = getTodayDate();
 
-  renderList();
-  renderBookingGrid();
+  try{
+    renderList();
+    renderBookingGrid();
+  }catch(e){
+    alert("预约页面错误：" + e.message);
+  }
 });
+
+
 
 function save(){
   setDoc(ref,state);
@@ -51,20 +63,42 @@ function getSlots(){
 }
 
 function renderBookingGrid(){
+  if(!state) return;
+
   const box = document.getElementById("bookingGrid");
+  if(!box){
+    alert("找不到 bookingGrid");
+    return;
+  }
+
+  if(!Array.isArray(state.tables) || state.tables.length === 0){
+    alert("没有桌位数据");
+    return;
+  }
+
   const slots = getSlots();
+
+  const title = document.getElementById("bookingDateTitle");
+  if(title){
+    title.innerText =
+      currentBookingDate === getTodayDate()
+        ? "今日预约时间表"
+        : currentBookingDate + " 预约时间表";
+  }
 
   box.innerHTML = `
     <div class="booking-grid" style="grid-template-columns:80px repeat(${state.tables.length}, 1fr);">
       <div class="grid-head time-head">时间</div>
+
       ${state.tables.map(t=>`
         <div class="grid-head">${t.name}</div>
       `).join("")}
 
       ${slots.map((time,rowIndex)=>`
         <div class="time-cell">${time}</div>
+
         ${state.tables.map((t,tableIndex)=>`
-          <div 
+          <div
             class="slot-cell"
             data-table="${tableIndex}"
             data-row="${rowIndex}"
@@ -72,7 +106,7 @@ function renderBookingGrid(){
             onpointermove="moveSelectByPoint(event)"
             onpointerup="endSelectSlot(event)"
             onpointercancel="endSelectSlot(event)"
-            ></div>
+          ></div>
         `).join("")}
       `).join("")}
     </div>
@@ -80,6 +114,9 @@ function renderBookingGrid(){
 
   drawExistingBookings();
 }
+
+
+
 
 function startSelectSlot(e,tableIndex,rowIndex){
   e.preventDefault();
