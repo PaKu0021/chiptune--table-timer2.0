@@ -1,7 +1,27 @@
 import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
+const ref = doc(db, "shop", "main");
+let state = null;
+
+onSnapshot(ref, snap=>{
+  if(!snap.exists()) return;
+
+  state = snap.data();
+
+  if(!state.bookings) state.bookings = [];
+  if(!state.tables) state.tables = [];
+
+  render();
+  renderBookingGrid();
+});
+
+function save(){
+  setDoc(ref,state);
+}
+
 let currentBookingDate = getTodayDate();
+
 
 function getTodayDate(){
   const d = new Date();
@@ -133,7 +153,7 @@ function confirmGridBooking(){
 
   const booking = {
     id: Date.now(),
-    date: document.getElementById("bookingDate").value,
+    date: currentBookingDate,
     name,
     phone,
     tableIndexes:[selection.tableIndex],
@@ -159,6 +179,34 @@ function closeBookingModal(){
   selection = null;
 }
 
+function openDatePicker(){
+  document.getElementById("datePickerInput").value = currentBookingDate;
+  document.getElementById("datePickerModalBg").style.display = "block";
+}
+
+function closeDatePicker(){
+  document.getElementById("datePickerModalBg").style.display = "none";
+}
+
+function confirmDatePicker(){
+  const v = document.getElementById("datePickerInput").value;
+
+  if(!v){
+    alert("请选择日期");
+    return;
+  }
+
+  currentBookingDate = v;
+  closeDatePicker();
+  renderBookingGrid();
+  renderList();
+}
+
+function drawExistingBookings(){}
+
+window.openDatePicker = openDatePicker;
+window.closeDatePicker = closeDatePicker;
+window.confirmDatePicker = confirmDatePicker;
 window.renderBookingGrid = renderBookingGrid;
 window.startSelectSlot = startSelectSlot;
 window.moveSelectSlot = moveSelectSlot;

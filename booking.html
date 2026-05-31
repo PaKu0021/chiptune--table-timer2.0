@@ -22,11 +22,17 @@
       <button class="btn-main" onclick="openDatePicker()">选择日期</button>
     </div>
   </div>
-  
+
   <div class="panel">
+    <h2 id="bookingDateTitle">今日预约时间表</h2>
+    <div id="bookingGrid" class="booking-grid-wrap"></div>
+  </div>
+
   <div class="panel">
-  <h2 id="bookingDateTitle">今日预约时间表</h2>
-  <div id="bookingGrid" class="booking-grid-wrap"></div>
+    <h2>预约列表</h2>
+    <div id="list"></div>
+  </div>
+
 </div>
 
 <div id="datePickerModalBg" class="modal-bg">
@@ -49,16 +55,6 @@
     <button class="btn-main full" onclick="confirmGridBooking()">确认预约</button>
     <button class="btn-ghost full" onclick="closeBookingModal()">取消</button>
   </div>
-</div>
-
-    <button class="btn-main" onclick="createBooking()">创建预约</button>
-  </div>
-
-  <div class="panel">
-    <h2>预约列表</h2>
-    <div id="list"></div>
-  </div>
-
 </div>
 
 <script type="module" src="./js/booking.js"></script>
