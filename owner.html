@@ -55,6 +55,34 @@
     </div>
   </div>
 
+  <div class="panel">
+  <h2>营业时间设置</h2>
+
+  <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:10px;">
+    <div>
+      <small>周一到周五 开始</small>
+      <input id="weekdayOpen" type="number" min="0" max="23">
+    </div>
+
+    <div>
+      <small>周一到周五 结束</small>
+      <input id="weekdayClose" type="number" min="0" max="24">
+    </div>
+
+    <div>
+      <small>周六周日 开始</small>
+      <input id="weekendOpen" type="number" min="0" max="23">
+    </div>
+
+    <div>
+      <small>周六周日 结束</small>
+      <input id="weekendClose" type="number" min="0" max="24">
+    </div>
+  </div>
+
+  <button class="btn-main full" onclick="saveBusinessHours()">保存营业时间</button>
+</div>
+
 <div class="panel">
   <div class="section-toggle" onclick="togglePackagePanel()">
     <div>

@@ -35,7 +35,17 @@ onSnapshot(ref,snap=>{
   if(!state.packages) state.packages = [];
   if(!state.tables) state.tables = [];
 
+  if(!state.businessHours){
+  state.businessHours = {
+    weekdayOpen:12,
+    weekdayClose:22,
+    weekendOpen:10,
+    weekendClose:22
+  };
+}
+
   render();
+  renderBusinessHours();
 });
 
 function save(){
@@ -518,7 +528,35 @@ function togglePackagePanel(){
 }
 
 
+function renderBusinessHours(){
+  const h = state.businessHours || {
+    weekdayOpen:12,
+    weekdayClose:22,
+    weekendOpen:10,
+    weekendClose:22
+  };
 
+  const ids = ["weekdayOpen","weekdayClose","weekendOpen","weekendClose"];
+
+  ids.forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = h[id];
+  });
+}
+
+function saveBusinessHours(){
+  state.businessHours = {
+    weekdayOpen: Number(document.getElementById("weekdayOpen").value || 12),
+    weekdayClose: Number(document.getElementById("weekdayClose").value || 22),
+    weekendOpen: Number(document.getElementById("weekendOpen").value || 10),
+    weekendClose: Number(document.getElementById("weekendClose").value || 22)
+  };
+
+  save();
+  alert("营业时间已保存");
+}
+
+window.saveBusinessHours = saveBusinessHours;
 window.togglePackagePanel = togglePackagePanel;
 window.setFilter = setFilter;
 window.setCurrencyMode = setCurrencyMode;

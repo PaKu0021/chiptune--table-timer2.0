@@ -49,18 +49,39 @@ function getTodayDate(){
 let selecting = false;
 let selection = null;
 
-const OPEN_HOUR = 10;
-const CLOSE_HOUR = 22;
+const DEFAULT_BUSINESS_HOURS = {
+  weekdayOpen: 12,
+  weekdayClose: 22,
+  weekendOpen: 10,
+  weekendClose: 22
+};
+
 const SLOT_MINUTES = 30;
 
+function getBusinessHours(){
+  const hours = state.businessHours || DEFAULT_BUSINESS_HOURS;
+  const d = new Date(currentBookingDate);
+  const day = d.getDay();
+  const isWeekend = day === 0 || day === 6;
+
+  return {
+    open: isWeekend ? Number(hours.weekendOpen || 10) : Number(hours.weekdayOpen || 12),
+    close: isWeekend ? Number(hours.weekendClose || 22) : Number(hours.weekdayClose || 22)
+  };
+}
+
 function getSlots(){
+  const {open, close} = getBusinessHours();
   const slots = [];
-  for(let h = OPEN_HOUR; h < CLOSE_HOUR; h++){
+
+  for(let h = open; h < close; h++){
     slots.push(`${String(h).padStart(2,"0")}:00`);
     slots.push(`${String(h).padStart(2,"0")}:30`);
   }
+
   return slots;
 }
+
 
 function renderBookingGrid(){
   if(!state) return;
@@ -196,7 +217,7 @@ function endSelectSlot(e){
   const slots = getSlots();
 
   const startTime = slots[start];
-  const endTime = slots[end] || `${CLOSE_HOUR}:00`;
+  const endTime = slots[end] || `${getBusinessHours().close}:00`;
 
   document.getElementById("selectedRangeText").innerText =
     `${state.tables[selection.tableIndex].name}｜${startTime} - ${endTime}`;
@@ -246,7 +267,7 @@ function confirmGridBooking(){
     phone,
     tableIndexes:[selection.tableIndex],
     startTime: slots[start],
-    endTime: slots[end] || `${CLOSE_HOUR}:00`,
+    endTime: slots[end] || `${getBusinessHours().close}:00`,
     checkedIn:false,
     checkInTime:null,
     checkInTimeText:"",
