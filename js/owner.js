@@ -6,7 +6,9 @@ const RATE = 0.044;
 
 let state = null;
 let currentFilter = "today";
-let currencyMode = "JPY";
+let currencyMode = "CONVERTED";
+let packagePanelOpen = false;
+
 
 function newTable(i){
   return {
@@ -98,6 +100,22 @@ function toRMB(r){
   return Math.floor(toJPY(r) * RATE);
 }
 
+function getAmountByMode(r){
+  if(currencyMode === "JPY"){
+    return r.currency === "日元" ? Number(r.totalJPY || r.jpy || 0) : 0;
+  }
+
+  if(currencyMode === "RMB"){
+    return r.currency === "人民币" ? Number(r.totalRMB || r.rmb || 0) : 0;
+  }
+
+  if(r.currency === "人民币"){
+    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+  }
+
+  return Number(r.totalJPY || r.jpy || 0);
+}
+
 function filterName(){
   if(currentFilter === "today") return "今天";
   if(currentFilter === "week") return "本周";
@@ -115,6 +133,17 @@ function render(){
 
   const tableInput = document.getElementById("tableCount");
   if(tableInput) tableInput.value = state.tables.length || 0;
+
+  const packageBody = document.getElementById("packagePanelBody");
+const packageBtn = document.getElementById("packageToggleBtn");
+
+if(packageBody){
+  packageBody.style.display = packagePanelOpen ? "block" : "none";
+}
+
+if(packageBtn){
+  packageBtn.innerText = packagePanelOpen ? "收起" : "展开";
+}
 }
 
 function renderButtons(){
@@ -123,21 +152,32 @@ function renderButtons(){
     if(btn) btn.classList.toggle("active",currentFilter === k);
   });
 
-  document.getElementById("c_jpy")?.classList.toggle("active",currencyMode === "JPY");
-  document.getElementById("c_rmb")?.classList.toggle("active",currencyMode === "RMB");
+document.getElementById("c_jpy")?.classList.toggle("active",currencyMode === "JPY");
+document.getElementById("c_rmb")?.classList.toggle("active",currencyMode === "RMB");
+document.getElementById("c_converted")?.classList.toggle("active",currencyMode === "CONVERTED");
+
 }
 
 function renderSummary(){
   const list = getFilteredRecords();
 
-  let totalJPY = 0;
-  let totalRMB = 0;
+  let jpyIncome = 0;
+  let rmbIncome = 0;
+  let convertedJPY = 0;
+
   let payStats = {};
   let typeStats = {walkin:0, booking:0};
 
   list.forEach(r=>{
-    totalJPY += toJPY(r);
-    totalRMB += toRMB(r);
+    if(r.currency === "人民币"){
+      const rmb = Number(r.totalRMB || r.rmb || 0);
+      rmbIncome += rmb;
+      convertedJPY += Math.floor(rmb / RATE);
+    }else{
+      const jpy = Number(r.totalJPY || r.jpy || 0);
+      jpyIncome += jpy;
+      convertedJPY += jpy;
+    }
 
     const pay = r.pay || "未记录";
     payStats[pay] = (payStats[pay] || 0) + 1;
@@ -147,12 +187,13 @@ function renderSummary(){
   });
 
   document.getElementById("summary").innerHTML =
-    `${filterName()}｜日元总值：¥${Math.floor(totalJPY).toLocaleString()}｜人民币总值：¥${Math.floor(totalRMB).toLocaleString()}｜笔数：${list.length}`;
+    `${filterName()}｜日元收入：¥${Math.floor(jpyIncome).toLocaleString()}｜人民币收入：¥${Math.floor(rmbIncome).toLocaleString()}｜换算总收入：¥${Math.floor(convertedJPY).toLocaleString()}｜笔数：${list.length}`;
 
   document.getElementById("payStats").innerHTML =
     `付款渠道：${Object.keys(payStats).map(k=>`${k} ${payStats[k]}笔`).join(" / ") || "暂无"}<br>
      客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔`;
 }
+
 
 function renderChart(){
   const canvas = document.getElementById("chart");
@@ -164,7 +205,7 @@ function renderChart(){
 
   list.forEach(r=>{
     const key = dateKey(getRecordTime(r));
-    const value = currencyMode === "JPY" ? toJPY(r) : toRMB(r);
+    const value = getAmountByMode(r);
     grouped[key] = (grouped[key] || 0) + value;
   });
 
@@ -246,7 +287,14 @@ function renderChart(){
 
   ctx.fillStyle = "#332d24";
   ctx.font = "15px -apple-system";
-  ctx.fillText(currencyMode === "JPY" ? "单位：日元" : "单位：人民币",padL,22);
+const unitText =
+  currencyMode === "JPY"
+    ? "单位：日元收入"
+    : currencyMode === "RMB"
+      ? "单位：人民币收入"
+      : "单位：换算日元总收入";
+
+ctx.fillText(unitText,padL,22);
 }
 
 function renderPackages(){
@@ -454,6 +502,24 @@ function setCurrencyMode(v){
   render();
 }
 
+function togglePackagePanel(){
+  packagePanelOpen = !packagePanelOpen;
+
+  const body = document.getElementById("packagePanelBody");
+  const btn = document.getElementById("packageToggleBtn");
+
+  if(body){
+    body.style.display = packagePanelOpen ? "block" : "none";
+  }
+
+  if(btn){
+    btn.innerText = packagePanelOpen ? "收起" : "展开";
+  }
+}
+
+
+
+window.togglePackagePanel = togglePackagePanel;
 window.setFilter = setFilter;
 window.setCurrencyMode = setCurrencyMode;
 window.addPackage = addPackage;

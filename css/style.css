@@ -654,3 +654,19 @@ button.selected-pop{
   font-weight:900;
   color:#332d24;
 }
+
+.section-toggle{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  cursor:pointer;
+}
+
+.section-toggle h2{
+  margin:0;
+}
+
+.section-toggle button{
+  min-width:80px;
+}
