@@ -265,6 +265,12 @@ function closeBookingModal(){
   document.getElementById("bookingModalBg").style.display = "none";
   document.getElementById("modalName").value = "";
   document.getElementById("modalPhone").value = "";
+
+  document.querySelectorAll(".slot-cell.selecting").forEach(el=>{
+    el.classList.remove("selecting");
+  });
+
+  selecting = false;
   selection = null;
 }
 
