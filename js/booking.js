@@ -1,75 +1,134 @@
 import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
-const ref = doc(db, "shop", "main");
-let state = null;
+let selecting = false;
+let selection = null;
 
-onSnapshot(ref, snap => {
-  if (!snap.exists()) return;
-  state = snap.data();
+const OPEN_HOUR = 10;
+const CLOSE_HOUR = 22;
+const SLOT_MINUTES = 30;
 
-  if (!state.bookings) state.bookings = [];
-  if (!Array.isArray(state.tables) || state.tables.length === 0) {
-  state.tables = Array.from({length:12},(_,i)=>({
-    name:(i+1)+"号桌"
-  }));
+function getSlots(){
+  const slots = [];
+  for(let h = OPEN_HOUR; h < CLOSE_HOUR; h++){
+    slots.push(`${String(h).padStart(2,"0")}:00`);
+    slots.push(`${String(h).padStart(2,"0")}:30`);
+  }
+  return slots;
 }
 
-  render();
-});
+function renderBookingGrid(){
+  const box = document.getElementById("bookingGrid");
+  const slots = getSlots();
 
-function save(){
-  setDoc(ref, state);
+  box.innerHTML = `
+    <div class="booking-grid" style="grid-template-columns:80px repeat(${state.tables.length}, 1fr);">
+      <div class="grid-head time-head">时间</div>
+      ${state.tables.map(t=>`
+        <div class="grid-head">${t.name}</div>
+      `).join("")}
+
+      ${slots.map((time,rowIndex)=>`
+        <div class="time-cell">${time}</div>
+        ${state.tables.map((t,tableIndex)=>`
+          <div 
+            class="slot-cell"
+            data-table="${tableIndex}"
+            data-row="${rowIndex}"
+            onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
+            onpointerenter="moveSelectSlot(event,${tableIndex},${rowIndex})"
+            onpointerup="endSelectSlot(event)"
+          ></div>
+        `).join("")}
+      `).join("")}
+    </div>
+  `;
+
+  drawExistingBookings();
 }
 
-function render(){
-  renderTableOptions();
-  renderList();
+function startSelectSlot(e,tableIndex,rowIndex){
+  e.preventDefault();
+
+  selecting = true;
+  selection = {
+    tableIndex,
+    startRow: rowIndex,
+    endRow: rowIndex
+  };
+
+  highlightSelection();
 }
 
-function renderTableOptions(){
-  const box = document.getElementById("tableChecks");
-  box.innerHTML = "";
-  box.className = "table-grid";
+function moveSelectSlot(e,tableIndex,rowIndex){
+  if(!selecting || !selection) return;
+  if(tableIndex !== selection.tableIndex) return;
 
-  state.tables.forEach((t,i)=>{
-    const label = document.createElement("label");
-    label.className = "table-item";
+  selection.endRow = rowIndex;
+  highlightSelection();
+}
 
-    label.innerHTML = `
-      <input type="checkbox" class="table-check" value="${i}">
-      <span class="num">${t.name.replace("号桌","")}</span>
-      <span class="sub">号桌</span>
-    `;
+function endSelectSlot(e){
+  if(!selecting || !selection) return;
 
-    box.appendChild(label);
+  selecting = false;
+
+  const start = Math.min(selection.startRow, selection.endRow);
+  const end = Math.max(selection.startRow, selection.endRow) + 1;
+  const slots = getSlots();
+
+  const startTime = slots[start];
+  const endTime = slots[end] || `${CLOSE_HOUR}:00`;
+
+  document.getElementById("selectedRangeText").innerText =
+    `${state.tables[selection.tableIndex].name}｜${startTime} - ${endTime}`;
+
+  document.getElementById("bookingModalBg").style.display = "block";
+}
+
+function highlightSelection(){
+  document.querySelectorAll(".slot-cell.selecting").forEach(el=>{
+    el.classList.remove("selecting");
+  });
+
+  if(!selection) return;
+
+  const start = Math.min(selection.startRow, selection.endRow);
+  const end = Math.max(selection.startRow, selection.endRow);
+
+  document.querySelectorAll(".slot-cell").forEach(el=>{
+    const table = Number(el.dataset.table);
+    const row = Number(el.dataset.row);
+
+    if(table === selection.tableIndex && row >= start && row <= end){
+      el.classList.add("selecting");
+    }
   });
 }
 
-function createBooking(){
-  const name = document.getElementById("name").value.trim();
-  const phone = document.getElementById("phone").value.trim();
-  const time = document.getElementById("time").value.trim();
+function confirmGridBooking(){
+  if(!selection) return;
 
-  const tableIndexes = [...document.querySelectorAll(".table-check:checked")]
-    .map(el => Number(el.value));
+  const name = document.getElementById("modalName").value.trim();
+  const phone = document.getElementById("modalPhone").value.trim();
 
   if(!name || !phone){
     alert("请填写姓名和手机号");
     return;
   }
 
-  if(tableIndexes.length === 0){
-    alert("请选择至少一张桌");
-    return;
-  }
+  const slots = getSlots();
+  const start = Math.min(selection.startRow, selection.endRow);
+  const end = Math.max(selection.startRow, selection.endRow) + 1;
 
   const booking = {
     id: Date.now(),
+    date: document.getElementById("bookingDate").value,
     name,
     phone,
-    time,
-    tableIndexes,
+    tableIndexes:[selection.tableIndex],
+    startTime: slots[start],
+    endTime: slots[end] || `${CLOSE_HOUR}:00`,
     checkedIn:false,
     checkInTime:null,
     checkInTimeText:""
@@ -77,165 +136,22 @@ function createBooking(){
 
   state.bookings.push(booking);
 
-  tableIndexes.forEach(idx=>{
-    const t = state.tables[idx];
-    if(!t) return;
-
-    t.type = "booking";
-    t.customer = {
-      name,
-      phoneLast4: phone.slice(-4)
-    };
-  });
-
   save();
 
-  document.getElementById("name").value = "";
-  document.getElementById("phone").value = "";
-  document.getElementById("time").value = "";
-  document.querySelectorAll(".table-check:checked").forEach(el=>{
-  el.checked = false;
-});
+  closeBookingModal();
+  render();
 }
 
-function renderList(){
-  const box = document.getElementById("list");
-  box.innerHTML = "";
-
-  if(!state.bookings.length){
-    box.innerHTML = `<p style="color:#8a8174;">暂无预约</p>`;
-    return;
-  }
-
-  state.bookings.forEach((b,i)=>{
-    const tableIndexes = b.tableIndexes || [b.tableIndex];
-
-    const div = document.createElement("div");
-    div.className = "panel";
-    div.style.background = b.checkedIn ? "#e9f7ed" : "#fffaf2";
-
-    div.innerHTML = `
-      <h3>${b.checkedIn ? "✅ " : ""}${b.name}</h3>
-      <p>
-        手机：${b.phone}<br>
-        到店时间：${b.time || "-"}<br>
-        当前桌位：${tableIndexes.map(idx=>state.tables[idx]?.name).filter(Boolean).join("、") || "-"}<br>
-        状态：${b.checkedIn ? "已入桌" : "未入桌"}
-        ${b.checkInTimeText ? `<br>开始时间：${b.checkInTimeText}` : ""}
-      </p>
-
-      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr));">
-        ${state.tables.map((t,idx)=>`
-          <label style="display:flex;gap:6px;align-items:center;">
-            <input 
-              type="checkbox" 
-              class="edit-table-${i}" 
-              value="${idx}"
-              ${tableIndexes.map(Number).includes(idx) ? "checked" : ""}
-              ${b.checkedIn ? "disabled" : ""}
-            >
-            ${t.name}
-          </label>
-        `).join("")}
-      </div>
-
-      <div class="action-row">
-        <button class="btn-main" onclick="changeBookingTables(${i})" ${b.checkedIn ? "disabled" : ""}>
-          保存桌位修改
-        </button>
-        <button class="btn-danger" onclick="deleteBooking(${i})">
-          删除预约
-        </button>
-      </div>
-    `;
-
-    box.appendChild(div);
-  });
+function closeBookingModal(){
+  document.getElementById("bookingModalBg").style.display = "none";
+  document.getElementById("modalName").value = "";
+  document.getElementById("modalPhone").value = "";
+  selection = null;
 }
 
-function changeBookingTables(i){
-  const b = state.bookings[i];
-  if(!b || b.checkedIn) return;
-
-  const oldIndexes = (b.tableIndexes || [b.tableIndex])
-    .filter(v => v !== undefined && v !== null)
-    .map(Number);
-
-  const newIndexes = [...document.querySelectorAll(`.edit-table-${i}:checked`)]
-    .map(el => Number(el.value));
-
-  if(newIndexes.length === 0){
-    alert("至少选择一张桌");
-    return;
-  }
-
-  oldIndexes.forEach(idx=>{
-    const t = state.tables[idx];
-    if(!t) return;
-
-    if(
-      !t.start &&
-      t.type === "booking" &&
-      t.customer?.name === b.name &&
-      t.customer?.phoneLast4 === b.phone.slice(-4)
-    ){
-      t.type = "";
-      t.customer = {name:"", phoneLast4:""};
-    }
-  });
-
-  newIndexes.forEach(idx=>{
-    const t = state.tables[idx];
-    if(!t) return;
-
-    if(t.start){
-      alert(`${t.name} 正在使用中，不能分配预约`);
-      return;
-    }
-
-    t.type = "booking";
-    t.customer = {
-      name: b.name,
-      phoneLast4: b.phone.slice(-4)
-    };
-  });
-
-  b.tableIndexes = newIndexes;
-  delete b.tableIndex;
-
-  save();
-}
-
-function deleteBooking(i){
-  const b = state.bookings[i];
-  if(!b) return;
-
-  if(!confirm("确定删除这个预约吗？")) return;
-
-  const tableIndexes = (b.tableIndexes || [b.tableIndex])
-    .filter(v => v !== undefined && v !== null)
-    .map(Number);
-
-  tableIndexes.forEach(idx=>{
-    const t = state.tables[idx];
-    if(!t) return;
-
-    if(
-      !t.start &&
-      t.type === "booking" &&
-      t.customer?.name === b.name &&
-      t.customer?.phoneLast4 === b.phone.slice(-4)
-    ){
-      t.type = "";
-      t.customer = {name:"", phoneLast4:""};
-    }
-  });
-
-  state.bookings.splice(i,1);
-  save();
-
-}
-
-window.createBooking = createBooking;
-window.changeBookingTables = changeBookingTables;
-window.deleteBooking = deleteBooking;
+window.renderBookingGrid = renderBookingGrid;
+window.startSelectSlot = startSelectSlot;
+window.moveSelectSlot = moveSelectSlot;
+window.endSelectSlot = endSelectSlot;
+window.confirmGridBooking = confirmGridBooking;
+window.closeBookingModal = closeBookingModal;
