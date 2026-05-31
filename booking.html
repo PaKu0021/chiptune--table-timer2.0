@@ -23,14 +23,26 @@
   </div>
 
   <div class="panel">
-    <h2>新增预约</h2>
+  <h2>预约时间表</h2>
+  <div class="booking-toolbar">
+    <input id="bookingDate" type="date" onchange="renderBookingGrid()">
+  </div>
 
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-      <input id="name" placeholder="客人姓名">
-      <input id="phone" placeholder="手机号">
-      <input id="time" placeholder="到店时间，例如 18:30">
-      <div id="tableChecks" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr));"></div>
-    </div>
+  <div id="bookingGrid" class="booking-grid-wrap"></div>
+</div>
+
+<div id="bookingModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>创建预约</h2>
+    <div id="selectedRangeText" style="margin-bottom:12px;font-weight:800;"></div>
+
+    <input id="modalName" placeholder="客人姓名">
+    <input id="modalPhone" placeholder="手机号">
+
+    <button class="btn-main full" onclick="confirmGridBooking()">确认预约</button>
+    <button class="btn-ghost full" onclick="closeBookingModal()">取消</button>
+  </div>
+</div>
 
     <button class="btn-main" onclick="createBooking()">创建预约</button>
   </div>
