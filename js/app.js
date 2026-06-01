@@ -26,8 +26,9 @@ let searchKeyword = "";
 let statusFilter = "";
 let typeFilter = "";
 let payFilter = "";
-let sortOrder = "asc";
 let selectedTables = [];
+let sortDirection = "asc";
+let filterPanelOpen = true;
 
 function newTable(i){
   return {
@@ -114,6 +115,15 @@ function getElapsedMs(t){
   if(!t.start) return 0;
   if(t.pausedAt) return t.pausedAt - t.start;
   return Date.now() - t.start;
+}
+
+function getRemainMs(t){
+  if(!t.start) return Infinity;
+
+  const limit = getLimitMs(t);
+  if(limit === Infinity) return Infinity;
+
+  return limit - getElapsedMs(t);
 }
 
 function calcPriceByTotalMinutes(totalMinutes){
@@ -209,32 +219,37 @@ const filteredTables = state.tables
     return true;
       })
 
+
 .sort((a,b)=>{
-  const ta = a.t;
-  const tb = b.t;
+  const sortMode = document.getElementById("sortMode")?.value || "table";
 
-  const getSortTime = (t)=>{
-    const status = getStatus(t);
+  let va = 0;
+  let vb = 0;
 
-    if(!t.start) return Infinity;
+  if(sortMode === "table"){
+    va = a.i;
+    vb = b.i;
+  }
 
-    const elapsed = getElapsedMs(t);
-    const limit = getLimitMs(t);
+  if(sortMode === "remain"){
+    va = getRemainMs(a.t);
+    vb = getRemainMs(b.t);
+  }
 
-    // 已超时：按超时时长排序，越早/越久超时数值越大
-    if(status === "overtime"){
-      return elapsed - limit;
-    }
+  if(sortMode === "used"){
+    va = getElapsedMs(a.t);
+    vb = getElapsedMs(b.t);
+  }
 
-    // 即将超时/使用中：按剩余时间排序，越快到时间数值越小
-    return limit - elapsed;
-  };
+  if(sortMode === "amount"){
+    va = getOriginalJPY(a.t);
+    vb = getOriginalJPY(b.t);
+  }
 
-  const va = getSortTime(ta);
-  const vb = getSortTime(tb);
-
-  return sortOrder === "desc" ? vb - va : va - vb;
+  return sortDirection === "desc" ? vb - va : va - vb;
 });
+  
+
 
 filteredTables.forEach(({t,i})=>{
     const p = getPackage(t);
@@ -830,7 +845,7 @@ setInterval(()=>{
       active.tagName === "SELECT"
     ) &&
     !active.id?.includes("Filter") &&
-    active.id !== "sortOrder"
+    active.id !== "sortMode"
   ){
     return;
   }
@@ -861,12 +876,6 @@ function setPayFilter(v){
   render();
 }
 
-
-function setSortOrder(v){
-  sortOrder = v;
-  document.activeElement.blur();
-  render();
-}
 
 function toggleTableSelect(i,checked){
   if(checked){
@@ -1081,7 +1090,34 @@ function confirmBatchCheckout(){
   render();
 }
 
+function toggleSortDirection(){
+  sortDirection = sortDirection === "asc" ? "desc" : "asc";
 
+  const btn = document.getElementById("sortDirectionBtn");
+  if(btn){
+    btn.innerText = sortDirection === "asc" ? "当前：正序" : "当前：倒序";
+  }
+
+  render();
+}
+
+function toggleFilterPanel(){
+  filterPanelOpen = !filterPanelOpen;
+
+  const body = document.getElementById("filterPanelBody");
+  const btn = document.getElementById("filterToggleBtn");
+
+  if(body){
+    body.style.display = filterPanelOpen ? "block" : "none";
+  }
+
+  if(btn){
+    btn.innerText = filterPanelOpen ? "收起" : "展开";
+  }
+}
+
+window.toggleSortDirection = toggleSortDirection;
+window.toggleFilterPanel = toggleFilterPanel;
 
 
 window.openBatchCheckout = openBatchCheckout;
@@ -1094,7 +1130,6 @@ window.toggleTableSelect = toggleTableSelect;
 window.clearBatchSelection = clearBatchSelection;
 window.batchStart = batchStart;
 window.batchCheckout = batchCheckout;
-window.setSortOrder = setSortOrder;
 window.setSearchKeyword = setSearchKeyword;
 window.setStatusFilter = setStatusFilter;
 window.setTypeFilter = setTypeFilter;
