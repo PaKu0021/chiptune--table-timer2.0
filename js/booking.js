@@ -132,7 +132,7 @@ function renderBookingGrid(){
     `}
   ></div>
 `).join("")}
-      `).join("")}
+`).join("")}
     </div>
   `;
 

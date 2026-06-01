@@ -62,13 +62,66 @@
   </div>
 </div>
  
-<script>
-function go(page){
+<script type="module">
+import { db } from "./js/firebase.js";
+import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
+const ref = doc(db,"shop","main");
+
+function getTodayDate(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+onSnapshot(ref,snap=>{
+  if(!snap.exists()) return;
+
+  const state = snap.data();
+  const tables = state.tables || [];
+  const bookings = state.bookings || [];
+  const records = state.records || [];
+
+  const usingCount = tables.filter(t=>t.start).length;
+  const freeCount = tables.length - usingCount;
+
+  const today = getTodayDate();
+
+  const todayBookingCount = bookings.filter(b=>{
+    return b.date === today;
+  }).length;
+
+  const todayRevenue = records
+    .filter(r=>{
+      const ts = r.timestamp || r.time || r.date;
+      if(!ts) return false;
+      const d = new Date(ts);
+      if(isNaN(d.getTime())) return false;
+
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      return key === today;
+    })
+    .reduce((sum,r)=>sum + Number(r.totalJPY || r.jpy || 0),0);
+
+  document.getElementById("homeUsingCount").innerText = `${usingCount}桌`;
+  document.getElementById("homeFreeCount").innerText = `${freeCount}桌`;
+  document.getElementById("homeBookingCount").innerText = `${todayBookingCount}组`;
+  document.getElementById("homeRevenue").innerText = `¥${todayRevenue.toLocaleString()}`;
+});
+
+window.go = function(page){
   location.href = page;
-}
-function goOwner(){
+};
+
+window.goOwner = function(){
+  const pw = prompt("请输入老板密码");
+
+  if(pw !== "prompt"){
+    alert("密码错误");
+    return;
+  }
+
   location.href = "./owner.html";
-}
+};
 </script>
 
 </body>
