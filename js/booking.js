@@ -112,23 +112,26 @@ function renderBookingGrid(){
       <div class="grid-head time-head">时间</div>
 
       ${state.tables.map(t=>`
-        <div class="grid-head">${t.name}</div>
+        <div class="grid-head ${t.start ? "table-using" : ""}">
+        ${t.name}${t.start ? " 使用中" : ""}
+        </div>
       `).join("")}
 
       ${slots.map((time,rowIndex)=>`
         <div class="time-cell">${time}</div>
-
         ${state.tables.map((t,tableIndex)=>`
-          <div
-            class="slot-cell"
-            data-table="${tableIndex}"
-            data-row="${rowIndex}"
-            onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
-            onpointermove="moveSelectByPoint(event)"
-            onpointerup="endSelectSlot(event)"
-            onpointercancel="endSelectSlot(event)"
-          ></div>
-        `).join("")}
+  <div
+    class="slot-cell ${t.start ? "disabled-slot" : ""}"
+    data-table="${tableIndex}"
+    data-row="${rowIndex}"
+    ${t.start ? "" : `
+      onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
+      onpointermove="moveSelectByPoint(event)"
+      onpointerup="endSelectSlot(event)"
+      onpointercancel="endSelectSlot(event)"
+    `}
+  ></div>
+`).join("")}
       `).join("")}
     </div>
   `;
@@ -170,11 +173,15 @@ function renderList(){
   }).join("");
 }
 
-
 function startSelectSlot(e,tableIndex,rowIndex){
+  if(state.tables[tableIndex]?.start){
+    return;
+  }
+
   e.preventDefault();
 
   selecting = true;
+
   selection = {
     tableIndex,
     startRow: rowIndex,

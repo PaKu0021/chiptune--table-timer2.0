@@ -24,6 +24,15 @@ export function renderNav(active){
     </button>
   `;
 }
-window.goOwner = ()=>{
-  location.href="./owner.html";
+
+window.goOwner = function(){
+
+  const pw = prompt("请输入老板密码");
+
+  if(pw !== "prompt"){
+    alert("密码错误");
+    return;
+  }
+
+  location.href = "./owner.html";
 };
