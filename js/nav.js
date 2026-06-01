@@ -14,7 +14,7 @@ export function renderNav(active){
     </button>
 
     <button class="${active === "owner" ? "btn-main" : "btn-ghost"}"
-      onclick="location.href='./owner.html'">
+      onclick="goOwner()">
       老板模式
     </button>
 
@@ -24,3 +24,6 @@ export function renderNav(active){
     </button>
   `;
 }
+window.goOwner = ()=>{
+  location.href="./owner.html";
+};
