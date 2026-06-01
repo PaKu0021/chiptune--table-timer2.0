@@ -16,11 +16,7 @@
       <h1>预约系统</h1>
       <p>录入客人信息 / 指定桌位 / 调整座位</p>
     </div>
-
-    <div class="header-actions">
-      <button onclick="location.href='./index.html'">返回首页</button>
-      <button class="btn-main" onclick="openDatePicker()">选择日期</button>
-    </div>
+    <div id="globalNav" class="header-actions"></div>
   </div>
 
   <div class="panel">
@@ -69,6 +65,10 @@
   </div>
 </div>
 
-<script type="module" src="./js/booking.js"></script>
+<script type="module">
+  import { renderNav } from "./js/nav.js";
+  renderNav("booking");
+  import "./js/booking.js";
+</script>
 </body>
 </html>

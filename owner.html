@@ -16,11 +16,7 @@
       <h1>老板模式</h1>
       <p>收入统计 / 套餐设置 / 桌位数量 / 收银记录</p>
     </div>
-
-    <div class="header-actions">
-      <button class="btn-ghost" onclick="location.href='./index.html'">返回首页</button>
-      <button class="btn-main" onclick="exportCSV()">导出当前筛选CSV</button>
-    </div>
+    <div id="globalNav" class="header-actions"></div>
   </div>
 
   <div class="panel">
@@ -103,7 +99,6 @@
 
 </div>  
 
-
 <div class="panel">
   <div class="section-toggle" onclick="togglePackagePanel()">
     <div>
@@ -114,7 +109,7 @@
     <button id="packageToggleBtn" class="btn-ghost" type="button">展开</button>
   </div>
 
-    <div id="packageBoxWrap" style="display:none;"></div>
+  <div id="packagePanelBody" style="display:none;margin-top:16px;">
     <div id="packageBox"></div>
 
     <div class="action-row">
@@ -123,7 +118,6 @@
     </div>
   </div>
 </div>
-
 
   <div class="panel">
     <h2>收银记录</h2>
@@ -152,6 +146,10 @@
 
 </div>
 
-<script type="module" src="./js/owner.js"></script>
+<script type="module">
+  import { renderNav } from "./js/nav.js";
+  renderNav("owner");
+  import "./js/owner.js";
+</script>
 </body>
 </html>

@@ -15,11 +15,7 @@
       <h1>桌位计时系统</h1>
       <p>实时计时 / 收银 / 超时提醒</p>
     </div>
-
-    <div class="header-actions">
-      <button class="btn-ghost" onclick="location.href='./index.html'">返回</button>
-      <button class="btn-main" onclick="initPush()">开启锁屏提醒</button>
-    </div>
+    <div id="globalNav" class="header-actions"></div>
   </div>
 
 <div class="panel">
@@ -108,16 +104,10 @@
     <button class="btn-ghost full" onclick="closeCheckout()">取消</button>
   </div>
 </div>
-
 <script type="module">
-  import("./js/app.js?v=debug001")
-    .then(() => {
-      /*alert("app.js 加载成功");*/
-    })
-    .catch(e => {
-      alert("app.js 加载失败：\n" + e.message);
-      console.error(e);
-    });
+  import { renderNav } from "./js/nav.js";
+  renderNav("app");
+  import "./js/app.js";
 </script>
 </body>
 </html>
