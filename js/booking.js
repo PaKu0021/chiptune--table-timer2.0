@@ -82,6 +82,33 @@ function getSlots(){
   return slots;
 }
 
+function isTableBusyAtSlot(t, rowIndex){
+  if(!t.start) return false;
+
+  const slots = getSlots();
+  const slotTime = slots[rowIndex];
+  if(!slotTime) return false;
+
+  const [hh, mm] = slotTime.split(":").map(Number);
+
+  const slotDate = new Date(currentBookingDate);
+  slotDate.setHours(hh, mm, 0, 0);
+
+  const slotStart = slotDate.getTime();
+  const slotEnd = slotStart + SLOT_MINUTES * 60000;
+
+  const p = state.packages?.[t.packageIndex] || {};
+  const baseMinutes = Number(p.minutes || 0);
+  const extraMinutes = Number(t.extra || 0) / 60000;
+
+  if(baseMinutes === 0) return false;
+
+  const busyStart = Number(t.start);
+  const busyEnd = busyStart + (baseMinutes + extraMinutes) * 60000;
+
+  return slotStart < busyEnd && slotEnd > busyStart;
+}
+
 
 function renderBookingGrid(){
   if(!state) return;
@@ -119,19 +146,24 @@ function renderBookingGrid(){
 
       ${slots.map((time,rowIndex)=>`
         <div class="time-cell">${time}</div>
-        ${state.tables.map((t,tableIndex)=>`
-  <div
-    class="slot-cell ${t.start ? "disabled-slot" : ""}"
-    data-table="${tableIndex}"
-    data-row="${rowIndex}"
-    ${t.start ? "" : `
-      onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
-      onpointermove="moveSelectByPoint(event)"
-      onpointerup="endSelectSlot(event)"
-      onpointercancel="endSelectSlot(event)"
-    `}
-  ></div>
-`).join("")}
+        ${state.tables.map((t,tableIndex)=>{
+
+  const busy = isTableBusyAtSlot(t,rowIndex);
+
+  return `
+    <div
+      class="slot-cell ${busy ? "disabled-slot" : ""}"
+      data-table="${tableIndex}"
+      data-row="${rowIndex}"
+      ${busy ? "" : `
+        onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
+        onpointermove="moveSelectByPoint(event)"
+        onpointerup="endSelectSlot(event)"
+        onpointercancel="endSelectSlot(event)"
+      `}
+    ></div>
+  `;
+}).join("")}
 `).join("")}
     </div>
   `;
@@ -174,9 +206,9 @@ function renderList(){
 }
 
 function startSelectSlot(e,tableIndex,rowIndex){
-  if(state.tables[tableIndex]?.start){
-    return;
-  }
+  if(isTableBusyAtSlot(state.tables[tableIndex], rowIndex)){
+  return;
+}
 
   e.preventDefault();
 
