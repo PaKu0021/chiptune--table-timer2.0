@@ -683,3 +683,30 @@ button.selected-pop{
   pointer-events:none !important;
 }
 
+.batch-table-card{
+  position:relative;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+
+  height:44px;
+
+  border:2px solid #ddd;
+  border-radius:12px;
+
+  cursor:pointer;
+}
+
+.batch-table-card input{
+  position:absolute;
+  opacity:0;
+}
+
+.batch-table-card .table-name{
+  font-weight:800;
+}
+
+.batch-table-card:has(input:checked){
+  background:#f2c94c;
+  border-color:#d8a900;
+}

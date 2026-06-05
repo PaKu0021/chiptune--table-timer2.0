@@ -942,11 +942,19 @@ function openBatchCheckout(){
 
       return `
         <div class="table-item" style="align-items:stretch;">
-          <label style="display:flex;align-items:center;gap:8px;justify-content:center;">
-            <input type="checkbox" class="batch-checkout-table" value="${i}">
-            <strong>${t.name}</strong>
-          </label>
+            <label class="batch-table-card">
 
+             <input
+                 type="checkbox"
+                  class="batch-checkout-table"
+                  value="${i}"
+              >
+
+            <span class="table-name">
+              ${t.name}
+            </span>
+
+            </label>
           <div style="font-size:13px;color:#8a8174;text-align:center;margin:6px 0;">
             日元 ¥${amountJPY.toLocaleString()} / 人民币 ¥${amountRMB.toLocaleString()}
           </div>
@@ -970,6 +978,20 @@ function openBatchCheckout(){
   value="${amountJPY}"
   placeholder="实际收款金额">
         </div>
+
+        <input
+  id="batch-amount-${i}"
+  type="number"
+  value="${amountJPY}"
+>
+
+<button
+  id="round-btn-${i}"
+  class="btn-ghost full"
+  onclick="roundBatchAmount(${i})"
+>
+  抹零
+</button>
       `;
     }).join("");
 
@@ -1096,10 +1118,32 @@ function toggleFilterPanel(){
   }
 }
 
+function roundBatchAmount(i){
+
+  const amountInput =
+    document.getElementById(`batch-amount-${i}`);
+
+  const btn =
+    document.getElementById(`round-btn-${i}`);
+
+  if(btn.disabled) return;
+
+  const amount =
+    Number(amountInput.value || 0);
+
+  amountInput.value = roundJPY(amount);
+
+  btn.disabled = true;
+
+  btn.innerText = "已抹零";
+
+  btn.style.background = "#d9d9d9";
+  btn.style.color = "#666";
+}
+
 window.toggleSortDirection = toggleSortDirection;
 window.toggleFilterPanel = toggleFilterPanel;
-
-
+window.roundBatchAmount = roundBatchAmount;
 window.openBatchCheckout = openBatchCheckout;
 window.closeBatchCheckout = closeBatchCheckout;
 window.confirmBatchCheckout = confirmBatchCheckout;
