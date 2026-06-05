@@ -29,10 +29,12 @@ window.goOwner = function(){
 
   const pw = prompt("请输入老板密码");
 
-  if(pw !== "prompt"){
+  if(pw !== "123456"){
     alert("密码错误");
     return;
   }
+
+  sessionStorage.setItem("owner_auth","1");
 
   location.href = "./owner.html";
 };
