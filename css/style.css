@@ -710,3 +710,52 @@ button.selected-pop{
   background:#f2c94c;
   border-color:#d8a900;
 }
+
+.batch-checkout-card{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:12px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  background:#fffaf2;
+}
+
+.batch-table-card{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  height:46px;
+  border:2px solid #e6dccb;
+  border-radius:14px;
+  background:#fff;
+  cursor:pointer;
+}
+
+.batch-table-card input{
+  position:absolute;
+  opacity:0;
+}
+
+.batch-table-card .table-name{
+  font-size:20px;
+  font-weight:900;
+}
+
+.batch-table-card:has(input:checked){
+  background:#f2c94c;
+  border-color:#d8a900;
+}
+
+.batch-info{
+  font-size:13px;
+  color:#8a8174;
+  line-height:1.5;
+}
+
+.disabled-round{
+  background:#d9d9d9 !important;
+  color:#666 !important;
+  border-color:#ccc !important;
+}
