@@ -964,7 +964,11 @@ function openBatchCheckout(){
             <option value="人民币">人民币</option>
           </select>
 
-          <input id="batch-amount-${i}" type="number" placeholder="实际收款金额，可不填">
+          <input
+  id="batch-amount-${i}"
+  type="number"
+  value="${amountJPY}"
+  placeholder="实际收款金额">
         </div>
       `;
     }).join("");
