@@ -26,7 +26,6 @@ let searchKeyword = "";
 let statusFilter = "";
 let typeFilter = "";
 let payFilter = "";
-let selectedTables = [];
 let sortDirection = "asc";
 let filterPanelOpen = true;
 
@@ -873,20 +872,6 @@ function setTypeFilter(v){
 function setPayFilter(v){
   payFilter = v;
   document.activeElement.blur();
-  render();
-}
-
-
-function toggleTableSelect(i,checked){
-  if(checked){
-    if(!selectedTables.includes(i)) selectedTables.push(i);
-  }else{
-    selectedTables = selectedTables.filter(v=>v!==i);
-  }
-}
-
-function clearBatchSelection(){
-  selectedTables = [];
   render();
 }
 
