@@ -478,22 +478,73 @@ function saveBookingDetail(){
   const b = getBookingById(activeBookingId);
   if(!b) return;
 
-  const newTable = Number(
-    document.getElementById("detailTable").value
-  );
+  const oldIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
 
-  b.name =
-    document.getElementById("detailName").value.trim();
+  const oldTableIndex = oldIndexes[0];
+  const newTableIndex = Number(document.getElementById("detailTable").value);
 
-  b.phone =
-    document.getElementById("detailPhone").value.trim();
+  const newName = document.getElementById("detailName").value.trim();
+  const newPhone = document.getElementById("detailPhone").value.trim();
+  const newPay = document.getElementById("detailPay").value;
 
-  b.pay =
-    document.getElementById("detailPay").value;
+  if(b.checkedIn && newTableIndex !== oldTableIndex){
+    const oldTable = state.tables[oldTableIndex];
+    const newTable = state.tables[newTableIndex];
 
-  b.tableIndexes = [newTable];
+    if(newTable?.start){
+      alert("新桌位正在使用中，不能更换");
+      return;
+    }
+
+    state.tables[newTableIndex] = {
+      ...oldTable,
+      name: newTable.name,
+      customer:{
+        name:newName,
+        phoneLast4:String(newPhone || "").slice(-4)
+      },
+      pay:newPay || oldTable.pay || "",
+      type:"booking"
+    };
+
+    state.tables[oldTableIndex] = {
+      name: oldTable.name,
+      start: null,
+      extra: 0,
+      packageIndex: 0,
+      type: "",
+      pay: "",
+      currency: "日元",
+      customer:{ name:"", phoneLast4:"" },
+      alerted:false,
+      alerting:false,
+      pausedAt:null,
+      lastAction:""
+    };
+  }
+
+  if(b.checkedIn && newTableIndex === oldTableIndex){
+    const t = state.tables[oldTableIndex];
+    if(t){
+      t.customer = {
+        name:newName,
+        phoneLast4:String(newPhone || "").slice(-4)
+      };
+      t.pay = newPay || t.pay || "";
+      t.type = "booking";
+    }
+  }
+
+  b.name = newName;
+  b.phone = newPhone;
+  b.pay = newPay;
+  b.tableIndexes = [newTableIndex];
+  delete b.tableIndex;
 
   save();
+  closeBookingAction();
   renderBookingGrid();
   renderList();
 
