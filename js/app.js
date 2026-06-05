@@ -937,26 +937,23 @@ function openBatchCheckout(){
     .map((t,i)=>({t,i}))
     .filter(({t})=>t.start)
     .map(({t,i})=>{
+      const p = getPackage(t);
       const amountJPY = getOriginalJPY(t);
       const amountRMB = getRMB(amountJPY);
 
       return `
-        <div class="table-item" style="align-items:stretch;">
-            <label class="batch-table-card">
+        <div class="batch-checkout-card">
 
-             <input
-                 type="checkbox"
-                  class="batch-checkout-table"
-                  value="${i}"
-              >
+          <label class="batch-table-card">
+            <input type="checkbox" class="batch-checkout-table" value="${i}">
+            <span class="table-name">${t.name}</span>
+          </label>
 
-            <span class="table-name">
-              ${t.name}
-            </span>
-
-            </label>
-          <div style="font-size:13px;color:#8a8174;text-align:center;margin:6px 0;">
-            日元 ¥${amountJPY.toLocaleString()} / 人民币 ¥${amountRMB.toLocaleString()}
+          <div class="batch-info">
+            <div><b>套餐：</b>${p.name}</div>
+            <div><b>客人：</b>${t.customer?.name || "-"} ${t.customer?.phoneLast4 || ""}</div>
+            <div><b>原价：</b>¥${amountJPY.toLocaleString()}</div>
+            <div><b>人民币参考：</b>¥${amountRMB.toLocaleString()}</div>
           </div>
 
           <select id="batch-pay-${i}">
@@ -973,25 +970,21 @@ function openBatchCheckout(){
           </select>
 
           <input
-  id="batch-amount-${i}"
-  type="number"
-  value="${amountJPY}"
-  placeholder="实际收款金额">
+            id="batch-amount-${i}"
+            type="number"
+            value="${amountJPY}"
+            placeholder="实际收款金额"
+          >
+
+          <button
+            id="round-btn-${i}"
+            class="btn-ghost full"
+            onclick="roundBatchAmount(${i})"
+          >
+            抹零
+          </button>
+
         </div>
-
-        <input
-  id="batch-amount-${i}"
-  type="number"
-  value="${amountJPY}"
->
-
-<button
-  id="round-btn-${i}"
-  class="btn-ghost full"
-  onclick="roundBatchAmount(${i})"
->
-  抹零
-</button>
       `;
     }).join("");
 
@@ -1000,6 +993,20 @@ function openBatchCheckout(){
   }
 
   document.getElementById("batchCheckoutModalBg").style.display = "block";
+}
+
+function roundBatchAmount(i){
+  const amountInput = document.getElementById(`batch-amount-${i}`);
+  const btn = document.getElementById(`round-btn-${i}`);
+
+  if(!amountInput || !btn || btn.disabled) return;
+
+  const amount = Number(amountInput.value || 0);
+  amountInput.value = roundJPY(amount);
+
+  btn.disabled = true;
+  btn.innerText = "已抹零";
+  btn.classList.add("disabled-round");
 }
 
 function closeBatchCheckout(){
@@ -1174,3 +1181,4 @@ window.closeCheckout = closeCheckout;
 window.initPush = initPush;
 window.updateCustomer = updateCustomer;
 window.toggleType = toggleType;
+window.roundBatchAmount = roundBatchAmount;
