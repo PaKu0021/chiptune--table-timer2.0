@@ -247,6 +247,23 @@ function moveSelectByPoint(e){
 }
 
 function endSelectSlot(e){
+  if(
+
+    e.target.classList.contains("booked") ||
+
+    e.target.classList.contains("checked-in-booking")
+
+  ){
+
+    selecting = false;
+
+    selection = null;
+
+    return;
+
+  }
+
+
   if(!selecting || !selection) return;
 
   selecting = false;
@@ -358,8 +375,8 @@ function confirmDatePicker(){
 }
 
 function drawExistingBookings(){
-  document.querySelectorAll(".slot-cell.booked").forEach(el=>{
-    el.classList.remove("booked");
+  document.querySelectorAll(".slot-cell.booked, .slot-cell.checked-in-booking").forEach(el=>{
+    el.classList.remove("booked","checked-in-booking");
     el.innerHTML = "";
     el.onclick = null;
   });
@@ -383,26 +400,38 @@ function drawExistingBookings(){
     const realEndRow = endRow > startRow ? endRow : startRow + 1;
 
     tableIndexes.forEach(tableIndex=>{
-      for(let rowIndex=startRow; rowIndex<realEndRow; rowIndex++){
+      for(let rowIndex = startRow; rowIndex < realEndRow; rowIndex++){
         const cell = document.querySelector(
           `.slot-cell[data-table="${tableIndex}"][data-row="${rowIndex}"]`
         );
 
         if(!cell) continue;
 
-        cell.classList.add("booked");
+        cell.classList.add(b.checkedIn ? "checked-in-booking" : "booked");
 
-        if(rowIndex === startRow){
-          cell.innerHTML = b.checkedIn ? `✅ ${b.name}` : b.name;
-        }
+        cell.onpointerdown = null;
+        cell.onpointermove = null;
+        cell.onpointerup = null;
+        cell.onpointercancel = null;
 
-        cell.onclick = ()=>{
+        cell.onclick = (e)=>{
+          e.preventDefault();
+          e.stopPropagation();
           openBookingAction(b.id);
         };
+
+        if(rowIndex === startRow){
+          cell.innerHTML = b.checkedIn
+            ? "✅ " + (b.name || "")
+            : (b.name || "");
+        }
       }
     });
   });
 }
+
+
+
 
 function getBookingById(id){
   return state.bookings.find(b=>Number(b.id) === Number(id));
@@ -503,6 +532,7 @@ function checkInBooking(){
     if(!t) return;
 
     t.type = "booking";
+    t.pay = b.pay || "";
     t.customer = {
       name:b.name,
       phoneLast4:String(b.phone || "").slice(-4)
