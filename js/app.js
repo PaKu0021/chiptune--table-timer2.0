@@ -989,7 +989,9 @@ function confirmBatchCheckout(){
     return;
   }
 
-  const noPay = indexes.filter(i=>!state.tables[i].pay);
+  const noPay = indexes.filter(i=>{
+    return !document.getElementById(`batch-pay-${i}`)?.value;
+  });
 
   if(noPay.length){
     alert("以下桌位还没有选择付款方式：\n" + noPay.map(i=>state.tables[i].name).join("、"));
@@ -999,15 +1001,26 @@ function confirmBatchCheckout(){
   if(!confirm(`确认批量结账 ${indexes.length} 桌吗？`)) return;
 
   indexes.forEach(i=>{
-    checkoutIndex = i;
-    useRound = false;
-
     const t = state.tables[i];
     const p = getPackage(t);
 
     const originalJPY = getOriginalJPY(t);
-    const finalJPY = originalJPY;
-    const totalRMB = getRMB(finalJPY);
+    const defaultRMB = getRMB(originalJPY);
+
+    const pay = document.getElementById(`batch-pay-${i}`).value;
+    const currency = document.getElementById(`batch-currency-${i}`).value;
+    const manualAmount = Number(document.getElementById(`batch-amount-${i}`).value || 0);
+
+    const finalJPY =
+      currency === "日元"
+        ? (manualAmount > 0 ? manualAmount : originalJPY)
+        : originalJPY;
+
+    const totalRMB =
+      currency === "人民币"
+        ? (manualAmount > 0 ? manualAmount : defaultRMB)
+        : defaultRMB;
+
     const now = new Date();
 
     stopAlertLoop(i);
@@ -1023,13 +1036,13 @@ function confirmBatchCheckout(){
       packageMinutes: p.unlimited ? "不限时" : p.minutes,
       packagePrice: p.price,
       extraMinutes: Math.floor(Number(t.extra || 0) / 60000),
-      extensionAmount: (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0),
+      extensionAmount: Math.max(0, originalJPY - Number(p.price || 0)),
       originalJPY,
       totalJPY: finalJPY,
       totalRMB,
-      pay: t.pay,
-      currency: t.currency || "日元",
-      roundRule: "不抹零"
+      pay,
+      currency,
+      roundRule: "批量结账"
     });
 
     state.tables[i] = {
