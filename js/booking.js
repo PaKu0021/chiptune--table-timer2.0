@@ -557,71 +557,7 @@ function cancelBooking(){
   renderBookingGrid();
 }
 
-function openChangeBookingTable(){
-  const b = getBookingById(activeBookingId);
-  if(!b) return;
 
-  if(b.checkedIn){
-    alert("已到店的预约不能更换桌位");
-    return;
-  }
-
-  const input = prompt("请输入新桌号，例如 1 或 1,2：");
-  if(!input) return;
-
-  const newIndexes = input
-    .split(",")
-    .map(v=>Number(v.trim()) - 1)
-    .filter(v=>!isNaN(v) && v >= 0 && v < state.tables.length);
-
-  if(!newIndexes.length){
-    alert("桌号不正确");
-    return;
-  }
-
-  const busy = newIndexes.filter(idx=>state.tables[idx]?.start);
-  if(busy.length){
-    alert("以下桌位正在使用中：\n" + busy.map(i=>state.tables[i].name).join("、"));
-    return;
-  }
-
-  const oldIndexes = (b.tableIndexes || [b.tableIndex])
-    .filter(v=>v !== undefined && v !== null)
-    .map(Number);
-
-  oldIndexes.forEach(idx=>{
-    const t = state.tables[idx];
-    if(!t || t.start) return;
-
-    if(
-      t.type === "booking" &&
-      t.customer?.name === b.name &&
-      t.customer?.phoneLast4 === String(b.phone || "").slice(-4)
-    ){
-      t.type = "";
-      t.customer = {name:"", phoneLast4:""};
-    }
-  });
-
-  newIndexes.forEach(idx=>{
-    const t = state.tables[idx];
-    if(!t) return;
-
-    t.type = "booking";
-    t.customer = {
-      name:b.name,
-      phoneLast4:String(b.phone || "").slice(-4)
-    };
-  });
-
-  b.tableIndexes = newIndexes;
-  delete b.tableIndex;
-
-  save();
-  closeBookingAction();
-  render();
-  renderBookingGrid();
-}
 
 window.openDatePicker = openDatePicker;
 window.closeDatePicker = closeDatePicker;
@@ -637,5 +573,4 @@ window.openBookingAction = openBookingAction;
 window.closeBookingAction = closeBookingAction;
 window.checkInBooking = checkInBooking;
 window.cancelBooking = cancelBooking;
-window.openChangeBookingTable = openChangeBookingTable;
 window.saveBookingDetail = saveBookingDetail;
