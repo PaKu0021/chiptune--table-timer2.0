@@ -11,17 +11,16 @@
 
 <div class="page-shell">
 
-  <div class="app-header">
-    <div class="app-title">
-      <h1>老板模式</h1>
-      <p>收入统计 / 套餐设置 / 桌位数量 / 收银记录</p>
-    </div>
-    <div id="globalNav" class="header-actions"></div>
+<div class="app-header">
+  <div class="app-title">
+    <h1>老板模式</h1>
+    <p>收入统计 / 套餐设置 / 桌位数量 / 收银记录</p>
   </div>
 
-<div class="header-actions">
-  <div id="globalNav" class="header-actions"></div>
-  <button class="btn-danger" onclick="logoutOwner()">退出老板模式</button>
+  <div class="header-actions">
+    <div id="globalNav" class="header-actions"></div>
+    <button class="btn-danger" onclick="logoutOwner()">退出老板模式</button>
+  </div>
 </div>
 
   <div class="panel">
@@ -150,12 +149,11 @@
   </div>
 
 </div>
-
 <script type="module">
   import { renderNav } from "./js/nav.js";
-  import "./js/owner.js";
   renderNav("owner");
 
+  import "./js/owner.js";
 </script>
 </body>
 </html>
