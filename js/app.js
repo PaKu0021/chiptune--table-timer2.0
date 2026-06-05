@@ -936,13 +936,38 @@ function openBatchCheckout(){
   box.innerHTML = state.tables
     .map((t,i)=>({t,i}))
     .filter(({t})=>t.start)
-    .map(({t,i})=>`
-      <label class="table-item">
-        <input type="checkbox" class="batch-checkout-table" value="${i}">
-        <span class="num">${t.name.replace("号桌","")}</span>
-        <span class="sub">${t.pay || "未选支付"}</span>
-      </label>
-    `).join("");
+    .map(({t,i})=>{
+      const amountJPY = getOriginalJPY(t);
+      const amountRMB = getRMB(amountJPY);
+
+      return `
+        <div class="table-item" style="align-items:stretch;">
+          <label style="display:flex;align-items:center;gap:8px;justify-content:center;">
+            <input type="checkbox" class="batch-checkout-table" value="${i}">
+            <strong>${t.name}</strong>
+          </label>
+
+          <div style="font-size:13px;color:#8a8174;text-align:center;margin:6px 0;">
+            日元 ¥${amountJPY.toLocaleString()} / 人民币 ¥${amountRMB.toLocaleString()}
+          </div>
+
+          <select id="batch-pay-${i}">
+            <option value="">付款方式</option>
+            <option value="现金">现金</option>
+            <option value="PayPay">PayPay</option>
+            <option value="微信">微信</option>
+            <option value="支付宝">支付宝</option>
+          </select>
+
+          <select id="batch-currency-${i}">
+            <option value="日元">日元</option>
+            <option value="人民币">人民币</option>
+          </select>
+
+          <input id="batch-amount-${i}" type="number" placeholder="实际收款金额，可不填">
+        </div>
+      `;
+    }).join("");
 
   if(!box.innerHTML){
     box.innerHTML = `<p style="color:#8a8174;">没有正在使用的桌位</p>`;
