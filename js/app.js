@@ -911,54 +911,7 @@ function batchStart(){
   render();
 }
 
-function batchCheckout(){
-  if(selectedTables.length === 0){
-    alert("请先选择桌位");
-    return;
-  }
 
-  const activeTables = selectedTables.filter(i=>state.tables[i]?.start);
-
-  if(activeTables.length === 0){
-    alert("选择的桌位没有正在计时的桌");
-    return;
-  }
-
-  if(!confirm(`确认批量结账 ${activeTables.length} 桌吗？`)) return;
-
-  activeTables.forEach(i=>{
-    checkoutIndex = i;
-    useRound = false;
-    confirmCheckout();
-  });
-
-  selectedTables = [];
-  render();
-}
-
-function openBatchStart(){
-  const pkgBox = document.getElementById("batchPackageSelect");
-  const tableBox = document.getElementById("batchTableChecks");
-
-  pkgBox.innerHTML = state.packages.map((p,i)=>`
-    <option value="${i}">
-      ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
-    </option>
-  `).join("");
-
-tableBox.innerHTML = state.tables
-  .map((t,i)=>({t,i}))
-  .filter(({t})=>!t.start)
-  .map(({t,i})=>`
-      <label class="table-item">
-      <input type="checkbox" class="batch-table-check" value="${i}" ${t.start ? "disabled" : ""}>
-      <span class="num">${t.name.replace("号桌","")}</span>
-      <span class="sub">${t.start ? "使用中" : "可开始"}</span>
-    </label>
-  `).join("");
-
-  document.getElementById("batchStartModalBg").style.display = "block";
-}
 
 function closeBatchStart(){
   document.getElementById("batchStartModalBg").style.display = "none";
