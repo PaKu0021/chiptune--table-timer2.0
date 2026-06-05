@@ -29,7 +29,7 @@ window.goOwner = function(){
 
   const pw = prompt("请输入老板密码");
 
-  if(pw !== "123456"){
+  if(pw !== "prompt"){
     alert("密码错误");
     return;
   }
