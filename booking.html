@@ -55,16 +55,49 @@
 
 <div id="bookingActionModalBg" class="modal-bg">
   <div class="modal">
-    <h2>预约操作</h2>
-    <div id="bookingActionInfo" style="margin-bottom:12px;font-weight:800;"></div>
 
-    <button class="btn-success full" onclick="checkInBooking()">到店并开始计时</button>
-    <button class="btn-main full" onclick="openChangeBookingTable()">更换桌位</button>
-    <button class="btn-danger full" onclick="cancelBooking()">取消预约</button>
-    <button class="btn-ghost full" onclick="closeBookingAction()">关闭</button>
+    <h2>预约详情</h2>
+
+    <div id="bookingActionInfo"
+         style="margin-bottom:12px;font-weight:800;">
+    </div>
+
+    <input id="detailName" placeholder="客人姓名">
+
+    <input id="detailPhone" placeholder="手机号">
+
+    <select id="detailTable"></select>
+
+    <select id="detailPay">
+      <option value="">付款方式</option>
+      <option value="现金">现金</option>
+      <option value="PayPay">PayPay</option>
+      <option value="微信">微信</option>
+      <option value="支付宝">支付宝</option>
+    </select>
+
+    <button class="btn-main full"
+      onclick="saveBookingDetail()">
+      保存修改
+    </button>
+
+    <button class="btn-success full"
+      onclick="checkInBooking()">
+      到店并开始计时
+    </button>
+
+    <button class="btn-danger full"
+      onclick="cancelBooking()">
+      取消预约
+    </button>
+
+    <button class="btn-ghost full"
+      onclick="closeBookingAction()">
+      关闭
+    </button>
+
   </div>
 </div>
-
 <script type="module">
   import { renderNav } from "./js/nav.js";
   renderNav("booking");
