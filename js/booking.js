@@ -414,21 +414,61 @@ function openBookingAction(id){
 
   activeBookingId = id;
 
-  const tables = (b.tableIndexes || [b.tableIndex])
-    .filter(v=>v !== undefined && v !== null)
-    .map(idx=>state.tables[Number(idx)]?.name)
-    .filter(Boolean)
-    .join("、");
+  const tableIndex = Number(
+    (b.tableIndexes || [b.tableIndex])[0] || 0
+  );
 
   document.getElementById("bookingActionInfo").innerHTML = `
-    客人：${b.name}<br>
-    手机：${b.phone}<br>
     时间：${b.startTime} - ${b.endTime}<br>
-    桌位：${tables || "-"}<br>
     状态：${b.checkedIn ? "已到店" : "未到店"}
   `;
 
+  document.getElementById("detailName").value =
+    b.name || "";
+
+  document.getElementById("detailPhone").value =
+    b.phone || "";
+
+  document.getElementById("detailPay").value =
+    b.pay || "";
+
+  document.getElementById("detailTable").innerHTML =
+    state.tables.map((t,i)=>`
+      <option
+        value="${i}"
+        ${i===tableIndex ? "selected" : ""}
+      >
+        ${t.name}
+      </option>
+    `).join("");
+
   document.getElementById("bookingActionModalBg").style.display = "block";
+}
+
+function saveBookingDetail(){
+  const b = getBookingById(activeBookingId);
+  if(!b) return;
+
+  const newTable = Number(
+    document.getElementById("detailTable").value
+  );
+
+  b.name =
+    document.getElementById("detailName").value.trim();
+
+  b.phone =
+    document.getElementById("detailPhone").value.trim();
+
+  b.pay =
+    document.getElementById("detailPay").value;
+
+  b.tableIndexes = [newTable];
+
+  save();
+  renderBookingGrid();
+  renderList();
+
+  alert("修改成功");
 }
 
 function closeBookingAction(){
@@ -598,3 +638,4 @@ window.closeBookingAction = closeBookingAction;
 window.checkInBooking = checkInBooking;
 window.cancelBooking = cancelBooking;
 window.openChangeBookingTable = openChangeBookingTable;
+window.saveBookingDetail = saveBookingDetail;
