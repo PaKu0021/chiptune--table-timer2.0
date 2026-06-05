@@ -222,17 +222,12 @@ const filteredTables = state.tables
 .sort((a,b)=>{
   const sortMode = document.getElementById("sortMode")?.value || "table";
 
-  let va = 0;
-  let vb = 0;
-
-  if(sortMode === "table"){
-    va = a.i;
-    vb = b.i;
-  }
+  let va = a.i;
+  let vb = b.i;
 
   if(sortMode === "remain"){
-    va = getRemainMs(a.t);
-    vb = getRemainMs(b.t);
+    va = getLimitMs(a.t) - getElapsedMs(a.t);
+    vb = getLimitMs(b.t) - getElapsedMs(b.t);
   }
 
   if(sortMode === "used"){
