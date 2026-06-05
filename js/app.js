@@ -211,10 +211,9 @@ const filteredTables = state.tables
     ].join(" ").toLowerCase();
 
     if(keyword && !text.includes(keyword)) return false;
-    if(statusFilter && status !== statusFilter) return false;
-    if(typeFilter && t.type !== typeFilter) return false;
-    if(payFilter && t.pay !== payFilter) return false;
-
+    if(statusFilter && statusFilter !== "all" && status !== statusFilter) return false;
+    if(typeFilter && typeFilter !== "all" && t.type !== typeFilter) return false;
+    if(payFilter && payFilter !== "all" && t.pay !== payFilter) return false;
     return true;
       })
 
@@ -870,28 +869,35 @@ function setPayFilter(v){
   render();
 }
 
-function batchStart(){
-  if(selectedTables.length === 0){
-    alert("请先选择桌位");
-    return;
+
+
+function openBatchStart(){
+  const pkgBox = document.getElementById("batchPackageSelect");
+  const tableBox = document.getElementById("batchTableChecks");
+
+  pkgBox.innerHTML = state.packages.map((p,i)=>`
+    <option value="${i}">
+      ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
+    </option>
+  `).join("");
+
+  tableBox.innerHTML = state.tables
+    .map((t,i)=>({t,i}))
+    .filter(({t})=>!t.start)
+    .map(({t,i})=>`
+      <label class="table-item">
+        <input type="checkbox" class="batch-table-check" value="${i}">
+        <span class="num">${t.name.replace("号桌","")}</span>
+        <span class="sub">可开始</span>
+      </label>
+    `).join("");
+
+  if(!tableBox.innerHTML){
+    tableBox.innerHTML = `<p style="color:#8a8174;">没有可开始的桌位</p>`;
   }
 
-  selectedTables.forEach(i=>{
-    const t = state.tables[i];
-    if(!t || t.start) return;
-
-    t.start = Date.now();
-    t.pausedAt = null;
-    t.alerted = false;
-    t.alerting = false;
-    t.lastAction = "start";
-  });
-
-  save();
-  render();
+  document.getElementById("batchStartModalBg").style.display = "block";
 }
-
-
 
 function closeBatchStart(){
   document.getElementById("batchStartModalBg").style.display = "none";
@@ -1120,28 +1126,6 @@ function toggleFilterPanel(){
   }
 }
 
-function roundBatchAmount(i){
-
-  const amountInput =
-    document.getElementById(`batch-amount-${i}`);
-
-  const btn =
-    document.getElementById(`round-btn-${i}`);
-
-  if(btn.disabled) return;
-
-  const amount =
-    Number(amountInput.value || 0);
-
-  amountInput.value = roundJPY(amount);
-
-  btn.disabled = true;
-
-  btn.innerText = "已抹零";
-
-  btn.style.background = "#d9d9d9";
-  btn.style.color = "#666";
-}
 
 window.toggleSortDirection = toggleSortDirection;
 window.toggleFilterPanel = toggleFilterPanel;
@@ -1152,10 +1136,6 @@ window.confirmBatchCheckout = confirmBatchCheckout;
 window.openBatchStart = openBatchStart;
 window.closeBatchStart = closeBatchStart;
 window.confirmBatchStart = confirmBatchStart;
-window.toggleTableSelect = toggleTableSelect;
-window.clearBatchSelection = clearBatchSelection;
-window.batchStart = batchStart;
-window.batchCheckout = batchCheckout;
 window.setSearchKeyword = setSearchKeyword;
 window.setStatusFilter = setStatusFilter;
 window.setTypeFilter = setTypeFilter;
