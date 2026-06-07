@@ -499,6 +499,13 @@ function openBookingAction(id){
       </option>
     `).join("");
 
+    document.getElementById("detailPackage").innerHTML =
+  (state.packages || []).map((p,i)=>`
+    <option value="${i}" ${Number(b.packageIndex || 0) === i ? "selected" : ""}>
+      ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
+    </option>
+  `).join("");
+
   document.getElementById("bookingActionModalBg").style.display = "block";
 }
 
@@ -516,6 +523,8 @@ function saveBookingDetail(){
   const newName = document.getElementById("detailName").value.trim();
   const newPhone = document.getElementById("detailPhone").value.trim();
   const newPay = document.getElementById("detailPay").value;
+  const newPackageIndex = Number(document.getElementById("detailPackage").value || 0);
+
 
   if(b.checkedIn && newTableIndex !== oldTableIndex){
     const oldTable = state.tables[oldTableIndex];
@@ -568,6 +577,7 @@ function saveBookingDetail(){
   b.name = newName;
   b.phone = newPhone;
   b.pay = newPay;
+  b.packageIndex = newPackageIndex;
   b.tableIndexes = [newTableIndex];
   delete b.tableIndex;
 
@@ -612,6 +622,7 @@ function checkInBooking(){
 
     t.type = "booking";
     t.pay = b.pay || "";
+    t.packageIndex = Number(b.packageIndex || 0);
     t.customer = {
       name:b.name,
       phoneLast4:String(b.phone || "").slice(-4)
