@@ -52,9 +52,17 @@
 </head>
 
 <body>
-  <div class="no-print" style="padding:16px;">
-    <button onclick="window.print()">打印二维码</button>
-  </div>
+  <div class="no-print" style="padding:16px;display:flex;gap:12px;">
+
+  <button onclick="history.back()">
+    ← 返回
+  </button>
+
+  <button onclick="window.print()">
+    打印二维码
+  </button>
+
+</div>
 
   <div id="qrGrid" class="qr-print-grid"></div>
 
