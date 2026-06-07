@@ -6,6 +6,8 @@ const params = new URLSearchParams(location.search);
 const tableNo = Number(params.get("table"));
 const tableIndex = tableNo - 1;
 
+let state = null;
+
 function formatTime(ms){
   ms = Math.max(0,ms);
   const s = Math.floor(ms / 1000);
@@ -15,10 +17,9 @@ function formatTime(ms){
   return `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
 }
 
-onSnapshot(ref,snap=>{
-  if(!snap.exists()) return;
+function renderDisplay(){
+  if(!state) return;
 
-  const state = snap.data();
   const t = state.tables?.[tableIndex];
 
   if(!t){
@@ -26,7 +27,7 @@ onSnapshot(ref,snap=>{
     return;
   }
 
-  document.getElementById("tableName").innerText = t.name;
+  document.getElementById("tableName").innerText = t.name || `${tableNo}号桌`;
 
   if(!t.start){
     document.getElementById("timeText").innerText = "未开始";
@@ -53,4 +54,12 @@ onSnapshot(ref,snap=>{
     document.getElementById("timeText").innerText = formatTime(remain);
     document.getElementById("statusText").innerText = "剩余时间";
   }
+}
+
+onSnapshot(ref,snap=>{
+  if(!snap.exists()) return;
+  state = snap.data();
+  renderDisplay();
 });
+
+setInterval(renderDisplay,1000);

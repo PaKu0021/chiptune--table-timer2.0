@@ -138,11 +138,17 @@ function renderBookingGrid(){
     <div class="booking-grid" style="grid-template-columns:80px repeat(${state.tables.length}, 1fr);">
       <div class="grid-head time-head">时间</div>
 
-      ${state.tables.map(t=>`
-        <div class="grid-head ${t.start ? "table-using" : ""}">
-        ${t.name}${t.start ? " 使用中" : ""}
-        </div>
-      `).join("")}
+      ${state.tables.map((t,tableIndex)=>{
+  const usingToday = slots.some((_,rowIndex)=>{
+    return isTableBusyAtSlot(t,rowIndex);
+  });
+
+  return `
+    <div class="grid-head ${usingToday ? "table-using" : ""}">
+      ${t.name}${usingToday ? " 使用中" : ""}
+    </div>
+  `;
+}).join("")}
 
       ${slots.map((time,rowIndex)=>`
         <div class="time-cell">${time}</div>
