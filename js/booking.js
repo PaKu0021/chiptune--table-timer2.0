@@ -109,6 +109,26 @@ function isTableBusyAtSlot(t, rowIndex){
   return slotStart < busyEnd && slotEnd > busyStart;
 }
 
+function isTableUsedAtSlot(t,rowIndex){
+  if(!t.start) return false;
+
+  const slots = getSlots();
+  const slotTime = slots[rowIndex];
+  if(!slotTime) return false;
+
+  const [hh,mm] = slotTime.split(":").map(Number);
+
+  const slotDate = new Date(currentBookingDate);
+  slotDate.setHours(hh,mm,0,0);
+
+  const slotStart = slotDate.getTime();
+  const slotEnd = slotStart + SLOT_MINUTES * 60000;
+
+  const usedStart = Number(t.start);
+  const usedEnd = Number(t.pausedAt || Date.now());
+
+  return slotStart < usedEnd && slotEnd > usedStart;
+}
 
 function renderBookingGrid(){
   if(!state) return;
@@ -154,11 +174,13 @@ function renderBookingGrid(){
         <div class="time-cell">${time}</div>
         ${state.tables.map((t,tableIndex)=>{
 
-  const busy = isTableBusyAtSlot(t,rowIndex);
+          const busy = isTableBusyAtSlot(t,rowIndex);
+          const used = isTableUsedAtSlot(t,rowIndex);
 
-  return `
-    <div
-      class="slot-cell ${busy ? "disabled-slot" : ""}"
+return `
+  <div
+    class="slot-cell ${busy ? "disabled-slot" : ""} ${used ? "used-slot" : ""}"
+
       data-table="${tableIndex}"
       data-row="${rowIndex}"
       ${busy ? "" : `
