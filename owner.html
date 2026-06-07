@@ -153,9 +153,11 @@
 </div>
 <script type="module">
   import { renderNav } from "./js/nav.js";
-  renderNav("owner");
 
-  import "./js/owner.js";
+  window.addEventListener("DOMContentLoaded", async ()=>{
+    renderNav("owner");
+    await import("./js/owner.js");
+  });
 </script>
 </body>
 </html>
