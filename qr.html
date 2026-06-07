@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>桌位二维码</title>
+<link rel="stylesheet" href="./css/style.css">
+<style>
+.qr-print-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:18px;
+  padding:24px;
+}
+
+.qr-card{
+  border:1px solid #ddd;
+  border-radius:18px;
+  padding:18px;
+  text-align:center;
+  background:#fff;
+}
+
+.qr-card h2{
+  margin:0 0 12px;
+}
+
+.qr-card canvas{
+  width:160px !important;
+  height:160px !important;
+}
+
+@media print{
+  body{
+    background:#fff;
+  }
+
+  .no-print{
+    display:none;
+  }
+
+  .qr-print-grid{
+    grid-template-columns:repeat(3,1fr);
+    gap:12mm;
+  }
+
+  .qr-card{
+    break-inside:avoid;
+  }
+}
+</style>
+</head>
+
+<body>
+  <div class="no-print" style="padding:16px;">
+    <button onclick="window.print()">打印二维码</button>
+  </div>
+
+  <div id="qrGrid" class="qr-print-grid"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <script type="module">
+    import { db } from "./js/firebase.js";
+    import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
+    const ref = doc(db,"shop","main");
+
+    onSnapshot(ref,snap=>{
+      if(!snap.exists()) return;
+
+      const state = snap.data();
+      const tables = state.tables || [];
+
+      const box = document.getElementById("qrGrid");
+
+      box.innerHTML = tables.map((t,i)=>`
+        <div class="qr-card">
+          <h2>${t.name || i+1+"号桌"}</h2>
+          <canvas id="qr-${i}"></canvas>
+          <p>扫码查看本桌剩余时间</p>
+        </div>
+      `).join("");
+
+      tables.forEach((t,i)=>{
+        const url = location.origin + location.pathname.replace("qr.html","display.html") + "?table=" + (i+1);
+        QRCode.toCanvas(document.getElementById("qr-"+i),url);
+      });
+    });
+  </script>
+</body>
+</html>
