@@ -1157,3 +1157,4 @@ window.initPush = initPush;
 window.updateCustomer = updateCustomer;
 window.toggleType = toggleType;
 window.roundBatchAmount = roundBatchAmount;
+window.render = render;
