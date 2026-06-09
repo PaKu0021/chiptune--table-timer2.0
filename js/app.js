@@ -660,8 +660,20 @@ function updateCheckout(){
   document.getElementById("checkoutInfo").innerHTML = `
     ${t.name}｜${p.name}${p.unlimited ? "（不限时）" : ""}<br>
     客人：${t.customer.name || "-"} ${t.customer.phoneLast4 || ""}<br>
-    类型：${t.type === "booking" ? "预约" : "Walk-in"}<br>
-    付款：${t.pay || "未选择"}｜币种：${t.currency}
+    类型：${t.type === "booking" ? "预约" : "Walk-in"}<br><br>
+
+    <select id="checkoutPay">
+      <option value="">请选择付款方式</option>
+      <option value="现金" ${t.pay==="现金"?"selected":""}>现金</option>
+      <option value="PayPay" ${t.pay==="PayPay"?"selected":""}>PayPay</option>
+      <option value="微信" ${t.pay==="微信"?"selected":""}>微信</option>
+      <option value="支付宝" ${t.pay==="支付宝"?"selected":""}>支付宝</option>
+    </select>
+
+    <select id="checkoutCurrency" style="margin-top:8px;">
+      <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
+      <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
+    </select>
   `;
 
   document.getElementById("checkoutAmount").innerHTML = `
@@ -671,14 +683,22 @@ function updateCheckout(){
   `;
 }
 
+
+
 function confirmCheckout(){
   const t = state.tables[checkoutIndex];
   const p = getPackage(t);
 
-  if(!t.pay){
-    alert("请选择付款方式");
-    return;
-  }
+  const pay = document.getElementById("checkoutPay")?.value || "";
+const currency = document.getElementById("checkoutCurrency")?.value || "日元";
+
+if(!pay){
+  alert("请选择付款方式");
+  return;
+}
+
+t.pay = pay;
+t.currency = currency;
 
   if(!confirm("确认结账？")){
     return;
