@@ -52,8 +52,15 @@
 <div id="datePickerModalBg" class="modal-bg">
   <div class="modal">
     <h2>选择日期</h2>
-    <input id="datePickerInput" type="date">
-    <button class="btn-main full" onclick="confirmDatePicker()">查看这一天</button>
+    <div class="calendar-head">
+  <button class="btn-ghost" onclick="changeCalendarMonth(-1)">‹</button>
+  <strong id="calendarTitle"></strong>
+  <button class="btn-ghost" onclick="changeCalendarMonth(1)">›</button>
+</div>
+
+<div id="calendarGrid" class="custom-calendar"></div>
+
+<button class="btn-main full" onclick="confirmDatePicker()">查看这一天</button>
     <button class="btn-ghost full" onclick="closeDatePicker()">取消</button>
   </div>
 </div>

@@ -5,7 +5,9 @@ const ref = doc(db, "shop", "main");
 let state = null;
 let activeBookingId = null;
 let bookingLocked = true;
-
+let calendarYear = new Date().getFullYear();
+let calendarMonth = new Date().getMonth();
+let selectedCalendarDate = currentBookingDate;
 
 onSnapshot(ref, snap=>{
   if(!snap.exists()) return;
@@ -482,8 +484,94 @@ if(tip) tip.style.display = "none";
 }
 
 function openDatePicker(){
-  document.getElementById("datePickerInput").value = currentBookingDate;
+  const d = new Date(currentBookingDate);
+  calendarYear = d.getFullYear();
+  calendarMonth = d.getMonth();
+  selectedCalendarDate = currentBookingDate;
+
   document.getElementById("datePickerModalBg").style.display = "block";
+  renderCustomCalendar();
+}
+
+
+function getBookingDates(){
+  const set = new Set();
+
+  (state.bookings || []).forEach(b=>{
+    if(b.date) set.add(b.date);
+  });
+
+  return set;
+}
+
+function renderCustomCalendar(){
+  const box = document.getElementById("calendarGrid");
+  const title = document.getElementById("calendarTitle");
+  if(!box || !title) return;
+
+  title.innerText = `${calendarYear}年${calendarMonth + 1}月`;
+
+  const bookingDates = getBookingDates();
+
+  const first = new Date(calendarYear, calendarMonth, 1);
+  const last = new Date(calendarYear, calendarMonth + 1, 0);
+  const startDay = first.getDay();
+  const days = last.getDate();
+
+  let html = `
+    <div class="cal-week">日</div>
+    <div class="cal-week">一</div>
+    <div class="cal-week">二</div>
+    <div class="cal-week">三</div>
+    <div class="cal-week">四</div>
+    <div class="cal-week">五</div>
+    <div class="cal-week">六</div>
+  `;
+
+  for(let i=0;i<startDay;i++){
+    html += `<div></div>`;
+  }
+
+  for(let d=1; d<=days; d++){
+    const dateStr =
+      `${calendarYear}-${String(calendarMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+
+    const hasBooking = bookingDates.has(dateStr);
+    const selected = selectedCalendarDate === dateStr;
+
+    html += `
+      <button
+        class="cal-day ${hasBooking ? "has-booking" : "no-booking"} ${selected ? "selected" : ""}"
+        onclick="selectCalendarDate('${dateStr}')"
+      >
+        ${d}
+        ${hasBooking ? `<span class="booking-dot"></span>` : ""}
+      </button>
+    `;
+  }
+
+  box.innerHTML = html;
+}
+
+function selectCalendarDate(dateStr){
+  selectedCalendarDate = dateStr;
+  renderCustomCalendar();
+}
+
+function changeCalendarMonth(step){
+  calendarMonth += step;
+
+  if(calendarMonth < 0){
+    calendarMonth = 11;
+    calendarYear--;
+  }
+
+  if(calendarMonth > 11){
+    calendarMonth = 0;
+    calendarYear++;
+  }
+
+  renderCustomCalendar();
 }
 
 function closeDatePicker(){
@@ -491,18 +579,14 @@ function closeDatePicker(){
 }
 
 function confirmDatePicker(){
-  const v = document.getElementById("datePickerInput").value;
+  currentBookingDate = selectedCalendarDate;
 
-  if(!v){
-    alert("请选择日期");
-    return;
-  }
-
-  currentBookingDate = v;
   closeDatePicker();
   renderBookingGrid();
   renderList();
 }
+  
+
 
 function drawExistingBookings(){
   document.querySelectorAll(".slot-cell.booked, .slot-cell.checked-in-booking").forEach(el=>{
@@ -801,3 +885,5 @@ window.checkInBooking = checkInBooking;
 window.cancelBooking = cancelBooking;
 window.saveBookingDetail = saveBookingDetail;
 window.toggleBookingLock = toggleBookingLock;
+window.changeCalendarMonth = changeCalendarMonth;
+window.selectCalendarDate = selectCalendarDate;

@@ -932,3 +932,61 @@ button.selected-pop{
   border-left:6px solid #54a66b;
   background:#f0fff4;
 }
+
+.calendar-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:12px;
+}
+
+.custom-calendar{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:8px;
+  margin:12px 0;
+}
+
+.cal-week{
+  text-align:center;
+  font-weight:800;
+  color:#8a8174;
+  font-size:13px;
+}
+
+.cal-day{
+  position:relative;
+  height:46px;
+  border-radius:14px;
+  background:#fff;
+  color:#332d24;
+  border:1px solid #e6dccb;
+}
+
+.cal-day.has-booking{
+  background:#fff3c4;
+  border-color:#d8a900;
+  font-weight:900;
+}
+
+.cal-day.no-booking{
+  opacity:.55;
+}
+
+.cal-day.selected{
+  background:#f2c94c;
+  border-color:#d8a900;
+  color:#332d24;
+  box-shadow:0 0 0 3px rgba(242,201,76,.25);
+}
+
+.booking-dot{
+  position:absolute;
+  left:50%;
+  bottom:5px;
+  width:6px;
+  height:6px;
+  transform:translateX(-50%);
+  border-radius:50%;
+  background:#e85d5d;
+}
