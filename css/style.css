@@ -868,3 +868,16 @@ button.selected-pop{
   color:#fff;
   border:none;
 }
+
+/* 锁定时：预约表只用于查看，允许手指在格子上滑动页面 */
+.locked-grid .slot-cell{
+  touch-action:auto !important;
+  pointer-events:auto !important;
+  cursor:default !important;
+}
+
+/* 解锁时：格子用于拖选预约 */
+.unlocked-grid .slot-cell{
+  touch-action:none !important;
+  cursor:pointer !important;
+}
