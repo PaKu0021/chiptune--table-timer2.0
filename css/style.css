@@ -774,7 +774,97 @@ button.selected-pop{
   white-space:nowrap;
 }
 
-.booking-lock-hint.locked{...}
-.booking-lock-hint.unlocked{...}
-.locked-grid{...}
-.unlocked-grid{...}
+/* ===== 预约锁定提示 ===== */
+
+.booking-lock-hint{
+  margin:12px 0 16px;
+  padding:12px 16px;
+  border-radius:12px;
+  font-size:14px;
+  font-weight:700;
+  transition:all .25s ease;
+}
+
+/* 锁定状态 */
+.booking-lock-hint.locked{
+  background:#fff0f0;
+  color:#d84f4f;
+  border:1px solid #f3b4b4;
+}
+
+/* 解锁状态 */
+.booking-lock-hint.unlocked{
+  background:#eefcf2;
+  color:#2e8b57;
+  border:1px solid #9ed6b0;
+}
+
+
+/* ===== 预约表锁定状态 ===== */
+
+/* 整个表格变灰 */
+.locked-grid{
+  opacity:0.75;
+  transition:all .25s ease;
+}
+
+.locked-grid::before{
+  content:"🔒 当前为锁定状态";
+  display:block;
+  text-align:center;
+  background:#fff0f0;
+  color:#d84f4f;
+  font-weight:800;
+  padding:10px;
+  border-bottom:1px solid #f3b4b4;
+}
+
+/* 锁定时鼠标样式 */
+.locked-grid .slot-cell{
+  cursor:not-allowed;
+}
+
+/* 解锁状态 */
+.unlocked-grid{
+  opacity:1;
+  transition:all .25s ease;
+}
+
+.unlocked-grid .slot-cell{
+  cursor:pointer;
+}
+
+
+/* 锁定时格子颜色稍微发灰 */
+.locked-grid .slot-cell:not(.booked):not(.checked-in-booking):not(.used-slot){
+  background:#f4f4f4;
+}
+
+
+/* 解锁后高亮一点 */
+.unlocked-grid .slot-cell:not(.booked):not(.checked-in-booking):not(.used-slot):hover{
+  background:#fff4c8;
+}
+
+
+/* 锁定按钮 */
+#bookingLockBtn{
+  min-width:120px;
+  font-weight:800;
+}
+
+
+/* 已锁定 */
+#bookingLockBtn.btn-danger{
+  background:#e85d5d;
+  color:#fff;
+  border:none;
+}
+
+
+/* 已解锁 */
+#bookingLockBtn.btn-success{
+  background:#4caf50;
+  color:#fff;
+  border:none;
+}
