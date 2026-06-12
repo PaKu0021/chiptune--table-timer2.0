@@ -895,3 +895,40 @@ button.selected-pop{
   touch-action:none !important;
   cursor:pointer !important;
 }
+
+
+.booking-list-item{
+  padding:14px 16px;
+  margin:10px 0;
+  border-radius:16px;
+  border:1px solid var(--line);
+  background:#fff;
+}
+
+.booking-list-time{
+  font-size:18px;
+  font-weight:900;
+  margin-bottom:8px;
+}
+
+.booking-list-main{
+  display:flex;
+  justify-content:space-between;
+  font-size:18px;
+  font-weight:800;
+}
+
+.booking-list-sub{
+  margin-top:8px;
+  color:var(--muted);
+  font-size:14px;
+}
+
+.booking-list-wait{
+  border-left:6px solid #f2c94c;
+}
+
+.booking-list-done{
+  border-left:6px solid #54a66b;
+  background:#f0fff4;
+}

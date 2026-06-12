@@ -20,8 +20,6 @@ onSnapshot(ref, snap=>{
     }));
   }
 
-  currentBookingDate = getTodayDate();
-
   try{
     renderList();
     renderBookingGrid();
@@ -241,12 +239,16 @@ function renderList(){
   const box = document.getElementById("list");
   if(!box) return;
 
-  const bookings = (state.bookings || []).filter(b=>{
-    return (b.date || currentBookingDate) === currentBookingDate;
-  });
+  const bookings = (state.bookings || [])
+    .filter(b=>{
+      return (b.date || getTodayDate()) === currentBookingDate;
+    })
+    .sort((a,b)=>{
+      return String(a.startTime || "99:99").localeCompare(String(b.startTime || "99:99"));
+    });
 
   if(bookings.length === 0){
-    box.innerHTML = `<p style="color:#8a8174;">暂无预约</p>`;
+    box.innerHTML = `<p style="color:#8a8174;">这一天暂无预约</p>`;
     return;
   }
 
@@ -257,19 +259,28 @@ function renderList(){
       .filter(Boolean)
       .join("、");
 
+    const statusText = b.checkedIn ? "已到店" : "未到店";
+    const statusClass = b.checkedIn ? "booking-list-done" : "booking-list-wait";
+
     return `
-      <div class="panel">
-        <h3>${b.checkedIn ? "✅ " : ""}${b.name}</h3>
-        <p>
-          手机：${b.phone}<br>
-          时间：${b.startTime || "-"} - ${b.endTime || "-"}<br>
-          桌位：${tables || "-"}<br>
-          状态：${b.checkedIn ? "已到店" : "未到店"}
-        </p>
+      <div class="booking-list-item ${statusClass}" onclick="${bookingLocked ? "" : `openBookingAction(${b.id})`}">
+        <div class="booking-list-time">
+          ${b.startTime || "-"} - ${b.endTime || "-"}
+        </div>
+
+        <div class="booking-list-main">
+          <strong>${b.name || "-"}</strong>
+          <span>${String(b.phone || "").slice(-4) || "-"}</span>
+        </div>
+
+        <div class="booking-list-sub">
+          桌位：${tables || "-"}｜${statusText}
+        </div>
       </div>
     `;
   }).join("");
 }
+
 
 function startSelectSlot(e,tableIndex,rowIndex){
   if(isTableBusyAtSlot(state.tables[tableIndex], rowIndex)){
