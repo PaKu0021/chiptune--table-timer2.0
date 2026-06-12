@@ -836,8 +836,22 @@ button.selected-pop{
 
 
 /* 锁定时格子颜色稍微发灰 */
-.locked-grid .slot-cell:not(.booked):not(.checked-in-booking):not(.used-slot){
+.locked-grid .slot-cell{
   background:#f4f4f4;
+}
+
+.locked-grid .slot-cell.used-slot{
+  background:#d9d9d9 !important;
+}
+
+.locked-grid .slot-cell.booked{
+  background:#54a66b !important;
+  color:#fff;
+}
+
+.locked-grid .slot-cell.checked-in-booking{
+  background:#f2c94c !important;
+  color:#332d24;
 }
 
 
