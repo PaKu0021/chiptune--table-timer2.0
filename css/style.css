@@ -773,3 +773,8 @@ button.selected-pop{
   pointer-events:none;
   white-space:nowrap;
 }
+
+.booking-lock-hint.locked{...}
+.booking-lock-hint.unlocked{...}
+.locked-grid{...}
+.unlocked-grid{...}

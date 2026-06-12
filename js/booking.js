@@ -4,6 +4,7 @@ import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.1
 const ref = doc(db, "shop", "main");
 let state = null;
 let activeBookingId = null;
+let bookingLocked = true;
 
 
 onSnapshot(ref, snap=>{
@@ -183,12 +184,15 @@ return `
 
       data-table="${tableIndex}"
       data-row="${rowIndex}"
-      ${busy ? "" : `
-        onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
-        onpointermove="moveSelectByPoint(event)"
-        onpointerup="endSelectSlot(event)"
-        onpointercancel="endSelectSlot(event)"
-      `}
+
+      ${busy || bookingLocked ? "" : `
+  onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
+  onpointermove="moveSelectByPoint(event)"
+  onpointerup="endSelectSlot(event)"
+  onpointercancel="endSelectSlot(event)"
+`}
+
+
     ></div>
   `;
 }).join("")}
@@ -197,6 +201,40 @@ return `
   `;
 
   drawExistingBookings();
+  updateBookingLockUI();
+
+}
+
+function updateBookingLockUI(){
+  const btn = document.getElementById("bookingLockBtn");
+  const hint = document.getElementById("bookingLockHint");
+  const grid = document.getElementById("bookingGrid");
+
+  if(btn){
+    btn.innerText = bookingLocked ? "🔒 已锁定" : "🔓 已解锁";
+    btn.className = bookingLocked ? "btn-danger" : "btn-success";
+  }
+
+  if(hint){
+    hint.innerText = bookingLocked
+      ? "当前为锁定状态，只能查看，不能创建/修改预约"
+      : "当前为解锁状态，可以创建/修改预约，操作完成后请重新锁定";
+
+    hint.className = bookingLocked
+      ? "booking-lock-hint locked"
+      : "booking-lock-hint unlocked";
+  }
+
+  if(grid){
+    grid.classList.toggle("locked-grid", bookingLocked);
+    grid.classList.toggle("unlocked-grid", !bookingLocked);
+  }
+}
+
+function toggleBookingLock(){
+  bookingLocked = !bookingLocked;
+  updateBookingLockUI();
+  renderBookingGrid();
 }
 
 function renderList(){
@@ -496,10 +534,14 @@ function drawExistingBookings(){
         cell.onpointercancel = null;
 
         cell.onclick = (e)=>{
-          e.preventDefault();
-          e.stopPropagation();
-          openBookingAction(b.id);
-        };
+  e.preventDefault();
+  e.stopPropagation();
+
+  if(bookingLocked) return;
+
+  openBookingAction(b.id);
+};
+
 
         if(rowIndex === startRow){
           cell.innerHTML = b.checkedIn
@@ -747,3 +789,4 @@ window.closeBookingAction = closeBookingAction;
 window.checkInBooking = checkInBooking;
 window.cancelBooking = cancelBooking;
 window.saveBookingDetail = saveBookingDetail;
+window.toggleBookingLock = toggleBookingLock;
