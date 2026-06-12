@@ -22,10 +22,23 @@
 </div>
   </div>
 
-  <div class="panel">
-    <h2 id="bookingDateTitle">今日预约时间表</h2>
-    <div id="bookingGrid" class="booking-grid-wrap"></div>
-  </div>
+ <div class="section-toggle">
+  <h2 id="bookingDateTitle">今日预约时间表</h2>
+
+  <button
+    id="bookingLockBtn"
+    class="btn-danger"
+    onclick="toggleBookingLock()"
+  >
+    🔒 已锁定
+  </button>
+</div>
+
+<div id="bookingLockHint" class="booking-lock-hint locked">
+  当前为锁定状态，只能查看，不能创建/修改预约
+</div>
+
+<div id="bookingGrid" class="booking-grid-wrap locked-grid"></div>
 
   <div class="panel">
     <h2>预约列表</h2>
