@@ -463,7 +463,8 @@ function confirmGridBooking(){
   save();
 
   closeBookingModal();
-  render();
+  renderBookingGrid();
+  renderList();
 }
 
 function closeBookingModal(){
@@ -829,8 +830,8 @@ function checkInBooking(){
 
   save();
   closeBookingAction();
-  render();
   renderBookingGrid();
+  renderList();
 }
 
 function cancelBooking(){
@@ -862,8 +863,8 @@ function cancelBooking(){
 
   save();
   closeBookingAction();
-  render();
   renderBookingGrid();
+  renderList();
 }
 
 

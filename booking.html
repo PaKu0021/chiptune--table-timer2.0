@@ -125,10 +125,17 @@
 
   </div>
 </div>
+
 <script type="module">
   import { renderNav } from "./js/nav.js";
+
   renderNav("booking");
-  import "./js/booking.js";
+
+  import("./js/booking.js").catch(e=>{
+    alert("booking.js 加载失败：\n" + e.message);
+    console.error(e);
+  });
 </script>
+
 </body>
 </html>
