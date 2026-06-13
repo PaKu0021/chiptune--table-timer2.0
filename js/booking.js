@@ -37,8 +37,6 @@ function save(){
   setDoc(ref,state);
 }
 
-let currentBookingDate = getTodayDate();
-
 
 function getTodayDate(){
   const d = new Date();
