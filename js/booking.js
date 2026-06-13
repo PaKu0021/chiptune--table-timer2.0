@@ -5,6 +5,7 @@ const ref = doc(db, "shop", "main");
 let state = null;
 let activeBookingId = null;
 let bookingLocked = true;
+let currentBookingDate = getTodayDate();
 let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = currentBookingDate;
