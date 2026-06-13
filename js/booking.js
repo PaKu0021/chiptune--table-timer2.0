@@ -299,22 +299,23 @@ function renderList(){
 
 
 function startSelectSlot(e,tableIndex,rowIndex){
-  if(isTableBusyAtSlot(state.tables[tableIndex], rowIndex)){
-  return;
-}
+  if(bookingLocked) return;
+  if(isTableBusyAtSlot(state.tables[tableIndex], rowIndex)) return;
 
   e.preventDefault();
 
   selecting = true;
 
   selection = {
-    tableIndex,
+    startTableIndex: tableIndex,
+    endTableIndex: tableIndex,
     startRow: rowIndex,
     endRow: rowIndex
   };
 
   highlightSelection();
 }
+
 
 function moveSelectSlot(e,tableIndex,rowIndex){
   if(!selecting || !selection) return;
@@ -333,49 +334,46 @@ function moveSelectByPoint(e){
   const tableIndex = Number(target.dataset.table);
   const rowIndex = Number(target.dataset.row);
 
-  if(tableIndex !== selection.tableIndex) return;
-
+  selection.endTableIndex = tableIndex;
   selection.endRow = rowIndex;
+
   highlightSelection();
 }
 
+
 function endSelectSlot(e){
-  if(
-
-    e.target.classList.contains("booked") ||
-
-    e.target.classList.contains("checked-in-booking")
-
-  ){
-
-    selecting = false;
-
-    selection = null;
-
-    return;
-
-  }
-
-
   if(!selecting || !selection) return;
 
   selecting = false;
 
-  const start = Math.min(selection.startRow, selection.endRow);
-  const end = Math.max(selection.startRow, selection.endRow) + 1;
+  const startRow = Math.min(selection.startRow, selection.endRow);
+  const endRow = Math.max(selection.startRow, selection.endRow) + 1;
+
+  const startTable = Math.min(selection.startTableIndex, selection.endTableIndex);
+  const endTable = Math.max(selection.startTableIndex, selection.endTableIndex);
+
   const slots = getSlots();
 
-  const startTime = slots[start];
-  const endTime = slots[end] || `${getBusinessHours().close}:00`;
+  const startTime = slots[startRow];
+  const endTime = slots[endRow] || `${getBusinessHours().close}:00`;
+
+  const tableNames = [];
+
+  for(let i=startTable; i<=endTable; i++){
+    tableNames.push(state.tables[i].name);
+  }
 
   document.getElementById("selectedRangeText").innerText =
-    `${state.tables[selection.tableIndex].name}｜${startTime} - ${endTime}`;
+    `${tableNames.join("、")}｜${startTime} - ${endTime}`;
 
-    const tip = document.getElementById("selectionTip");
-    if(tip) tip.style.display = "none";   
+  const tip = document.getElementById("selectionTip");
+  if(tip) tip.style.display = "none";
 
   document.getElementById("bookingModalBg").style.display = "block";
 }
+
+
+
 
 function updateSelectionTip(){
   let tip = document.getElementById("selectionTip");
@@ -408,7 +406,10 @@ function updateSelectionTip(){
   const startTime = slots[start];
   const endTime = slots[end] || `${getBusinessHours().close}:00`;
 
-  tip.innerHTML = `<b>${durationText}</b><br>${startTime} - ${endTime}`;
+  const tableCount =
+    Math.abs(selection.endTableIndex - selection.startTableIndex) + 1;
+
+    tip.innerHTML = `<b>${tableCount}桌｜${durationText}</b><br>${startTime} - ${endTime}`;
 
   const cell = document.querySelector(
     `.slot-cell[data-table="${selection.tableIndex}"][data-row="${selection.endRow}"]`
@@ -422,6 +423,7 @@ function updateSelectionTip(){
   }
 }
 
+
 function highlightSelection(){
   document.querySelectorAll(".slot-cell.selecting").forEach(el=>{
     el.classList.remove("selecting");
@@ -429,20 +431,32 @@ function highlightSelection(){
 
   if(!selection) return;
 
-  const start = Math.min(selection.startRow, selection.endRow);
-  const end = Math.max(selection.startRow, selection.endRow);
+  const startRow = Math.min(selection.startRow, selection.endRow);
+  const endRow = Math.max(selection.startRow, selection.endRow);
+
+  const startTable = Math.min(selection.startTableIndex, selection.endTableIndex);
+  const endTable = Math.max(selection.startTableIndex, selection.endTableIndex);
 
   document.querySelectorAll(".slot-cell").forEach(el=>{
     const table = Number(el.dataset.table);
     const row = Number(el.dataset.row);
 
-    if(table === selection.tableIndex && row >= start && row <= end){
+    if(
+      table >= startTable &&
+      table <= endTable &&
+      row >= startRow &&
+      row <= endRow
+    ){
       el.classList.add("selecting");
     }
   });
-  updateSelectionTip();
 
+  updateSelectionTip();
 }
+
+
+
+
 
 function confirmGridBooking(){
   if(!selection) return;
@@ -464,7 +478,13 @@ function confirmGridBooking(){
     date: currentBookingDate,
     name,
     phone,
-    tableIndexes:[selection.tableIndex],
+    tableIndexes:Array.from(
+  {
+    length:
+      Math.abs(selection.endTableIndex - selection.startTableIndex) + 1
+  },
+  (_,idx)=>Math.min(selection.startTableIndex, selection.endTableIndex) + idx
+),
     startTime: slots[start],
     endTime: slots[end] || `${getBusinessHours().close}:00`,
     checkedIn:false,
