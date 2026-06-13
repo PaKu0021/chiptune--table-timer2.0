@@ -867,8 +867,11 @@ function cancelBooking(){
   renderList();
 }
 
+function printBookingGrid(){
+  window.print();
+}
 
-
+window.printBookingGrid = printBookingGrid;
 window.openDatePicker = openDatePicker;
 window.closeDatePicker = closeDatePicker;
 window.confirmDatePicker = confirmDatePicker;

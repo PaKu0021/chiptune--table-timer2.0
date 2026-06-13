@@ -990,3 +990,72 @@ button.selected-pop{
   border-radius:50%;
   background:#e85d5d;
 }
+@media print{
+  body{
+    background:#fff !important;
+    padding:0 !important;
+  }
+
+  .app-header,
+  #bookingLockHint,
+  #bookingLockBtn,
+  .header-actions,
+  .booking-list-item,
+  .panel:has(#list),
+  .modal-bg{
+    display:none !important;
+  }
+
+  .page-shell{
+    width:100% !important;
+    margin:0 !important;
+  }
+
+  .panel{
+    box-shadow:none !important;
+    border:none !important;
+    margin:0 !important;
+    padding:0 !important;
+  }
+
+  #bookingGrid{
+    overflow:visible !important;
+    border:none !important;
+  }
+
+  .booking-grid{
+    min-width:0 !important;
+    width:100% !important;
+    font-size:11px !important;
+  }
+
+  .grid-head,
+  .time-cell,
+  .slot-cell{
+    border:1px solid #ccc !important;
+  }
+
+  .slot-cell{
+    height:28px !important;
+  }
+
+  .booked{
+    background:#54a66b !important;
+    color:#fff !important;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+
+  .checked-in-booking{
+    background:#f2c94c !important;
+    color:#000 !important;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+
+  .used-slot{
+    background:#ddd !important;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+}
