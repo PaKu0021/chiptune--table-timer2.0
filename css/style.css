@@ -1059,3 +1059,8 @@ button.selected-pop{
     print-color-adjust:exact;
   }
 }
+.time-cell.past-time-cell{
+  background:#d9d9d9 !important;
+  color:#777 !important;
+  font-weight:800;
+}

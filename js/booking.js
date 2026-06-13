@@ -130,6 +130,19 @@ function isTableUsedAtSlot(t,rowIndex){
   return slotStart < usedEnd && slotEnd > usedStart;
 }
 
+function isPastTimeSlot(rowIndex){
+  const slots = getSlots();
+  const slotTime = slots[rowIndex];
+  if(!slotTime) return false;
+
+  const [hh, mm] = slotTime.split(":").map(Number);
+
+  const slotDate = new Date(currentBookingDate);
+  slotDate.setHours(hh, mm + SLOT_MINUTES, 0, 0);
+
+  return slotDate.getTime() <= Date.now();
+}
+
 function renderBookingGrid(){
   if(!state) return;
 
@@ -171,7 +184,9 @@ function renderBookingGrid(){
 }).join("")}
 
       ${slots.map((time,rowIndex)=>`
-        <div class="time-cell">${time}</div>
+        <div class="time-cell ${isPastTimeSlot(rowIndex) ? "past-time-cell" : ""}">
+          ${time}
+        </div>
         ${state.tables.map((t,tableIndex)=>{
 
           const busy = isTableBusyAtSlot(t,rowIndex);
