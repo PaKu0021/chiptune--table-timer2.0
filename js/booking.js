@@ -903,7 +903,7 @@ function cancelBooking(){
 }
 
 function printBookingGrid(){
-  window.print();
+  location.href = `./print-booking.html?date=${currentBookingDate}`;
 }
 
 window.printBookingGrid = printBookingGrid;

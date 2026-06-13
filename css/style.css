@@ -1064,3 +1064,75 @@ button.selected-pop{
   color:#777 !important;
   font-weight:800;
 }
+
+.print-page{
+  background:#fff;
+  color:#000;
+}
+
+.print-toolbar{
+  display:flex;
+  gap:12px;
+  margin-bottom:16px;
+}
+
+#printTitle{
+  text-align:center;
+  margin:10px 0 16px;
+}
+
+.print-booking-table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;
+  font-size:11px;
+}
+
+.print-booking-table th,
+.print-booking-table td{
+  border:1px solid #999;
+  height:26px;
+  text-align:center;
+  padding:2px;
+}
+
+.print-booking-table th{
+  background:#f3f3f3;
+}
+
+.print-time{
+  font-weight:800;
+  background:#f7f7f7;
+}
+
+.print-booked{
+  background:#54a66b !important;
+  color:#fff;
+}
+
+.print-checked{
+  background:#f2c94c !important;
+  color:#000;
+}
+
+@media print{
+  .no-print{
+    display:none !important;
+  }
+
+  body{
+    padding:0 !important;
+    background:#fff !important;
+  }
+
+  @page{
+    size:A4 landscape;
+    margin:8mm;
+  }
+
+  .print-booked,
+  .print-checked{
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+}
