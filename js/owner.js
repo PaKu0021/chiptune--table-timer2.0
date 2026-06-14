@@ -570,8 +570,46 @@ function logoutOwner(){
   location.href="./index.html";
 }
 
-window.logoutOwner = logoutOwner;
+function setTopActionActive(type){
 
+  document
+    .getElementById("btnQrPage")
+    ?.classList.remove("active-top-btn");
+
+  document
+    .getElementById("btnCashierPage")
+    ?.classList.remove("active-top-btn");
+
+  if(type === "qr"){
+    document
+      .getElementById("btnQrPage")
+      ?.classList.add("active-top-btn");
+  }
+
+  if(type === "cashier"){
+    document
+      .getElementById("btnCashierPage")
+      ?.classList.add("active-top-btn");
+  }
+}
+
+function openQrPage(){
+  setTopActionActive("qr");
+
+  setTimeout(()=>{
+    location.href = "./qr.html";
+  },120);
+}
+
+function openCashierPage(){
+  setTopActionActive("cashier");
+
+  setTimeout(()=>{
+    location.href = "./cashier.html";
+  },120);
+}
+
+window.logoutOwner = logoutOwner;
 window.saveBusinessHours = saveBusinessHours;
 window.togglePackagePanel = togglePackagePanel;
 window.setFilter = setFilter;
@@ -581,4 +619,5 @@ window.removePackage = removePackage;
 window.savePackages = savePackages;
 window.saveTableCount = saveTableCount;
 window.exportCSV = exportCSV;
-window.toggleBusinessHoursPanel = toggleBusinessHoursPanel;
+window.openQrPage = openQrPage;
+window.openCashierPage = openCashierPage;
