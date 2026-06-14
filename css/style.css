@@ -683,3 +683,16 @@ button.selected-pop{
   pointer-events:none !important;
 }
 
+.selection-tip{
+  position:fixed;
+  z-index:2000;
+  background:#332d24;
+  color:#fff;
+  padding:8px 12px;
+  border-radius:12px;
+  font-size:14px;
+  line-height:1.4;
+  box-shadow:0 6px 18px rgba(0,0,0,.22);
+  pointer-events:none;
+  white-space:nowrap;
+}
