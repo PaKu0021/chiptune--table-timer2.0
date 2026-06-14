@@ -1183,50 +1183,27 @@ button.selected-pop{
   border-color:#d8a900 !important;
 }
 
-.date-filter-section{
-  display:grid;
-  grid-template-columns:1fr 1fr 1fr auto;
-  gap:12px;
-  align-items:end;
-}
-
-.date-item{
-  display:flex;
-  flex-direction:column;
-}
-
-.date-item label{
-  font-size:14px;
-  font-weight:800;
-  color:#8a8174;
-  margin-bottom:6px;
-}
-
-.date-item input,
-.date-item select{
-  height:52px;
-}
-
-@media(max-width:760px){
-  .date-filter-section{
-    grid-template-columns:1fr;
-  }
+.cashier-filter-title{
+  margin:18px 0 12px;
+  font-size:18px;
+  font-weight:900;
 }
 
 .cashier-filter-card{
   display:grid;
   grid-template-columns:1fr 1fr 1fr 96px;
-  gap:14px;
+  gap:12px;
   align-items:end;
-  margin-top:12px;
 }
 
 .cashier-date-item{
   display:flex;
   flex-direction:column;
+  min-width:0;
 }
 
 .cashier-date-item label{
+  display:block;
   font-size:14px;
   font-weight:900;
   color:#8a8174;
@@ -1235,12 +1212,19 @@ button.selected-pop{
 
 .cashier-date-item input,
 .cashier-date-item select{
+  width:100%;
   height:56px;
   margin:0;
+  padding:0 14px;
+  border-radius:14px;
+  border:1px solid var(--line);
+  background:#fff;
 }
 
 .cashier-search-btn{
   height:56px;
+  margin:0;
+  align-self:end;
 }
 
 @media(max-width:760px){

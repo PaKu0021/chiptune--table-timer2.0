@@ -23,46 +23,43 @@
     </div>
   </div>
 
-  <div class="panel">
-    <h2>筛选</h2>
+<div class="panel">
+  <h2>筛选</h2>
 
-    <div class="action-row">
-      <button id="cashier_today" onclick="setQuickRange('today')">今天</button>
-      <button id="cashier_week" onclick="setQuickRange('week')">本周</button>
-      <button id="cashier_month" onclick="setQuickRange('month')">本月</button>
-      <button id="cashier_all" onclick="setQuickRange('all')">全部</button>      
+  <div class="action-row">
+    <button id="cashier_today" onclick="setQuickRange('today')">今天</button>
+    <button id="cashier_week" onclick="setQuickRange('week')">本周</button>
+    <button id="cashier_month" onclick="setQuickRange('month')">本月</button>
+    <button id="cashier_all" onclick="setQuickRange('all')">全部</button>
+  </div>
+
+  <h3 class="cashier-filter-title">自定义日期范围</h3>
+
+  <div class="cashier-filter-card">
+    <div class="cashier-date-item">
+      <label>开始日期</label>
+      <input id="startDate" type="date">
     </div>
 
-    <h3 style="margin:16px 0 10px;">自定义日期范围</h3>
+    <div class="cashier-date-item">
+      <label>结束日期</label>
+      <input id="endDate" type="date">
+    </div>
 
-<h3 style="margin:16px 0 10px;">自定义日期范围</h3>
+    <div class="cashier-date-item">
+      <label>支付方式</label>
+      <select id="payFilter">
+        <option value="">全部支付方式</option>
+        <option value="现金">现金</option>
+        <option value="PayPay">PayPay</option>
+        <option value="微信">微信</option>
+        <option value="支付宝">支付宝</option>
+      </select>
+    </div>
 
-<div class="cashier-filter-card">
-  <div class="cashier-date-item">
-    <label>开始日期</label>
-    <input id="startDate" type="date">
+    <button class="btn-main cashier-search-btn" onclick="applyDateFilter()">查询</button>
   </div>
-
-  <div class="cashier-date-item">
-    <label>结束日期</label>
-    <input id="endDate" type="date">
-  </div>
-
-  <div class="cashier-date-item">
-    <label>支付方式</label>
-    <select id="payFilter">
-      <option value="">全部支付方式</option>
-      <option value="现金">现金</option>
-      <option value="PayPay">PayPay</option>
-      <option value="微信">微信</option>
-      <option value="支付宝">支付宝</option>
-    </select>
-  </div>
-
-  <button class="btn-main cashier-search-btn" onclick="applyDateFilter()">查询</button>
 </div>
-
-
 
 
   </div>
