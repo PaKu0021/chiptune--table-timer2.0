@@ -10,6 +10,26 @@ let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = currentBookingDate;
 
+const BOOKING_COLORS = [
+  "#B7E4C7",
+  "#A9DEF9",
+  "#FFD6A5",
+  "#D8B4FE",
+  "#FFCAD4",
+  "#FDFFB6",
+  "#C7F9CC",
+  "#FEC5BB",
+  "#BDE0FE",
+  "#E9C46A",
+  "#CDEAC0",
+  "#F1C0E8"
+];
+
+function getNextBookingColor(){
+  const count = (state.bookings || []).length;
+  return BOOKING_COLORS[count % BOOKING_COLORS.length];
+}
+
 onSnapshot(ref, snap=>{
   if(!snap.exists()) return;
 
@@ -476,6 +496,7 @@ function confirmGridBooking(){
   const booking = {
     id: Date.now(),
     date: currentBookingDate,
+    color: getNextBookingColor(),
     name,
     phone,
     tableIndexes:Array.from(
@@ -628,6 +649,8 @@ function drawExistingBookings(){
     el.classList.remove("booked","checked-in-booking");
     el.innerHTML = "";
     el.onclick = null;
+    el.style.background = "";
+    el.style.color = "";
   });
 
   const slots = getSlots();
@@ -657,7 +680,13 @@ function drawExistingBookings(){
         if(!cell) continue;
 
         cell.classList.add(b.checkedIn ? "checked-in-booking" : "booked");
-
+        if(b.checkedIn){
+        cell.style.background = "#f2c94c";
+        cell.style.color = "#332d24";
+}else{
+        cell.style.background = b.color || "#54a66b";
+        cell.style.color = "#332d24";
+}
         cell.onpointerdown = null;
         cell.onpointermove = null;
         cell.onpointerup = null;
