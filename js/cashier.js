@@ -278,7 +278,7 @@ function exportCashierCSV(){
     toRMB(r),
     r.pay || "",
     r.currency || "",
-    r.roundRule || ""
+    r.roundRule || "",
     r.receiptImage ? "已上传" : "未上传"
   ]);
 
