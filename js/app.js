@@ -26,7 +26,6 @@ let searchKeyword = "";
 let statusFilter = "";
 let typeFilter = "";
 let payFilter = "";
-let selectedTables = [];
 let sortDirection = "asc";
 let filterPanelOpen = true;
 
@@ -212,10 +211,9 @@ const filteredTables = state.tables
     ].join(" ").toLowerCase();
 
     if(keyword && !text.includes(keyword)) return false;
-    if(statusFilter && status !== statusFilter) return false;
-    if(typeFilter && t.type !== typeFilter) return false;
-    if(payFilter && t.pay !== payFilter) return false;
-
+    if(statusFilter && statusFilter !== "all" && status !== statusFilter) return false;
+    if(typeFilter && typeFilter !== "all" && t.type !== typeFilter) return false;
+    if(payFilter && payFilter !== "all" && t.pay !== payFilter) return false;
     return true;
       })
 
@@ -223,17 +221,12 @@ const filteredTables = state.tables
 .sort((a,b)=>{
   const sortMode = document.getElementById("sortMode")?.value || "table";
 
-  let va = 0;
-  let vb = 0;
-
-  if(sortMode === "table"){
-    va = a.i;
-    vb = b.i;
-  }
+  let va = a.i;
+  let vb = b.i;
 
   if(sortMode === "remain"){
-    va = getRemainMs(a.t);
-    vb = getRemainMs(b.t);
+    va = getLimitMs(a.t) - getElapsedMs(a.t);
+    vb = getLimitMs(b.t) - getElapsedMs(b.t);
   }
 
   if(sortMode === "used"){
@@ -667,8 +660,20 @@ function updateCheckout(){
   document.getElementById("checkoutInfo").innerHTML = `
     ${t.name}｜${p.name}${p.unlimited ? "（不限时）" : ""}<br>
     客人：${t.customer.name || "-"} ${t.customer.phoneLast4 || ""}<br>
-    类型：${t.type === "booking" ? "预约" : "Walk-in"}<br>
-    付款：${t.pay || "未选择"}｜币种：${t.currency}
+    类型：${t.type === "booking" ? "预约" : "Walk-in"}<br><br>
+
+    <select id="checkoutPay">
+      <option value="">请选择付款方式</option>
+      <option value="现金" ${t.pay==="现金"?"selected":""}>现金</option>
+      <option value="PayPay" ${t.pay==="PayPay"?"selected":""}>PayPay</option>
+      <option value="微信" ${t.pay==="微信"?"selected":""}>微信</option>
+      <option value="支付宝" ${t.pay==="支付宝"?"selected":""}>支付宝</option>
+    </select>
+
+    <select id="checkoutCurrency" style="margin-top:8px;">
+      <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
+      <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
+    </select>
   `;
 
   document.getElementById("checkoutAmount").innerHTML = `
@@ -678,14 +683,22 @@ function updateCheckout(){
   `;
 }
 
+
+
 function confirmCheckout(){
   const t = state.tables[checkoutIndex];
   const p = getPackage(t);
 
-  if(!t.pay){
-    alert("请选择付款方式");
-    return;
-  }
+  const pay = document.getElementById("checkoutPay")?.value || "";
+const currency = document.getElementById("checkoutCurrency")?.value || "日元";
+
+if(!pay){
+  alert("请选择付款方式");
+  return;
+}
+
+t.pay = pay;
+t.currency = currency;
 
   if(!confirm("确认结账？")){
     return;
@@ -877,64 +890,6 @@ function setPayFilter(v){
 }
 
 
-function toggleTableSelect(i,checked){
-  if(checked){
-    if(!selectedTables.includes(i)) selectedTables.push(i);
-  }else{
-    selectedTables = selectedTables.filter(v=>v!==i);
-  }
-}
-
-function clearBatchSelection(){
-  selectedTables = [];
-  render();
-}
-
-function batchStart(){
-  if(selectedTables.length === 0){
-    alert("请先选择桌位");
-    return;
-  }
-
-  selectedTables.forEach(i=>{
-    const t = state.tables[i];
-    if(!t || t.start) return;
-
-    t.start = Date.now();
-    t.pausedAt = null;
-    t.alerted = false;
-    t.alerting = false;
-    t.lastAction = "start";
-  });
-
-  save();
-  render();
-}
-
-function batchCheckout(){
-  if(selectedTables.length === 0){
-    alert("请先选择桌位");
-    return;
-  }
-
-  const activeTables = selectedTables.filter(i=>state.tables[i]?.start);
-
-  if(activeTables.length === 0){
-    alert("选择的桌位没有正在计时的桌");
-    return;
-  }
-
-  if(!confirm(`确认批量结账 ${activeTables.length} 桌吗？`)) return;
-
-  activeTables.forEach(i=>{
-    checkoutIndex = i;
-    useRound = false;
-    confirmCheckout();
-  });
-
-  selectedTables = [];
-  render();
-}
 
 function openBatchStart(){
   const pkgBox = document.getElementById("batchPackageSelect");
@@ -946,16 +901,20 @@ function openBatchStart(){
     </option>
   `).join("");
 
-tableBox.innerHTML = state.tables
-  .map((t,i)=>({t,i}))
-  .filter(({t})=>!t.start)
-  .map(({t,i})=>`
+  tableBox.innerHTML = state.tables
+    .map((t,i)=>({t,i}))
+    .filter(({t})=>!t.start)
+    .map(({t,i})=>`
       <label class="table-item">
-      <input type="checkbox" class="batch-table-check" value="${i}" ${t.start ? "disabled" : ""}>
-      <span class="num">${t.name.replace("号桌","")}</span>
-      <span class="sub">${t.start ? "使用中" : "可开始"}</span>
-    </label>
-  `).join("");
+        <input type="checkbox" class="batch-table-check" value="${i}">
+        <span class="num">${t.name.replace("号桌","")}</span>
+        <span class="sub">可开始</span>
+      </label>
+    `).join("");
+
+  if(!tableBox.innerHTML){
+    tableBox.innerHTML = `<p style="color:#8a8174;">没有可开始的桌位</p>`;
+  }
 
   document.getElementById("batchStartModalBg").style.display = "block";
 }
@@ -998,19 +957,77 @@ function openBatchCheckout(){
   box.innerHTML = state.tables
     .map((t,i)=>({t,i}))
     .filter(({t})=>t.start)
-    .map(({t,i})=>`
-      <label class="table-item">
-        <input type="checkbox" class="batch-checkout-table" value="${i}">
-        <span class="num">${t.name.replace("号桌","")}</span>
-        <span class="sub">${t.pay || "未选支付"}</span>
-      </label>
-    `).join("");
+    .map(({t,i})=>{
+      const p = getPackage(t);
+      const amountJPY = getOriginalJPY(t);
+      const amountRMB = getRMB(amountJPY);
+
+      return `
+        <div class="batch-checkout-card">
+
+          <label class="batch-table-card">
+            <input type="checkbox" class="batch-checkout-table" value="${i}">
+            <span class="table-name">${t.name}</span>
+          </label>
+
+          <div class="batch-info">
+            <div><b>套餐：</b>${p.name}</div>
+            <div><b>客人：</b>${t.customer?.name || "-"} ${t.customer?.phoneLast4 || ""}</div>
+            <div><b>原价：</b>¥${amountJPY.toLocaleString()}</div>
+            <div><b>人民币参考：</b>¥${amountRMB.toLocaleString()}</div>
+          </div>
+
+          <select id="batch-pay-${i}">
+            <option value="">付款方式</option>
+            <option value="现金">现金</option>
+            <option value="PayPay">PayPay</option>
+            <option value="微信">微信</option>
+            <option value="支付宝">支付宝</option>
+          </select>
+
+          <select id="batch-currency-${i}">
+            <option value="日元">日元</option>
+            <option value="人民币">人民币</option>
+          </select>
+
+          <input
+            id="batch-amount-${i}"
+            type="number"
+            value="${amountJPY}"
+            placeholder="实际收款金额"
+          >
+
+          <button
+            id="round-btn-${i}"
+            class="btn-ghost full"
+            onclick="roundBatchAmount(${i})"
+          >
+            抹零
+          </button>
+
+        </div>
+      `;
+    }).join("");
 
   if(!box.innerHTML){
     box.innerHTML = `<p style="color:#8a8174;">没有正在使用的桌位</p>`;
   }
 
   document.getElementById("batchCheckoutModalBg").style.display = "block";
+}
+
+function roundBatchAmount(i){
+  const amountInput = document.getElementById(`batch-amount-${i}`);
+  const btn = document.getElementById(`round-btn-${i}`);
+
+  if(!amountInput || !btn || btn.disabled) return;
+
+  const amount = Number(amountInput.value || 0);
+  amountInput.value = roundJPY(amount);
+
+  btn.disabled = true;
+  btn.innerText = "已抹零";
+  btn.classList.add("disabled-round");
 }
 
 function closeBatchCheckout(){
@@ -1026,7 +1043,9 @@ function confirmBatchCheckout(){
     return;
   }
 
-  const noPay = indexes.filter(i=>!state.tables[i].pay);
+  const noPay = indexes.filter(i=>{
+    return !document.getElementById(`batch-pay-${i}`)?.value;
+  });
 
   if(noPay.length){
     alert("以下桌位还没有选择付款方式：\n" + noPay.map(i=>state.tables[i].name).join("、"));
@@ -1036,15 +1055,26 @@ function confirmBatchCheckout(){
   if(!confirm(`确认批量结账 ${indexes.length} 桌吗？`)) return;
 
   indexes.forEach(i=>{
-    checkoutIndex = i;
-    useRound = false;
-
     const t = state.tables[i];
     const p = getPackage(t);
 
     const originalJPY = getOriginalJPY(t);
-    const finalJPY = originalJPY;
-    const totalRMB = getRMB(finalJPY);
+    const defaultRMB = getRMB(originalJPY);
+
+    const pay = document.getElementById(`batch-pay-${i}`).value;
+    const currency = document.getElementById(`batch-currency-${i}`).value;
+    const manualAmount = Number(document.getElementById(`batch-amount-${i}`).value || 0);
+
+    const finalJPY =
+      currency === "日元"
+        ? (manualAmount > 0 ? manualAmount : originalJPY)
+        : originalJPY;
+
+    const totalRMB =
+      currency === "人民币"
+        ? (manualAmount > 0 ? manualAmount : defaultRMB)
+        : defaultRMB;
+
     const now = new Date();
 
     stopAlertLoop(i);
@@ -1060,13 +1090,14 @@ function confirmBatchCheckout(){
       packageMinutes: p.unlimited ? "不限时" : p.minutes,
       packagePrice: p.price,
       extraMinutes: Math.floor(Number(t.extra || 0) / 60000),
-      extensionAmount: (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0),
+      extensionAmount: Math.max(0, originalJPY - Number(p.price || 0)),
       originalJPY,
       totalJPY: finalJPY,
       totalRMB,
-      pay: t.pay,
-      currency: t.currency || "日元",
-      roundRule: "不抹零"
+      pay,
+      currency,
+      roundRule: "不抹零",
+      checkoutMethod: "批量结账"      
     });
 
     state.tables[i] = {
@@ -1116,20 +1147,16 @@ function toggleFilterPanel(){
   }
 }
 
+
 window.toggleSortDirection = toggleSortDirection;
 window.toggleFilterPanel = toggleFilterPanel;
-
-
+window.roundBatchAmount = roundBatchAmount;
 window.openBatchCheckout = openBatchCheckout;
 window.closeBatchCheckout = closeBatchCheckout;
 window.confirmBatchCheckout = confirmBatchCheckout;
 window.openBatchStart = openBatchStart;
 window.closeBatchStart = closeBatchStart;
 window.confirmBatchStart = confirmBatchStart;
-window.toggleTableSelect = toggleTableSelect;
-window.clearBatchSelection = clearBatchSelection;
-window.batchStart = batchStart;
-window.batchCheckout = batchCheckout;
 window.setSearchKeyword = setSearchKeyword;
 window.setStatusFilter = setStatusFilter;
 window.setTypeFilter = setTypeFilter;
@@ -1150,3 +1177,5 @@ window.closeCheckout = closeCheckout;
 window.initPush = initPush;
 window.updateCustomer = updateCustomer;
 window.toggleType = toggleType;
+window.roundBatchAmount = roundBatchAmount;
+window.render = render;

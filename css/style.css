@@ -471,10 +471,10 @@ button.selected-pop{
   user-select:none;
 }
 
-.table-item input{
-  width:18px;
-  height:18px;
-  margin:0 0 6px;
+.table-item input[type="number"]{
+  width:100%;
+  height:42px;
+  margin-top:8px;
 }
 
 .table-item .num{
@@ -530,13 +530,6 @@ button.selected-pop{
   color:#332d24 !important;
   border:1px solid #d8a900 !important;
   box-shadow:0 3px 8px rgba(216,169,0,.25) !important;
-}
-.table-grid{
-  display:grid !important;
-  grid-template-columns:repeat(4, 1fr) !important;
-  gap:14px !important;
-  margin:16px 0 12px !important;
-  max-width:720px !important;
 }
 
 .table-grid .table-item:nth-child(9),

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>收银记录</title>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+<div class="page-shell">
+
+  <div class="app-header">
+    <div class="app-title">
+      <h1>收银记录</h1>
+      <p>日期筛选 / 支付方式统计 / 导出表格 / 打印</p>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn-ghost" onclick="location.href='./owner.html'">返回老板模式</button>
+      <button class="btn-main" onclick="printCashier()">打印</button>
+      <button class="btn-success" onclick="exportCashierCSV()">导出表格</button>
+    </div>
+  </div>
+
+<div class="panel">
+  <h2>筛选</h2>
+
+  <div class="action-row">
+    <button id="cashier_today" onclick="setQuickRange('today')">今天</button>
+    <button id="cashier_week" onclick="setQuickRange('week')">本周</button>
+    <button id="cashier_month" onclick="setQuickRange('month')">本月</button>
+    <button id="cashier_all" onclick="setQuickRange('all')">全部</button>
+  </div>
+
+  <h3 class="cashier-filter-title">自定义日期范围</h3>
+
+  <div class="cashier-filter-card">
+    <div class="cashier-date-item">
+      <label>开始日期</label>
+      <input id="startDate" type="date">
+    </div>
+
+    <div class="cashier-date-item">
+      <label>结束日期</label>
+      <input id="endDate" type="date">
+    </div>
+
+    <div class="cashier-date-item">
+      <label>支付方式</label>
+      <select id="payFilter">
+        <option value="">全部支付方式</option>
+        <option value="现金">现金</option>
+        <option value="PayPay">PayPay</option>
+        <option value="微信">微信</option>
+        <option value="支付宝">支付宝</option>
+      </select>
+    </div>
+
+    <button class="btn-main cashier-search-btn" onclick="applyDateFilter()">查询</button>
+  </div>
+</div>
+
+
+  </div>
+
+  <div class="panel">
+    <h2 id="cashierTitle">收款明细</h2>
+
+    <div style="overflow:auto;">
+      <table class="record-table">
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>桌位</th>
+            <th>客人</th>
+            <th>类型</th>
+            <th>套餐</th>
+            <th>原价</th>
+            <th>实收日元</th>
+            <th>人民币</th>
+            <th>支付方式</th>
+            <th>币种</th>
+            <th>抹零</th>
+            <th>收款截图</th>
+          </tr>
+        </thead>
+        <tbody id="cashierRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>支付方式总计</h2>
+    <div id="cashierSummary"></div>
+  </div>
+
+</div>
+
+<script type="module" src="./js/cashier.js"></script>
+</body>
+</html>

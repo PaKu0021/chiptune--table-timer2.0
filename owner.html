@@ -5,24 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>老板模式</title>
 <link rel="stylesheet" href="./css/style.css">
-<button class="btn-danger"
-        onclick="logoutOwner()">
-  退出老板模式
-</button>
 </head>
 
 <body>
 
 <div class="page-shell">
 
-  <div class="app-header">
-    <div class="app-title">
-      <h1>老板模式</h1>
-      <p>收入统计 / 套餐设置 / 桌位数量 / 收银记录</p>
-    </div>
-    <div id="globalNav" class="header-actions"></div>
+<div class="app-header">
+  <div class="app-title">
+    <h1>老板模式</h1>
+    <p>收入统计 / 套餐设置 / 桌位数量 / 收银记录</p>
   </div>
 
+  <div class="header-actions">
+    <div id="globalNav" class="header-actions"></div>
+    <button class="btn-danger" onclick="logoutOwner()">退出老板模式</button>
+  </div>
+</div>
+
+<div class="action-row">
+<button
+  id="btnQrPage"
+  class="btn-main"
+  onclick="openQrPage()"
+>
+  打印桌位二维码
+</button>
+
+<button
+  id="btnCashierPage"
+  class="btn-main"
+  onclick="openCashierPage()"
+>
+  查看收银记录
+</button>
+</div>
+  
   <div class="panel">
     <div class="action-row">
       <button id="f_today" onclick="setFilter('today')">今天</button>
@@ -149,12 +167,13 @@
   </div>
 
 </div>
-
 <script type="module">
   import { renderNav } from "./js/nav.js";
-  import "./js/owner.js";
-  renderNav("owner");
 
+  window.addEventListener("DOMContentLoaded", async ()=>{
+    renderNav("owner");
+    await import("./js/owner.js");
+  });
 </script>
 </body>
 </html>

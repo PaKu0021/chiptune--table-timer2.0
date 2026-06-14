@@ -14,7 +14,7 @@ export function renderNav(active){
     </button>
 
     <button class="${active === "owner" ? "btn-main" : "btn-ghost"}"
-      onclick="goOwner()">
+      ${active === "owner" ? "disabled" : "onclick=\"goOwner()\""}>
       老板模式
     </button>
 
@@ -26,6 +26,12 @@ export function renderNav(active){
 }
 
 window.goOwner = function(){
+  const ok = sessionStorage.getItem("owner_auth");
+
+  if(ok === "1"){
+    location.href = "./owner.html";
+    return;
+  }
 
   const pw = prompt("请输入老板密码");
 
@@ -34,5 +40,6 @@ window.goOwner = function(){
     return;
   }
 
+  sessionStorage.setItem("owner_auth","1");
   location.href = "./owner.html";
 };

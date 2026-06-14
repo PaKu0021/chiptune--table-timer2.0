@@ -2,23 +2,13 @@ import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const OWNER_PASSWORD = "prompt";
+
 const ok = sessionStorage.getItem("owner_auth");
 
 if(ok !== "1"){
-  const pwd = prompt("请输入老板密码");
-
-  if(pwd !== OWNER_PASSWORD){
-    alert("密码错误");
-
-    location.href = "./index.html";
-
-    throw new Error("auth failed");
-  }
-
-  sessionStorage.setItem("owner_auth","1");
+  location.href = "./index.html";
+  throw new Error("owner auth required");
 }
-
-
 
 const ref = doc(db,"shop","main");
 const RATE = 0.044;
@@ -580,8 +570,46 @@ function logoutOwner(){
   location.href="./index.html";
 }
 
-window.logoutOwner = logoutOwner;
+function setTopActionActive(type){
 
+  document
+    .getElementById("btnQrPage")
+    ?.classList.remove("active-top-btn");
+
+  document
+    .getElementById("btnCashierPage")
+    ?.classList.remove("active-top-btn");
+
+  if(type === "qr"){
+    document
+      .getElementById("btnQrPage")
+      ?.classList.add("active-top-btn");
+  }
+
+  if(type === "cashier"){
+    document
+      .getElementById("btnCashierPage")
+      ?.classList.add("active-top-btn");
+  }
+}
+
+function openQrPage(){
+  setTopActionActive("qr");
+
+  setTimeout(()=>{
+    location.href = "./qr.html";
+  },120);
+}
+
+function openCashierPage(){
+  setTopActionActive("cashier");
+
+  setTimeout(()=>{
+    location.href = "./cashier.html";
+  },120);
+}
+
+window.logoutOwner = logoutOwner;
 window.saveBusinessHours = saveBusinessHours;
 window.togglePackagePanel = togglePackagePanel;
 window.setFilter = setFilter;
@@ -591,4 +619,5 @@ window.removePackage = removePackage;
 window.savePackages = savePackages;
 window.saveTableCount = saveTableCount;
 window.exportCSV = exportCSV;
-window.toggleBusinessHoursPanel = toggleBusinessHoursPanel;
+window.openQrPage = openQrPage;
+window.openCashierPage = openCashierPage;

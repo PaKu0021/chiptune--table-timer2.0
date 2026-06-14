@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>收银记录打印</title>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body class="print-page">
+
+<h2 id="printTitle">收银记录</h2>
+
+<table class="record-table">
+  <thead>
+    <tr>
+      <th>时间</th>
+      <th>桌位</th>
+      <th>客人</th>
+      <th>套餐</th>
+      <th>实收日元</th>
+      <th>支付方式</th>
+    </tr>
+  </thead>
+
+  <tbody id="printRows"></tbody>
+</table>
+
+<script type="module" src="./js/cashier-print.js"></script>
+
+</body>
+</html>

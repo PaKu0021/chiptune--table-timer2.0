@@ -4,7 +4,31 @@ import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.1
 const ref = doc(db, "shop", "main");
 let state = null;
 let activeBookingId = null;
+let bookingLocked = true;
+let currentBookingDate = getTodayDate();
+let calendarYear = new Date().getFullYear();
+let calendarMonth = new Date().getMonth();
+let selectedCalendarDate = currentBookingDate;
 
+const BOOKING_COLORS = [
+  "#B7E4C7",
+  "#A9DEF9",
+  "#FFD6A5",
+  "#D8B4FE",
+  "#FFCAD4",
+  "#FDFFB6",
+  "#C7F9CC",
+  "#FEC5BB",
+  "#BDE0FE",
+  "#E9C46A",
+  "#CDEAC0",
+  "#F1C0E8"
+];
+
+function getNextBookingColor(){
+  const count = (state.bookings || []).length;
+  return BOOKING_COLORS[count % BOOKING_COLORS.length];
+}
 
 onSnapshot(ref, snap=>{
   if(!snap.exists()) return;
@@ -19,8 +43,6 @@ onSnapshot(ref, snap=>{
     }));
   }
 
-  currentBookingDate = getTodayDate();
-
   try{
     renderList();
     renderBookingGrid();
@@ -34,8 +56,6 @@ onSnapshot(ref, snap=>{
 function save(){
   setDoc(ref,state);
 }
-
-let currentBookingDate = getTodayDate();
 
 
 function getTodayDate(){
@@ -109,6 +129,39 @@ function isTableBusyAtSlot(t, rowIndex){
   return slotStart < busyEnd && slotEnd > busyStart;
 }
 
+function isTableUsedAtSlot(t,rowIndex){
+  if(!t.start) return false;
+
+  const slots = getSlots();
+  const slotTime = slots[rowIndex];
+  if(!slotTime) return false;
+
+  const [hh,mm] = slotTime.split(":").map(Number);
+
+  const slotDate = new Date(currentBookingDate);
+  slotDate.setHours(hh,mm,0,0);
+
+  const slotStart = slotDate.getTime();
+  const slotEnd = slotStart + SLOT_MINUTES * 60000;
+
+  const usedStart = Number(t.start);
+  const usedEnd = Number(t.pausedAt || Date.now());
+
+  return slotStart < usedEnd && slotEnd > usedStart;
+}
+
+function isPastTimeSlot(rowIndex){
+  const slots = getSlots();
+  const slotTime = slots[rowIndex];
+  if(!slotTime) return false;
+
+  const [hh, mm] = slotTime.split(":").map(Number);
+
+  const slotDate = new Date(currentBookingDate);
+  slotDate.setHours(hh, mm + SLOT_MINUTES, 0, 0);
+
+  return slotDate.getTime() <= Date.now();
+}
 
 function renderBookingGrid(){
   if(!state) return;
@@ -138,29 +191,42 @@ function renderBookingGrid(){
     <div class="booking-grid" style="grid-template-columns:80px repeat(${state.tables.length}, 1fr);">
       <div class="grid-head time-head">时间</div>
 
-      ${state.tables.map(t=>`
-        <div class="grid-head ${t.start ? "table-using" : ""}">
-        ${t.name}${t.start ? " 使用中" : ""}
-        </div>
-      `).join("")}
-
-      ${slots.map((time,rowIndex)=>`
-        <div class="time-cell">${time}</div>
-        ${state.tables.map((t,tableIndex)=>{
-
-  const busy = isTableBusyAtSlot(t,rowIndex);
+      ${state.tables.map((t,tableIndex)=>{
+  const usingToday = slots.some((_,rowIndex)=>{
+    return isTableBusyAtSlot(t,rowIndex);
+  });
 
   return `
-    <div
-      class="slot-cell ${busy ? "disabled-slot" : ""}"
+    <div class="grid-head ${usingToday ? "table-using" : ""}">
+      ${t.name}${usingToday ? " 使用中" : ""}
+    </div>
+  `;
+}).join("")}
+
+      ${slots.map((time,rowIndex)=>`
+        <div class="time-cell ${isPastTimeSlot(rowIndex) ? "past-time-cell" : ""}">
+          ${time}
+        </div>
+        ${state.tables.map((t,tableIndex)=>{
+
+          const busy = isTableBusyAtSlot(t,rowIndex);
+          const used = isTableUsedAtSlot(t,rowIndex);
+
+return `
+  <div
+    class="slot-cell ${busy ? "disabled-slot" : ""} ${used ? "used-slot" : ""}"
+
       data-table="${tableIndex}"
       data-row="${rowIndex}"
-      ${busy ? "" : `
-        onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
-        onpointermove="moveSelectByPoint(event)"
-        onpointerup="endSelectSlot(event)"
-        onpointercancel="endSelectSlot(event)"
-      `}
+
+      ${busy || bookingLocked ? "" : `
+  onpointerdown="startSelectSlot(event,${tableIndex},${rowIndex})"
+  onpointermove="moveSelectByPoint(event)"
+  onpointerup="endSelectSlot(event)"
+  onpointercancel="endSelectSlot(event)"
+`}
+
+
     ></div>
   `;
 }).join("")}
@@ -169,18 +235,56 @@ function renderBookingGrid(){
   `;
 
   drawExistingBookings();
+  updateBookingLockUI();
+
+}
+
+function updateBookingLockUI(){
+  const btn = document.getElementById("bookingLockBtn");
+  const hint = document.getElementById("bookingLockHint");
+  const grid = document.getElementById("bookingGrid");
+
+  if(btn){
+    btn.innerText = bookingLocked ? "🔒 已锁定" : "🔓 已解锁";
+    btn.className = bookingLocked ? "btn-danger" : "btn-success";
+  }
+
+  if(hint){
+    hint.innerText = bookingLocked
+      ? "当前为锁定状态，只能查看，不能创建/修改预约"
+      : "当前为解锁状态，可以创建/修改预约，操作完成后请重新锁定";
+
+    hint.className = bookingLocked
+      ? "booking-lock-hint locked"
+      : "booking-lock-hint unlocked";
+  }
+
+  if(grid){
+    grid.classList.toggle("locked-grid", bookingLocked);
+    grid.classList.toggle("unlocked-grid", !bookingLocked);
+  }
+}
+
+function toggleBookingLock(){
+  bookingLocked = !bookingLocked;
+  updateBookingLockUI();
+  renderBookingGrid();
 }
 
 function renderList(){
   const box = document.getElementById("list");
   if(!box) return;
 
-  const bookings = (state.bookings || []).filter(b=>{
-    return (b.date || currentBookingDate) === currentBookingDate;
-  });
+  const bookings = (state.bookings || [])
+    .filter(b=>{
+      return (b.date || getTodayDate()) === currentBookingDate;
+    })
+    .sort((a,b)=>{
+      return String(a.startTime || "99:99").localeCompare(String(b.startTime || "99:99"));
+    });
 
   if(bookings.length === 0){
-    box.innerHTML = `<p style="color:#8a8174;">暂无预约</p>`;
+    box.innerHTML = `<p style="color:#8a8174;">这一天暂无预约</p>`;
     return;
   }
 
@@ -191,37 +295,47 @@ function renderList(){
       .filter(Boolean)
       .join("、");
 
+    const statusText = b.checkedIn ? "已到店" : "未到店";
+    const statusClass = b.checkedIn ? "booking-list-done" : "booking-list-wait";
+
     return `
-      <div class="panel">
-        <h3>${b.checkedIn ? "✅ " : ""}${b.name}</h3>
-        <p>
-          手机：${b.phone}<br>
-          时间：${b.startTime || "-"} - ${b.endTime || "-"}<br>
-          桌位：${tables || "-"}<br>
-          状态：${b.checkedIn ? "已到店" : "未到店"}
-        </p>
+      <div class="booking-list-item ${statusClass}" onclick="${bookingLocked ? "" : `openBookingAction(${b.id})`}">
+        <div class="booking-list-time">
+          ${b.startTime || "-"} - ${b.endTime || "-"}
+        </div>
+
+        <div class="booking-list-main">
+          <strong>${b.name || "-"}</strong>
+          <span>${String(b.phone || "").slice(-4) || "-"}</span>
+        </div>
+
+        <div class="booking-list-sub">
+          桌位：${tables || "-"}｜${statusText}
+        </div>
       </div>
     `;
   }).join("");
 }
 
+
 function startSelectSlot(e,tableIndex,rowIndex){
-  if(isTableBusyAtSlot(state.tables[tableIndex], rowIndex)){
-  return;
-}
+  if(bookingLocked) return;
+  if(isTableBusyAtSlot(state.tables[tableIndex], rowIndex)) return;
 
   e.preventDefault();
 
   selecting = true;
 
   selection = {
-    tableIndex,
+    startTableIndex: tableIndex,
+    endTableIndex: tableIndex,
     startRow: rowIndex,
     endRow: rowIndex
   };
 
   highlightSelection();
 }
+
 
 function moveSelectSlot(e,tableIndex,rowIndex){
   if(!selecting || !selection) return;
@@ -240,9 +354,9 @@ function moveSelectByPoint(e){
   const tableIndex = Number(target.dataset.table);
   const rowIndex = Number(target.dataset.row);
 
-  if(tableIndex !== selection.tableIndex) return;
-
+  selection.endTableIndex = tableIndex;
   selection.endRow = rowIndex;
+
   highlightSelection();
 }
 
@@ -296,15 +410,70 @@ function endSelectSlot(e){
 
   selecting = false;
 
-  const start = Math.min(selection.startRow, selection.endRow);
-  const end = Math.max(selection.startRow, selection.endRow) + 1;
+  const startRow = Math.min(selection.startRow, selection.endRow);
+  const endRow = Math.max(selection.startRow, selection.endRow) + 1;
+
+  const startTable = Math.min(selection.startTableIndex, selection.endTableIndex);
+  const endTable = Math.max(selection.startTableIndex, selection.endTableIndex);
+
   const slots = getSlots();
 
+  const startTime = slots[startRow];
+  const endTime = slots[endRow] || `${getBusinessHours().close}:00`;
+
+  const tableNames = [];
+
+  for(let i=startTable; i<=endTable; i++){
+    tableNames.push(state.tables[i].name);
+  }
+
+  document.getElementById("selectedRangeText").innerText =
+    `${tableNames.join("、")}｜${startTime} - ${endTime}`;
+
+  const tip = document.getElementById("selectionTip");
+  if(tip) tip.style.display = "none";
+
+  document.getElementById("bookingModalBg").style.display = "block";
+}
+
+
+
+
+function updateSelectionTip(){
+  let tip = document.getElementById("selectionTip");
+
+  if(!tip){
+    tip = document.createElement("div");
+    tip.id = "selectionTip";
+    tip.className = "selection-tip";
+    document.body.appendChild(tip);
+  }
+
+  if(!selection){
+    tip.style.display = "none";
+    return;
+  }
+
+  const start = Math.min(selection.startRow, selection.endRow);
+  const end = Math.max(selection.startRow, selection.endRow) + 1;
+
+  const minutes = (end - start) * SLOT_MINUTES;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+
+  const durationText =
+    hours > 0
+      ? `${hours}小时${mins ? mins + "分钟" : ""}`
+      : `${mins}分钟`;
+
+  const slots = getSlots();
   const startTime = slots[start];
   const endTime = slots[end] || `${getBusinessHours().close}:00`;
 
-  document.getElementById("selectedRangeText").innerText =
-    `${state.tables[selection.tableIndex].name}｜${startTime} - ${endTime}`;
+  const tableCount =
+    Math.abs(selection.endTableIndex - selection.startTableIndex) + 1;
+
+    tip.innerHTML = `<b>${tableCount}桌｜${durationText}</b><br>${startTime} - ${endTime}`;
 
     const tip = document.getElementById("selectionTip");
 if(tip) tip.style.display = "none";
@@ -318,19 +487,31 @@ function highlightSelection(){
 
   if(!selection) return;
 
-  const start = Math.min(selection.startRow, selection.endRow);
-  const end = Math.max(selection.startRow, selection.endRow);
+  const startRow = Math.min(selection.startRow, selection.endRow);
+  const endRow = Math.max(selection.startRow, selection.endRow);
+
+  const startTable = Math.min(selection.startTableIndex, selection.endTableIndex);
+  const endTable = Math.max(selection.startTableIndex, selection.endTableIndex);
 
   document.querySelectorAll(".slot-cell").forEach(el=>{
     const table = Number(el.dataset.table);
     const row = Number(el.dataset.row);
 
-    if(table === selection.tableIndex && row >= start && row <= end){
+    if(
+      table >= startTable &&
+      table <= endTable &&
+      row >= startRow &&
+      row <= endRow
+    ){
       el.classList.add("selecting");
     }
   });
   updateSelectionTip();
 }
+
+
+
+
 
 function confirmGridBooking(){
   if(!selection) return;
@@ -350,9 +531,16 @@ function confirmGridBooking(){
   const booking = {
     id: Date.now(),
     date: currentBookingDate,
+    color: getNextBookingColor(),
     name,
     phone,
-    tableIndexes:[selection.tableIndex],
+    tableIndexes:Array.from(
+  {
+    length:
+      Math.abs(selection.endTableIndex - selection.startTableIndex) + 1
+  },
+  (_,idx)=>Math.min(selection.startTableIndex, selection.endTableIndex) + idx
+),
     startTime: slots[start],
     endTime: slots[end] || `${getBusinessHours().close}:00`,
     checkedIn:false,
@@ -366,7 +554,8 @@ function confirmGridBooking(){
   save();
 
   closeBookingModal();
-  render();
+  renderBookingGrid();
+  renderList();
 }
 
 function closeBookingModal(){
@@ -385,8 +574,94 @@ if(tip) tip.style.display = "none";
 }
 
 function openDatePicker(){
-  document.getElementById("datePickerInput").value = currentBookingDate;
+  const d = new Date(currentBookingDate);
+  calendarYear = d.getFullYear();
+  calendarMonth = d.getMonth();
+  selectedCalendarDate = currentBookingDate;
+
   document.getElementById("datePickerModalBg").style.display = "block";
+  renderCustomCalendar();
+}
+
+
+function getBookingDates(){
+  const set = new Set();
+
+  (state.bookings || []).forEach(b=>{
+    if(b.date) set.add(b.date);
+  });
+
+  return set;
+}
+
+function renderCustomCalendar(){
+  const box = document.getElementById("calendarGrid");
+  const title = document.getElementById("calendarTitle");
+  if(!box || !title) return;
+
+  title.innerText = `${calendarYear}年${calendarMonth + 1}月`;
+
+  const bookingDates = getBookingDates();
+
+  const first = new Date(calendarYear, calendarMonth, 1);
+  const last = new Date(calendarYear, calendarMonth + 1, 0);
+  const startDay = first.getDay();
+  const days = last.getDate();
+
+  let html = `
+    <div class="cal-week">日</div>
+    <div class="cal-week">一</div>
+    <div class="cal-week">二</div>
+    <div class="cal-week">三</div>
+    <div class="cal-week">四</div>
+    <div class="cal-week">五</div>
+    <div class="cal-week">六</div>
+  `;
+
+  for(let i=0;i<startDay;i++){
+    html += `<div></div>`;
+  }
+
+  for(let d=1; d<=days; d++){
+    const dateStr =
+      `${calendarYear}-${String(calendarMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+
+    const hasBooking = bookingDates.has(dateStr);
+    const selected = selectedCalendarDate === dateStr;
+
+    html += `
+      <button
+        class="cal-day ${hasBooking ? "has-booking" : "no-booking"} ${selected ? "selected" : ""}"
+        onclick="selectCalendarDate('${dateStr}')"
+      >
+        ${d}
+        ${hasBooking ? `<span class="booking-dot"></span>` : ""}
+      </button>
+    `;
+  }
+
+  box.innerHTML = html;
+}
+
+function selectCalendarDate(dateStr){
+  selectedCalendarDate = dateStr;
+  renderCustomCalendar();
+}
+
+function changeCalendarMonth(step){
+  calendarMonth += step;
+
+  if(calendarMonth < 0){
+    calendarMonth = 11;
+    calendarYear--;
+  }
+
+  if(calendarMonth > 11){
+    calendarMonth = 0;
+    calendarYear++;
+  }
+
+  renderCustomCalendar();
 }
 
 function closeDatePicker(){
@@ -394,24 +669,22 @@ function closeDatePicker(){
 }
 
 function confirmDatePicker(){
-  const v = document.getElementById("datePickerInput").value;
+  currentBookingDate = selectedCalendarDate;
 
-  if(!v){
-    alert("请选择日期");
-    return;
-  }
-
-  currentBookingDate = v;
   closeDatePicker();
   renderBookingGrid();
   renderList();
 }
+  
+
 
 function drawExistingBookings(){
-  document.querySelectorAll(".slot-cell.booked").forEach(el=>{
-    el.classList.remove("booked");
+  document.querySelectorAll(".slot-cell.booked, .slot-cell.checked-in-booking").forEach(el=>{
+    el.classList.remove("booked","checked-in-booking");
     el.innerHTML = "";
     el.onclick = null;
+    el.style.background = "";
+    el.style.color = "";
   });
 
   const slots = getSlots();
@@ -433,26 +706,48 @@ function drawExistingBookings(){
     const realEndRow = endRow > startRow ? endRow : startRow + 1;
 
     tableIndexes.forEach(tableIndex=>{
-      for(let rowIndex=startRow; rowIndex<realEndRow; rowIndex++){
+      for(let rowIndex = startRow; rowIndex < realEndRow; rowIndex++){
         const cell = document.querySelector(
           `.slot-cell[data-table="${tableIndex}"][data-row="${rowIndex}"]`
         );
 
         if(!cell) continue;
 
-        cell.classList.add("booked");
+        cell.classList.add(b.checkedIn ? "checked-in-booking" : "booked");
+        if(b.checkedIn){
+        cell.style.background = "#f2c94c";
+        cell.style.color = "#332d24";
+}else{
+        cell.style.background = b.color || "#54a66b";
+        cell.style.color = "#332d24";
+}
+        cell.onpointerdown = null;
+        cell.onpointermove = null;
+        cell.onpointerup = null;
+        cell.onpointercancel = null;
+
+        cell.onclick = (e)=>{
+  e.preventDefault();
+  e.stopPropagation();
+
+  if(bookingLocked) return;
+
+  openBookingAction(b.id);
+};
+
 
         if(rowIndex === startRow){
-          cell.innerHTML = b.checkedIn ? `✅ ${b.name}` : b.name;
+          cell.innerHTML = b.checkedIn
+            ? "✅ " + (b.name || "")
+            : (b.name || "");
         }
-
-        cell.onclick = ()=>{
-          openBookingAction(b.id);
-        };
       }
     });
   });
 }
+
+
+
 
 function getBookingById(id){
   return state.bookings.find(b=>Number(b.id) === Number(id));
@@ -464,21 +759,122 @@ function openBookingAction(id){
 
   activeBookingId = id;
 
-  const tables = (b.tableIndexes || [b.tableIndex])
-    .filter(v=>v !== undefined && v !== null)
-    .map(idx=>state.tables[Number(idx)]?.name)
-    .filter(Boolean)
-    .join("、");
+  const tableIndex = Number(
+    (b.tableIndexes || [b.tableIndex])[0] || 0
+  );
 
   document.getElementById("bookingActionInfo").innerHTML = `
-    客人：${b.name}<br>
-    手机：${b.phone}<br>
     时间：${b.startTime} - ${b.endTime}<br>
-    桌位：${tables || "-"}<br>
     状态：${b.checkedIn ? "已到店" : "未到店"}
   `;
 
+  document.getElementById("detailName").value =
+    b.name || "";
+
+  document.getElementById("detailPhone").value =
+    b.phone || "";
+
+  document.getElementById("detailPay").value =
+    b.pay || "";
+
+  document.getElementById("detailTable").innerHTML =
+    state.tables.map((t,i)=>`
+      <option
+        value="${i}"
+        ${i===tableIndex ? "selected" : ""}
+      >
+        ${t.name}
+      </option>
+    `).join("");
+
+    document.getElementById("detailPackage").innerHTML =
+  (state.packages || []).map((p,i)=>`
+    <option value="${i}" ${Number(b.packageIndex || 0) === i ? "selected" : ""}>
+      ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
+    </option>
+  `).join("");
+
   document.getElementById("bookingActionModalBg").style.display = "block";
+}
+
+function saveBookingDetail(){
+  const b = getBookingById(activeBookingId);
+  if(!b) return;
+
+  const oldIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+
+  const oldTableIndex = oldIndexes[0];
+  const newTableIndex = Number(document.getElementById("detailTable").value);
+
+  const newName = document.getElementById("detailName").value.trim();
+  const newPhone = document.getElementById("detailPhone").value.trim();
+  const newPay = document.getElementById("detailPay").value;
+  const newPackageIndex = Number(document.getElementById("detailPackage").value || 0);
+
+
+  if(b.checkedIn && newTableIndex !== oldTableIndex){
+    const oldTable = state.tables[oldTableIndex];
+    const newTable = state.tables[newTableIndex];
+
+    if(newTable?.start){
+      alert("新桌位正在使用中，不能更换");
+      return;
+    }
+
+    state.tables[newTableIndex] = {
+      ...oldTable,
+      name: newTable.name,
+      customer:{
+        name:newName,
+        phoneLast4:String(newPhone || "").slice(-4)
+      },
+      pay:newPay || oldTable.pay || "",
+      type:"booking"
+    };
+
+    state.tables[oldTableIndex] = {
+      name: oldTable.name,
+      start: null,
+      extra: 0,
+      packageIndex: 0,
+      type: "",
+      pay: "",
+      currency: "日元",
+      customer:{ name:"", phoneLast4:"" },
+      alerted:false,
+      alerting:false,
+      pausedAt:null,
+      lastAction:""
+    };
+  }
+
+  if(b.checkedIn && newTableIndex === oldTableIndex){
+    const t = state.tables[oldTableIndex];
+    if(t){
+      t.customer = {
+        name:newName,
+        phoneLast4:String(newPhone || "").slice(-4)
+      };
+      t.pay = newPay || t.pay || "";
+      t.type = "booking";
+    }
+  }
+
+  b.name = newName;
+  b.phone = newPhone;
+  b.pay = newPay;
+  b.packageIndex = newPackageIndex;
+  b.tableIndexes = [newTableIndex];
+  delete b.tableIndex;
+
+  save();
+  closeBookingAction();
+  renderBookingGrid();
+  renderList();
+
+  alert("修改成功");
 }
 
 function closeBookingAction(){
@@ -513,6 +909,8 @@ function checkInBooking(){
     if(!t) return;
 
     t.type = "booking";
+    t.pay = b.pay || "";
+    t.packageIndex = Number(b.packageIndex || 0);
     t.customer = {
       name:b.name,
       phoneLast4:String(b.phone || "").slice(-4)
@@ -530,8 +928,8 @@ function checkInBooking(){
 
   save();
   closeBookingAction();
-  render();
   renderBookingGrid();
+  renderList();
 }
 
 function cancelBooking(){
@@ -563,76 +961,15 @@ function cancelBooking(){
 
   save();
   closeBookingAction();
-  render();
   renderBookingGrid();
+  renderList();
 }
 
-function openChangeBookingTable(){
-  const b = getBookingById(activeBookingId);
-  if(!b) return;
-
-  if(b.checkedIn){
-    alert("已到店的预约不能更换桌位");
-    return;
-  }
-
-  const input = prompt("请输入新桌号，例如 1 或 1,2：");
-  if(!input) return;
-
-  const newIndexes = input
-    .split(",")
-    .map(v=>Number(v.trim()) - 1)
-    .filter(v=>!isNaN(v) && v >= 0 && v < state.tables.length);
-
-  if(!newIndexes.length){
-    alert("桌号不正确");
-    return;
-  }
-
-  const busy = newIndexes.filter(idx=>state.tables[idx]?.start);
-  if(busy.length){
-    alert("以下桌位正在使用中：\n" + busy.map(i=>state.tables[i].name).join("、"));
-    return;
-  }
-
-  const oldIndexes = (b.tableIndexes || [b.tableIndex])
-    .filter(v=>v !== undefined && v !== null)
-    .map(Number);
-
-  oldIndexes.forEach(idx=>{
-    const t = state.tables[idx];
-    if(!t || t.start) return;
-
-    if(
-      t.type === "booking" &&
-      t.customer?.name === b.name &&
-      t.customer?.phoneLast4 === String(b.phone || "").slice(-4)
-    ){
-      t.type = "";
-      t.customer = {name:"", phoneLast4:""};
-    }
-  });
-
-  newIndexes.forEach(idx=>{
-    const t = state.tables[idx];
-    if(!t) return;
-
-    t.type = "booking";
-    t.customer = {
-      name:b.name,
-      phoneLast4:String(b.phone || "").slice(-4)
-    };
-  });
-
-  b.tableIndexes = newIndexes;
-  delete b.tableIndex;
-
-  save();
-  closeBookingAction();
-  render();
-  renderBookingGrid();
+function printBookingGrid(){
+  location.href = `./print-booking.html?date=${currentBookingDate}`;
 }
 
+window.printBookingGrid = printBookingGrid;
 window.openDatePicker = openDatePicker;
 window.closeDatePicker = closeDatePicker;
 window.confirmDatePicker = confirmDatePicker;
@@ -647,4 +984,7 @@ window.openBookingAction = openBookingAction;
 window.closeBookingAction = closeBookingAction;
 window.checkInBooking = checkInBooking;
 window.cancelBooking = cancelBooking;
-window.openChangeBookingTable = openChangeBookingTable;
+window.saveBookingDetail = saveBookingDetail;
+window.toggleBookingLock = toggleBookingLock;
+window.changeCalendarMonth = changeCalendarMonth;
+window.selectCalendarDate = selectCalendarDate;
