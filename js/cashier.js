@@ -1,5 +1,44 @@
 import { db } from "./firebase.js";
-import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
+async function uploadReceipt(timestamp,file){
+  if(!file) return;
+
+  const img = await imageToBase64(file);
+
+  const record = state.records.find(r=>Number(r.timestamp) === Number(timestamp));
+  if(!record){
+    alert("找不到这条收银记录");
+    return;
+  }
+
+  record.receiptImage = img;
+  record.receiptFileName = file.name || "";
+  record.receiptUploadedAt = Date.now();
+
+  await setDoc(ref,state);
+
+  alert("截图已保存");
+  renderCashier();
+}
+
+function viewReceipt(timestamp){
+  const record = state.records.find(r=>Number(r.timestamp) === Number(timestamp));
+
+  if(!record || !record.receiptImage){
+    alert("没有截图");
+    return;
+  }
+
+  const win = window.open("");
+  win.document.write(`
+    <html>
+      <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;">
+        <img src="${record.receiptImage}" style="max-width:100%;max-height:100vh;">
+      </body>
+    </html>
+  `);
+}
 
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
@@ -93,6 +132,42 @@ function getFilteredRecords(){
   }).sort((a,b)=>getRecordTime(a) - getRecordTime(b));
 }
 
+function imageToBase64(file){
+  return new Promise((resolve,reject)=>{
+    if(!file){
+      resolve("");
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = e=>{
+      const img = new Image();
+
+      img.onload = ()=>{
+        const canvas = document.createElement("canvas");
+
+        const maxWidth = 900;
+        const scale = Math.min(1, maxWidth / img.width);
+
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+
+        resolve(canvas.toDataURL("image/jpeg",0.65));
+      };
+
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function renderCashier(){
   const rows = getFilteredRecords();
 
@@ -115,6 +190,20 @@ function renderCashier(){
         <td>${r.pay || "未记录"}</td>
         <td>${r.currency || ""}</td>
         <td>${r.roundRule || ""}</td>
+        <td>
+  ${
+    r.pay === "现金"
+      ? "现金无需截图"
+      : `
+        ${r.receiptImage ? `<button onclick="viewReceipt(${r.timestamp})">查看</button>` : ""}
+        <input
+          type="file"
+          accept="image/*"
+          onchange="uploadReceipt(${r.timestamp}, this.files[0])"
+        >
+      `
+  }
+</td>
       </tr>
     `;
   }).join("");
@@ -171,10 +260,11 @@ function renderSummary(rows){
 function exportCashierCSV(){
   const rows = getFilteredRecords();
 
+
   const headers = [
-    "时间","桌位","客人姓名","手机尾号","类型","套餐",
-    "原价日元","实收日元","人民币","支付方式","币种","抹零"
-  ];
+  "时间","桌位","客人姓名","手机尾号","类型","套餐",
+  "原价日元","实收日元","人民币","支付方式","币种","抹零","收款截图"
+];
 
   const body = rows.map(r=>[
     r.time || "",
@@ -189,6 +279,7 @@ function exportCashierCSV(){
     r.pay || "",
     r.currency || "",
     r.roundRule || ""
+    r.receiptImage ? "已上传" : "未上传"
   ]);
 
   const csv = [headers, ...body]
@@ -223,3 +314,5 @@ window.setQuickRange = setQuickRange;
 window.renderCashier = renderCashier;
 window.exportCashierCSV = exportCashierCSV;
 window.printCashier = printCashier;
+window.uploadReceipt = uploadReceipt;
+window.viewReceipt = viewReceipt;
