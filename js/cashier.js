@@ -311,7 +311,18 @@ function exportCashierCSV(){
 }
 
 function printCashier(){
-  window.print();
+
+  const start =
+    document.getElementById("startDate").value;
+
+  const end =
+    document.getElementById("endDate").value;
+
+  const pay =
+    document.getElementById("payFilter").value;
+
+  location.href =
+    `./cashier-print.html?start=${start}&end=${end}&pay=${pay}`;
 }
 
 onSnapshot(ref, snap=>{
