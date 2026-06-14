@@ -1136,3 +1136,43 @@ button.selected-pop{
     print-color-adjust:exact;
   }
 }
+
+@media print{
+  .app-header,
+  .header-actions,
+  .no-print,
+  button,
+  input,
+  select{
+    display:none !important;
+  }
+
+  body{
+    background:#fff !important;
+    padding:0 !important;
+  }
+
+  .panel{
+    box-shadow:none !important;
+    border:none !important;
+    margin:0 0 12px !important;
+    padding:0 !important;
+  }
+
+  .record-table{
+    width:100% !important;
+    border-collapse:collapse !important;
+  }
+
+  .record-table th,
+  .record-table td{
+    border:1px solid #999 !important;
+    font-size:11px !important;
+    padding:4px !important;
+  }
+
+  @page{
+    size:A4 landscape;
+    margin:8mm;
+  }
+}
