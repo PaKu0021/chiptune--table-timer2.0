@@ -689,3 +689,18 @@ button.selected-pop{
   pointer-events:none;
   white-space:nowrap;
 }
+
+/* 锁定状态：预约表只查看，允许手指在桌位格子上滑动页面 */
+.locked-grid .slot-cell,
+.locked-grid .slot-cell.booked,
+.locked-grid .slot-cell.checked-in-booking,
+.locked-grid .slot-cell.used-slot{
+  touch-action:pan-y !important;
+  pointer-events:auto !important;
+  cursor:default !important;
+}
+
+/* 解锁状态：用于拖选预约，所以禁止页面滚动 */
+.unlocked-grid .slot-cell{
+  touch-action:none !important;
+}
