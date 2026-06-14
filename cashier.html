@@ -33,18 +33,34 @@
       <button onclick="setQuickRange('all')">全部</button>
     </div>
 
-    <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:10px;">
-      <input id="startDate" type="date" onchange="renderCashier()">
-      <input id="endDate" type="date" onchange="renderCashier()">
+    <h3 style="margin:16px 0 10px;">自定义日期范围</h3>
 
-      <select id="payFilter" onchange="renderCashier()">
-        <option value="">全部支付方式</option>
-        <option value="现金">现金</option>
-        <option value="PayPay">PayPay</option>
-        <option value="微信">微信</option>
-        <option value="支付宝">支付宝</option>
-      </select>
-    </div>
+<div class="date-filter-section">
+
+  <div class="date-item">
+    <label>开始日期</label>
+    <input id="startDate" type="date">
+  </div>
+
+  <div class="date-item">
+    <label>结束日期</label>
+    <input id="endDate" type="date">
+  </div>
+
+  <div class="date-item">
+    <label>支付方式</label>
+    <select id="payFilter">
+      <option value="">全部支付方式</option>
+      <option value="现金">现金</option>
+      <option value="PayPay">PayPay</option>
+      <option value="微信">微信</option>
+      <option value="支付宝">支付宝</option>
+    </select>
+  </div>
+
+  <button class="btn-main" onclick="applyDateFilter()">查询</button>
+
+</div>
   </div>
 
   <div class="panel">

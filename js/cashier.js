@@ -310,6 +310,11 @@ onSnapshot(ref, snap=>{
   setQuickRange("today");
 });
 
+function applyDateFilter(){
+  renderCashier();
+}
+
+window.applyDateFilter = applyDateFilter;
 window.setQuickRange = setQuickRange;
 window.renderCashier = renderCashier;
 window.exportCashierCSV = exportCashierCSV;
