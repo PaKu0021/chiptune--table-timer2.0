@@ -1,5 +1,7 @@
+
 import { db } from "./firebase.js";
 import { doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
 
 async function uploadReceipt(timestamp,file){
   if(!file) return;
@@ -44,6 +46,8 @@ const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 
 let state = null;
+let quickRange = "today";
+let initialized = false; 
 
 function dateKey(ts){
   const d = new Date(ts);
@@ -75,6 +79,7 @@ function toRMB(r){
 }
 
 function setQuickRange(type){
+  quickRange = type;
   const now = new Date();
   let start = "";
   let end = "";
@@ -189,7 +194,7 @@ function renderCashier(){
         <td>¥${toRMB(r).toLocaleString()}</td>
         <td>${r.pay || "未记录"}</td>
         <td>${r.currency || ""}</td>
-        <td>${r.roundRule || ""}</td>
+        <td>${r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || "")}</td>
         <td>
   ${
     r.pay === "现金"
@@ -209,6 +214,15 @@ function renderCashier(){
   }).join("");
 
   renderSummary(rows);
+  renderCashierButtons();
+}
+
+function renderCashierButtons(){
+  ["today","week","month","all"].forEach(k=>{
+    document
+      .getElementById("cashier_" + k)
+      ?.classList.toggle("active", quickRange === k);
+  });
 }
 
 function renderSummary(rows){
@@ -278,7 +292,7 @@ function exportCashierCSV(){
     toRMB(r),
     r.pay || "",
     r.currency || "",
-    r.roundRule || "",
+    r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || ""),    
     r.receiptImage ? "已上传" : "未上传"
   ]);
 
@@ -307,8 +321,15 @@ onSnapshot(ref, snap=>{
 
   if(!state.records) state.records = [];
 
-  setQuickRange("today");
+  if(!initialized){
+    initialized = true;
+    setQuickRange("today");
+  }else{
+    renderCashier();
+  }
 });
+
+
 
 function applyDateFilter(){
   renderCashier();

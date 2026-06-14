@@ -1212,3 +1212,39 @@ button.selected-pop{
     grid-template-columns:1fr;
   }
 }
+
+.cashier-filter-card{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr 96px;
+  gap:14px;
+  align-items:end;
+  margin-top:12px;
+}
+
+.cashier-date-item{
+  display:flex;
+  flex-direction:column;
+}
+
+.cashier-date-item label{
+  font-size:14px;
+  font-weight:900;
+  color:#8a8174;
+  margin-bottom:8px;
+}
+
+.cashier-date-item input,
+.cashier-date-item select{
+  height:56px;
+  margin:0;
+}
+
+.cashier-search-btn{
+  height:56px;
+}
+
+@media(max-width:760px){
+  .cashier-filter-card{
+    grid-template-columns:1fr;
+  }
+}

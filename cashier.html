@@ -27,27 +27,28 @@
     <h2>筛选</h2>
 
     <div class="action-row">
-      <button onclick="setQuickRange('today')">今天</button>
-      <button onclick="setQuickRange('week')">本周</button>
-      <button onclick="setQuickRange('month')">本月</button>
-      <button onclick="setQuickRange('all')">全部</button>
+      <button id="cashier_today" onclick="setQuickRange('today')">今天</button>
+      <button id="cashier_week" onclick="setQuickRange('week')">本周</button>
+      <button id="cashier_month" onclick="setQuickRange('month')">本月</button>
+      <button id="cashier_all" onclick="setQuickRange('all')">全部</button>      
     </div>
 
     <h3 style="margin:16px 0 10px;">自定义日期范围</h3>
 
-<div class="date-filter-section">
+<h3 style="margin:16px 0 10px;">自定义日期范围</h3>
 
-  <div class="date-item">
+<div class="cashier-filter-card">
+  <div class="cashier-date-item">
     <label>开始日期</label>
     <input id="startDate" type="date">
   </div>
 
-  <div class="date-item">
+  <div class="cashier-date-item">
     <label>结束日期</label>
     <input id="endDate" type="date">
   </div>
 
-  <div class="date-item">
+  <div class="cashier-date-item">
     <label>支付方式</label>
     <select id="payFilter">
       <option value="">全部支付方式</option>
@@ -58,9 +59,12 @@
     </select>
   </div>
 
-  <button class="btn-main" onclick="applyDateFilter()">查询</button>
-
+  <button class="btn-main cashier-search-btn" onclick="applyDateFilter()">查询</button>
 </div>
+
+
+
+
   </div>
 
   <div class="panel">

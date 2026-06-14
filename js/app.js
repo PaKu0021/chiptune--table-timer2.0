@@ -1096,7 +1096,8 @@ function confirmBatchCheckout(){
       totalRMB,
       pay,
       currency,
-      roundRule: "批量结账"
+      roundRule: "不抹零",
+      checkoutMethod: "批量结账"      
     });
 
     state.tables[i] = {
