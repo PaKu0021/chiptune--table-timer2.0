@@ -44,7 +44,9 @@ onSnapshot(ref, snap=>{
 
   const state = snap.data();
   const tables = state.tables || [];
-  const bookings = (state.bookings || []).filter(b=>b.date === printDate);
+  const bookings = (state.bookings || []).filter(b=>{
+  return (b.date || printDate) === printDate;
+});  
   const slots = getSlots(getBusinessHours(state));
 
   document.getElementById("printTitle").innerText = `${printDate} 预约时间表`;
@@ -67,8 +69,11 @@ onSnapshot(ref, snap=>{
       const booking = bookings.find(b=>{
         const tableIndexes = (b.tableIndexes || [b.tableIndex]).map(Number);
         const startRow = slots.indexOf(b.startTime);
+        
         const endRow = slots.indexOf(b.endTime);
         const realEndRow = endRow > startRow ? endRow : startRow + 1;
+
+        if(startRow < 0) return false;
 
         return tableIndexes.includes(tableIndex) &&
                rowIndex >= startRow &&
@@ -89,3 +94,11 @@ onSnapshot(ref, snap=>{
 
   document.getElementById("printGrid").innerHTML = html;
 });
+
+function doPrint(){
+  setTimeout(()=>{
+    window.print();
+  },300);
+}
+
+window.doPrint = doPrint;
