@@ -360,50 +360,6 @@ function moveSelectByPoint(e){
   highlightSelection();
 }
 
-function updateSelectionTip(){
-  let tip = document.getElementById("selectionTip");
-
-  if(!tip){
-    tip = document.createElement("div");
-    tip.id = "selectionTip";
-    tip.className = "selection-tip";
-    document.body.appendChild(tip);
-  }
-
-  if(!selection){
-    tip.style.display = "none";
-    return;
-  }
-
-  const start = Math.min(selection.startRow, selection.endRow);
-  const end = Math.max(selection.startRow, selection.endRow) + 1;
-
-  const minutes = (end - start) * SLOT_MINUTES;
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-
-  const durationText =
-    hours > 0
-      ? `${hours}小时${mins ? mins + "分钟" : ""}`
-      : `${mins}分钟`;
-
-  const slots = getSlots();
-  const startTime = slots[start];
-  const endTime = slots[end] || `${getBusinessHours().close}:00`;
-
-  tip.innerHTML = `<b>${durationText}</b><br>${startTime} - ${endTime}`;
-
-  const cell = document.querySelector(
-    `.slot-cell[data-table="${selection.tableIndex}"][data-row="${selection.endRow}"]`
-  );
-
-  if(cell){
-    const rect = cell.getBoundingClientRect();
-    tip.style.left = rect.right + 8 + "px";
-    tip.style.top = rect.top + "px";
-    tip.style.display = "block";
-  }
-}
 
 function endSelectSlot(e){
   if(!selecting || !selection) return;
@@ -437,8 +393,6 @@ function endSelectSlot(e){
 }
 
 
-
-
 function updateSelectionTip(){
   let tip = document.getElementById("selectionTip");
 
@@ -454,10 +408,10 @@ function updateSelectionTip(){
     return;
   }
 
-  const start = Math.min(selection.startRow, selection.endRow);
-  const end = Math.max(selection.startRow, selection.endRow) + 1;
+  const startRow = Math.min(selection.startRow, selection.endRow);
+  const endRow = Math.max(selection.startRow, selection.endRow) + 1;
 
-  const minutes = (end - start) * SLOT_MINUTES;
+  const minutes = (endRow - startRow) * SLOT_MINUTES;
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
 
@@ -467,18 +421,30 @@ function updateSelectionTip(){
       : `${mins}分钟`;
 
   const slots = getSlots();
-  const startTime = slots[start];
-  const endTime = slots[end] || `${getBusinessHours().close}:00`;
+  const startTime = slots[startRow];
+  const endTime = slots[endRow] || `${getBusinessHours().close}:00`;
 
   const tableCount =
     Math.abs(selection.endTableIndex - selection.startTableIndex) + 1;
 
-    tip.innerHTML = `<b>${tableCount}桌｜${durationText}</b><br>${startTime} - ${endTime}`;
+  tip.innerHTML =
+    `<b>${tableCount}桌｜${durationText}</b><br>${startTime} - ${endTime}`;
 
-    const tip = document.getElementById("selectionTip");
-if(tip) tip.style.display = "none";
-  document.getElementById("bookingModalBg").style.display = "block";
+  const cell = document.querySelector(
+    `.slot-cell[data-table="${selection.endTableIndex}"][data-row="${selection.endRow}"]`
+  );
+
+  if(cell){
+    const rect = cell.getBoundingClientRect();
+    tip.style.left = rect.right + 8 + "px";
+    tip.style.top = rect.top + "px";
+    tip.style.display = "block";
+  }else{
+    tip.style.display = "none";
+  }
 }
+
+
 
 function highlightSelection(){
   document.querySelectorAll(".slot-cell.selecting").forEach(el=>{
