@@ -531,13 +531,6 @@ button.selected-pop{
   border:1px solid #d8a900 !important;
   box-shadow:0 3px 8px rgba(216,169,0,.25) !important;
 }
-.table-grid{
-  display:grid !important;
-  grid-template-columns:repeat(4, 1fr) !important;
-  gap:14px !important;
-  margin:16px 0 12px !important;
-  max-width:720px !important;
-}
 
 .table-grid .table-item:nth-child(9),
 .table-grid .table-item:nth-child(11){
@@ -681,34 +674,6 @@ button.selected-pop{
   background:#d9d9d9 !important;
   cursor:not-allowed !important;
   pointer-events:none !important;
-}
-
-.batch-table-card{
-  position:relative;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-
-  height:44px;
-
-  border:2px solid #ddd;
-  border-radius:12px;
-
-  cursor:pointer;
-}
-
-.batch-table-card input{
-  position:absolute;
-  opacity:0;
-}
-
-.batch-table-card .table-name{
-  font-weight:800;
-}
-
-.batch-table-card:has(input:checked){
-  background:#f2c94c;
-  border-color:#d8a900;
 }
 
 .batch-checkout-card{
@@ -990,75 +955,7 @@ button.selected-pop{
   border-radius:50%;
   background:#e85d5d;
 }
-@media print{
-  body{
-    background:#fff !important;
-    padding:0 !important;
-  }
-
-  .app-header,
-  #bookingLockHint,
-  #bookingLockBtn,
-  .header-actions,
-  .booking-list-item,
-  .panel:has(#list),
-  .modal-bg{
-    display:none !important;
-  }
-
-  .page-shell{
-    width:100% !important;
-    margin:0 !important;
-  }
-
-  .panel{
-    box-shadow:none !important;
-    border:none !important;
-    margin:0 !important;
-    padding:0 !important;
-  }
-
-  #bookingGrid{
-    overflow:visible !important;
-    border:none !important;
-  }
-
-  .booking-grid{
-    min-width:0 !important;
-    width:100% !important;
-    font-size:11px !important;
-  }
-
-  .grid-head,
-  .time-cell,
-  .slot-cell{
-    border:1px solid #ccc !important;
-  }
-
-  .slot-cell{
-    height:28px !important;
-  }
-
-  .booked{
-    background:#54a66b !important;
-    color:#fff !important;
-    -webkit-print-color-adjust:exact;
-    print-color-adjust:exact;
-  }
-
-  .checked-in-booking{
-    background:#f2c94c !important;
-    color:#000 !important;
-    -webkit-print-color-adjust:exact;
-    print-color-adjust:exact;
-  }
-
-  .used-slot{
-    background:#ddd !important;
-    -webkit-print-color-adjust:exact;
-    print-color-adjust:exact;
-  }
-}
+  
 .time-cell.past-time-cell{
   background:#d9d9d9 !important;
   color:#777 !important;
@@ -1113,69 +1010,7 @@ button.selected-pop{
 .print-checked{
   background:#f2c94c !important;
   color:#000;
-}
-
-@media print{
-  .no-print{
-    display:none !important;
-  }
-
-  body{
-    padding:0 !important;
-    background:#fff !important;
-  }
-
-  @page{
-    size:A4 landscape;
-    margin:8mm;
-  }
-
-  .print-booked,
-  .print-checked{
-    -webkit-print-color-adjust:exact;
-    print-color-adjust:exact;
-  }
-}
-
-@media print{
-  .app-header,
-  .header-actions,
-  .no-print,
-  button,
-  input,
-  select{
-    display:none !important;
-  }
-
-  body{
-    background:#fff !important;
-    padding:0 !important;
-  }
-
-  .panel{
-    box-shadow:none !important;
-    border:none !important;
-    margin:0 0 12px !important;
-    padding:0 !important;
-  }
-
-  .record-table{
-    width:100% !important;
-    border-collapse:collapse !important;
-  }
-
-  .record-table th,
-  .record-table td{
-    border:1px solid #999 !important;
-    font-size:11px !important;
-    padding:4px !important;
-  }
-
-  @page{
-    size:A4 landscape;
-    margin:8mm;
-  }
-}
+} 
 
 .active-top-btn{
   background:#f2c94c !important;
@@ -1230,5 +1065,78 @@ button.selected-pop{
 @media(max-width:760px){
   .cashier-filter-card{
     grid-template-columns:1fr;
+  }
+}
+
+@media print{
+  .app-header,
+  .header-actions,
+  .no-print,
+  button,
+  input,
+  select,
+  .modal-bg,
+  #bookingLockHint,
+  #bookingLockBtn{
+    display:none !important;
+  }
+
+  body{
+    background:#fff !important;
+    padding:0 !important;
+  }
+
+  .page-shell{
+    width:100% !important;
+    margin:0 !important;
+  }
+
+  .panel{
+    box-shadow:none !important;
+    border:none !important;
+    margin:0 0 12px !important;
+    padding:0 !important;
+  }
+
+  .record-table,
+  .print-booking-table{
+    width:100% !important;
+    border-collapse:collapse !important;
+  }
+
+  .record-table th,
+  .record-table td,
+  .print-booking-table th,
+  .print-booking-table td{
+    border:1px solid #999 !important;
+    font-size:11px !important;
+    padding:4px !important;
+  }
+
+  .print-booked,
+  .booked{
+    background:#54a66b !important;
+    color:#fff !important;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+
+  .print-checked,
+  .checked-in-booking{
+    background:#f2c94c !important;
+    color:#000 !important;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+
+  .used-slot{
+    background:#ddd !important;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+
+  @page{
+    size:A4 landscape;
+    margin:8mm;
   }
 }
