@@ -704,3 +704,75 @@ button.selected-pop{
 .unlocked-grid .slot-cell{
   touch-action:none !important;
 }
+
+/* ===== 打印预约时间表 ===== */
+
+.print-page{
+  background:#f7f3ea;
+  padding:20px;
+}
+
+.print-toolbar{
+  display:flex;
+  gap:10px;
+  margin-bottom:20px;
+}
+
+.print-booking-table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;
+  background:#fff;
+}
+
+.print-booking-table th,
+.print-booking-table td{
+  border:1px solid #d8cbb8;
+  text-align:center;
+  vertical-align:middle;
+  height:38px;
+  padding:4px;
+  font-size:13px;
+}
+
+.print-booking-table th{
+  background:#f2c94c;
+  font-weight:900;
+}
+
+.print-time{
+  background:#fff7df;
+  font-weight:800;
+  width:70px;
+}
+
+.print-booked{
+  background:#b7e4c7;
+  color:#332d24;
+  font-weight:800;
+}
+
+.print-checked{
+  background:#f2c94c;
+  color:#332d24;
+  font-weight:800;
+}
+
+@media print{
+
+  .no-print{
+    display:none !important;
+  }
+
+  body{
+    background:#fff;
+    padding:0;
+  }
+
+  .print-booking-table th,
+  .print-booking-table td{
+    height:26px;
+    font-size:11px;
+    padding:2px;
+  }
+}
