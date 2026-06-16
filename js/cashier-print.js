@@ -1,28 +1,21 @@
-import { db } from "./firebase.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-
-const ref = doc(db,"shop","main");
 const RATE = 0.044;
 
-const query = new URLSearchParams(location.search);
-const start = query.get("start") || "";
-const end = query.get("end") || "";
-const pay = query.get("pay") || "";
+const raw = sessionStorage.getItem("cashier_print_data");
+const payload = raw ? JSON.parse(raw) : {
+  start:"全部",
+  end:"全部",
+  pay:"全部支付方式",
+  rows:[]
+};
 
-function dateKey(ts){
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function getRecordTime(r){
-  return r.timestamp || r.time || r.date || 0;
-}
+const rows = payload.rows || [];
 
 function toJPY(r){
   if(r.currency === "人民币"){
-    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+    return Math.floor(Number(r.totalRMB || 0) / RATE);
   }
-  return Number(r.totalJPY || r.jpy || 0);
+
+  return Number(r.totalJPY || 0);
 }
 
 function renderSummary(rows){
@@ -64,40 +57,19 @@ function renderSummary(rows){
   `;
 }
 
-getDoc(ref).then(snap=>{
-  if(!snap.exists()) return;
+document.getElementById("printTitle").innerText =
+  `收银记录｜${payload.start} ～ ${payload.end}｜${payload.pay}｜${rows.length}笔`;
 
-  const state = snap.data();
+document.getElementById("printRows").innerHTML =
+  rows.map(r=>`
+    <tr>
+      <td>${r.time || ""}</td>
+      <td>${r.tableName || ""}</td>
+      <td>${r.customerName || ""}${r.phoneLast4 ? "（" + r.phoneLast4 + "）" : ""}</td>
+      <td>${r.packageName || ""}</td>
+      <td>¥${toJPY(r).toLocaleString()}</td>
+      <td>${r.pay || "未记录"}</td>
+    </tr>
+  `).join("");
 
-  const rows = (state.records || []).filter(r=>{
-    const ts = getRecordTime(r);
-    const d = new Date(ts);
-
-    if(isNaN(d.getTime())) return false;
-
-    const key = dateKey(d.getTime());
-
-    if(start && key < start) return false;
-    if(end && key > end) return false;
-    if(pay && r.pay !== pay) return false;
-
-    return true;
-  });
-
-  document.getElementById("printTitle").innerText =
-    `收银记录｜${start || "全部"} ～ ${end || "全部"}｜${pay || "全部支付方式"}｜${rows.length}笔`;
-
-  document.getElementById("printRows").innerHTML =
-    rows.map(r=>`
-      <tr>
-        <td>${r.time || ""}</td>
-        <td>${r.tableName || ""}</td>
-        <td>${r.customerName || ""}${r.phoneLast4 ? "（" + r.phoneLast4 + "）" : ""}</td>
-        <td>${r.packageName || ""}</td>
-        <td>¥${toJPY(r).toLocaleString()}</td>
-        <td>${r.pay || "未记录"}</td>
-      </tr>
-    `).join("");
-
-  renderSummary(rows);
-});
+renderSummary(rows);

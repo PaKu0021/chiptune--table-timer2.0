@@ -349,29 +349,34 @@ function exportCashierCSV(){
   a.click();
 }
 
-
-
-
-
-
-
-
-  
-
 function printCashier(){
+  const rows = getFilteredRecords();
 
-  const start =
-    document.getElementById("startDate").value;
+  const lightRows = rows.map(r=>({
+    time:r.time || "",
+    tableName:r.tableName || "",
+    customerName:r.customerName || "",
+    phoneLast4:r.phoneLast4 || "",
+    packageName:r.packageName || "",
+    pay:r.pay || "未记录",
+    currency:r.currency || "",
+    totalJPY:r.totalJPY || r.jpy || 0,
+    totalRMB:r.totalRMB || r.rmb || 0
+  }));
 
-  const end =
-    document.getElementById("endDate").value;
+  const payload = {
+    start: document.getElementById("startDate").value || "全部",
+    end: document.getElementById("endDate").value || "全部",
+    pay: document.getElementById("payFilter").value || "全部支付方式",
+    rows: lightRows
+  };
 
-  const pay =
-    document.getElementById("payFilter").value;
+  sessionStorage.setItem("cashier_print_data", JSON.stringify(payload));
 
-  location.href =
-    `./cashier-print.html?start=${start}&end=${end}&pay=${pay}`;
+  location.href = "./cashier-print.html";
 }
+
+
 
 onSnapshot(ref, snap=>{
   if(!snap.exists()) return;

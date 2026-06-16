@@ -95,10 +95,9 @@ getDoc(ref).then(snap=>{
   document.getElementById("printGrid").innerHTML = html;
 });
 
+
 function doPrint(){
-  setTimeout(()=>{
-    window.print();
-  },300);
+  window.print();
 }
 
 window.doPrint = doPrint;
