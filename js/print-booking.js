@@ -1,5 +1,5 @@
 import { db } from "./firebase.js";
-import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const ref = doc(db, "shop", "main");
 
@@ -39,7 +39,7 @@ function getBusinessHours(state){
   };
 }
 
-onSnapshot(ref, snap=>{
+getDoc(ref).then(snap=>{
   if(!snap.exists()) return;
 
   const state = snap.data();
