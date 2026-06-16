@@ -274,11 +274,10 @@ function renderSummary(rows){
 function exportCashierCSV(){
   const rows = getFilteredRecords();
 
-
   const headers = [
-  "时间","桌位","客人姓名","手机尾号","类型","套餐",
-  "原价日元","实收日元","人民币","支付方式","币种","抹零","收款截图"
-];
+    "时间","桌位","客人姓名","手机尾号","类型","套餐",
+    "原价日元","实收日元","人民币","支付方式","币种","抹零","收款截图"
+  ];
 
   const body = rows.map(r=>[
     r.time || "",
@@ -292,11 +291,47 @@ function exportCashierCSV(){
     toRMB(r),
     r.pay || "",
     r.currency || "",
-    r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || ""),    
+    r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || ""),
     r.receiptImage ? "已上传" : "未上传"
   ]);
 
-  const csv = [headers, ...body]
+  const pays = {
+    "现金":0,
+    "PayPay":0,
+    "微信":0,
+    "支付宝":0,
+    "未记录":0
+  };
+
+  let totalJPY = 0;
+  let totalRMB = 0;
+
+  rows.forEach(r=>{
+    const pay = r.pay || "未记录";
+    const jpy = toJPY(r);
+    const rmb = toRMB(r);
+
+    if(!pays[pay]) pays[pay] = 0;
+
+    pays[pay] += jpy;
+    totalJPY += jpy;
+    totalRMB += rmb;
+  });
+
+  const summaryRows = [
+    [],
+    ["支付方式总计"],
+    ["支付方式","金额（日元）"],
+    ...Object.keys(pays).map(k=>[k, Math.floor(pays[k])]),
+    ["日元总计", Math.floor(totalJPY)],
+    ["人民币参考", Math.floor(totalRMB)]
+  ];
+
+  const csv = [
+    headers,
+    ...body,
+    ...summaryRows
+  ]
     .map(row=>row.map(v=>`"${String(v ?? "").replace(/"/g,'""')}"`).join(","))
     .join("\n");
 
@@ -304,11 +339,24 @@ function exportCashierCSV(){
     type:"text/csv;charset=utf-8"
   });
 
+  const start = document.getElementById("startDate").value || "全部";
+  const end = document.getElementById("endDate").value || "全部";
+  const pay = document.getElementById("payFilter").value || "全部支付方式";
+
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `收银记录_${getTodayDate()}.csv`;
+  a.download = `收银记录_${start}_${end}_${pay}.csv`;
   a.click();
 }
+
+
+
+
+
+
+
+
+  
 
 function printCashier(){
 
