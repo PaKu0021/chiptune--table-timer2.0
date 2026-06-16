@@ -776,3 +776,89 @@ button.selected-pop{
     padding:2px;
   }
 }
+
+.past-time-cell{
+  background:#e5e1d8 !important;
+  color:#aaa !important;
+}
+
+.past-time-cell + .slot-cell,
+.slot-cell.past-slot{
+  background:#eeeeee !important;
+  color:#aaa !important;
+}
+
+.custom-calendar{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:10px;
+  margin:16px 0;
+}
+
+.cal-week{
+  text-align:center;
+  font-weight:900;
+  color:#8a8174;
+  padding:8px 0;
+}
+
+.cal-day{
+  height:54px;
+  border:1px solid #e6dccb;
+  border-radius:16px;
+  background:#fff;
+  font-size:18px;
+  font-weight:900;
+  color:#2b6fc9;
+  position:relative;
+}
+
+.cal-day.today{
+  box-shadow:0 0 0 3px rgba(242,201,76,.45);
+}
+
+.cal-day.selected{
+  background:#f2c94c !important;
+  border-color:#d8a900 !important;
+  color:#332d24 !important;
+}
+
+.cal-day.has-booking{
+  border:2px solid #54a66b;
+}
+
+.booking-dot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#54a66b;
+  position:absolute;
+  bottom:6px;
+  left:50%;
+  transform:translateX(-50%);
+}
+
+.calendar-head{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:18px;
+  margin:8px 0 14px;
+}
+
+.calendar-head strong{
+  min-width:140px;
+  text-align:center;
+  font-size:22px;
+}
+
+@media(min-width:768px){
+  #datePickerModalBg .modal{
+    width:720px;
+    left:50%;
+    right:auto;
+    bottom:50%;
+    transform:translate(-50%,50%);
+    border-radius:28px;
+  }
+}

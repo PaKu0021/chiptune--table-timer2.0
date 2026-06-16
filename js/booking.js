@@ -214,8 +214,7 @@ function renderBookingGrid(){
 
 return `
   <div
-    class="slot-cell ${busy ? "disabled-slot" : ""} ${used ? "used-slot" : ""}"
-
+      class="slot-cell ${isPastTimeSlot(rowIndex) ? "past-slot" : ""} ${busy ? "disabled-slot" : ""} ${used ? "used-slot" : ""}"
       data-table="${tableIndex}"
       data-row="${rowIndex}"
 
@@ -595,15 +594,19 @@ function renderCustomCalendar(){
     const hasBooking = bookingDates.has(dateStr);
     const selected = selectedCalendarDate === dateStr;
 
-    html += `
-      <button
-        class="cal-day ${hasBooking ? "has-booking" : "no-booking"} ${selected ? "selected" : ""}"
-        onclick="selectCalendarDate('${dateStr}')"
-      >
-        ${d}
-        ${hasBooking ? `<span class="booking-dot"></span>` : ""}
-      </button>
-    `;
+const today = dateStr === getTodayDate();
+
+html += `
+  <button
+    class="cal-day ${hasBooking ? "has-booking" : ""} ${selected ? "selected" : ""} ${today ? "today" : ""}"
+    onclick="selectCalendarDate('${dateStr}')"
+  >
+    ${d}
+    ${hasBooking ? `<span class="booking-dot"></span>` : ""}
+  </button>
+`;
+
+
   }
 
   box.innerHTML = html;
