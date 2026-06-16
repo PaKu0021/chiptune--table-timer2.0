@@ -99,7 +99,26 @@ function getSlots(){
     slots.push(`${String(h).padStart(2,"0")}:30`);
   }
 
+  slots.push(`${String(close).padStart(2,"0")}:00`);
+
   return slots;
+}
+
+
+
+function timeToMinutes(time){
+  const [h,m] = String(time || "00:00").split(":").map(Number);
+  return h * 60 + m;
+}
+
+function findPackageIndexByDuration(startTime,endTime){
+  const minutes = timeToMinutes(endTime) - timeToMinutes(startTime);
+
+  const index = (state.packages || []).findIndex(p=>{
+    return Number(p.minutes || 0) === minutes;
+  });
+
+  return index >= 0 ? index : 0;
 }
 
 function isTableBusyAtSlot(t, rowIndex){
@@ -203,7 +222,7 @@ function renderBookingGrid(){
   `;
 }).join("")}
 
-      ${slots.map((time,rowIndex)=>`
+${slots.slice(0,-1).map((time,rowIndex)=>`
         <div class="time-cell ${isPastTimeSlot(rowIndex) ? "past-time-cell" : ""}">
           ${time}
         </div>
@@ -492,6 +511,9 @@ function confirmGridBooking(){
   const slots = getSlots();
   const start = Math.min(selection.startRow, selection.endRow);
   const end = Math.max(selection.startRow, selection.endRow) + 1;
+  const startTime = slots[start];
+  const endTime = slots[end] || `${getBusinessHours().close}:00`;
+  const packageIndex = findPackageIndexByDuration(startTime,endTime);
 
   const booking = {
     id: Date.now(),
@@ -506,8 +528,9 @@ function confirmGridBooking(){
   },
   (_,idx)=>Math.min(selection.startTableIndex, selection.endTableIndex) + idx
 ),
-    startTime: slots[start],
-    endTime: slots[end] || `${getBusinessHours().close}:00`,
+    startTime,
+    endTime,
+    packageIndex,
     checkedIn:false,
     checkInTime:null,
     checkInTimeText:"",
@@ -668,11 +691,16 @@ function drawExistingBookings(){
       .map(Number);
 
     const startRow = slots.indexOf(b.startTime);
-    const endRow = slots.indexOf(b.endTime);
 
-    if(startRow < 0) return;
+    let endRow = slots.indexOf(b.endTime);
 
-    const realEndRow = endRow > startRow ? endRow : startRow + 1;
+if(startRow < 0) return;
+
+if(endRow < 0 && b.endTime === `${getBusinessHours().close}:00`){
+  endRow = slots.length;
+}
+
+const realEndRow = endRow > startRow ? endRow : startRow + 1;
 
     tableIndexes.forEach(tableIndex=>{
       for(let rowIndex = startRow; rowIndex < realEndRow; rowIndex++){
