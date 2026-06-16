@@ -8,6 +8,11 @@
 
 <body class="print-page">
 
+<div class="print-toolbar no-print">
+  <button onclick="location.href='./cashier.html'">← 返回收银记录</button>
+  <button onclick="window.print()">打印</button>
+</div>
+
 <h2 id="printTitle">收银记录</h2>
 
 <table class="record-table">
@@ -21,11 +26,12 @@
       <th>支付方式</th>
     </tr>
   </thead>
-
   <tbody id="printRows"></tbody>
 </table>
 
-<script type="module" src="./js/cashier-print.js"></script>
+<h2>支付方式总计</h2>
+<div id="printSummary"></div>
 
+<script type="module" src="./js/cashier-print.js"></script>
 </body>
 </html>
