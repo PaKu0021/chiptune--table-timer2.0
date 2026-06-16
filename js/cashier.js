@@ -32,15 +32,31 @@ function viewReceipt(timestamp){
     return;
   }
 
-  const win = window.open("");
-  win.document.write(`
-    <html>
-      <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;">
-        <img src="${record.receiptImage}" style="max-width:100%;max-height:100vh;">
-      </body>
-    </html>
-  `);
+  let bg = document.getElementById("receiptPreviewBg");
+
+  if(!bg){
+    bg = document.createElement("div");
+    bg.id = "receiptPreviewBg";
+    bg.className = "modal-bg";
+    bg.innerHTML = `
+      <div class="modal">
+        <h2>收款截图</h2>
+        <img id="receiptPreviewImg" style="width:100%;border-radius:16px;margin:12px 0;">
+        <button class="btn-ghost full" onclick="closeReceiptPreview()">关闭</button>
+      </div>
+    `;
+    document.body.appendChild(bg);
+  }
+
+  document.getElementById("receiptPreviewImg").src = record.receiptImage;
+  bg.style.display = "block";
 }
+
+function closeReceiptPreview(){
+  document.getElementById("receiptPreviewBg").style.display = "none";
+}
+
+    
 
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
@@ -200,8 +216,14 @@ function renderCashier(){
     r.pay === "现金"
       ? "现金无需截图"
       : `
-        ${r.receiptImage ? `<button onclick="viewReceipt(${r.timestamp})">查看</button>` : ""}
-        <input
+        ${r.receiptImage ? `
+  <img
+    src="${r.receiptImage}"
+    onclick="viewReceipt(${r.timestamp})"
+    style="width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid #e6dccb;"
+  >
+` : ""}
+      <input
           type="file"
           accept="image/*"
           onchange="uploadReceipt(${r.timestamp}, this.files[0])"
@@ -406,3 +428,4 @@ window.exportCashierCSV = exportCashierCSV;
 window.printCashier = printCashier;
 window.uploadReceipt = uploadReceipt;
 window.viewReceipt = viewReceipt;
+window.closeReceiptPreview = closeReceiptPreview;
