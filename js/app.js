@@ -21,57 +21,9 @@ let sortDirection = "asc";
 let filterPanelOpen = true;
 
 function newTable(i){
-  return {
-    name: i + "号桌",
-    start: null,
-    extra: 0,
-    packageIndex: 0,
-    type: "",
-    pay: "",
-    payTiming: "prepaid",
-    paidJPY: 0,
-    paidRMB: 0,
-    paidAt: null,
-    currency: "日元",
-    customer: { name:"", phoneLast4:"" },
-    alerted: false,
-    alerting: false,
-    pausedAt: null
-  };
-}  
-
-function resetTable(name){
-  return {
-    name,
-
-    start: null,
-    extra: 0,
-
-    packageIndex: 0,
-
-    type: "",
-    pay: "",
-
-    payTiming: "prepaid",
-    paidJPY: 0,
-    paidRMB: 0,
-    paidAt: null,
-
-    currency: "日元",
-
-    customer:{
-      name:"",
-      phoneLast4:""
-    },
-
-    alerted:false,
-    alerting:false,
-
-    pausedAt:null,
-
-    lastAction:""
-  };
-}
+  return resetTable(i + "号桌");
+}   
+ 
 
 const defaultState = {
   packages:[
@@ -353,8 +305,8 @@ ${t.start ? `
         已收金额：¥${paidJPY.toLocaleString()}<br>
         当前应收：¥${originalJPY.toLocaleString()}<br>
         需收/补收：¥${dueJPY.toLocaleString()}<br>
-        人民币参考：¥${getRMB(dueJPY).toLocaleString()}
-        抹零参考：¥${roundedJPY.toLocaleString()}<br>
+        人民币参考：¥${getRMB(dueJPY).toLocaleString()}<br>
+        抹零参考：¥${roundJPY(dueJPY).toLocaleString()}<br>
       </div>
 
       <div class="row">
@@ -796,9 +748,9 @@ t.currency = currency;
   }
 
   stopAlertLoop(checkoutIndex);
-
   const originalJPY = getOriginalJPY(t);
-  const finalJPY = useRound ? roundJPY(originalJPY) : originalJPY;
+  const dueJPY = getDueJPY(t);
+  const finalJPY = useRound ? roundJPY(dueJPY) : dueJPY;
   const totalRMB = getRMB(finalJPY);
   const now = new Date();
 
