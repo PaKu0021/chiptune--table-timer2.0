@@ -925,6 +925,12 @@ function closeBatchStart(){
 
 function confirmBatchStart(){
   const packageIndex = Number(document.getElementById("batchPackageSelect").value);
+  const pay = document.getElementById("batchPaySelect").value;
+
+  if(!pay){
+    alert("请选择付款方式");
+    return;
+  }
 
   const indexes = [...document.querySelectorAll(".batch-table-check:checked")]
     .map(el=>Number(el.value));
@@ -939,6 +945,7 @@ function confirmBatchStart(){
     if(!t || t.start) return;
 
     t.packageIndex = packageIndex;
+    t.pay = pay;
     t.start = Date.now();
     t.pausedAt = null;
     t.alerted = false;
@@ -950,6 +957,11 @@ function confirmBatchStart(){
   closeBatchStart();
   render();
 }
+
+
+
+
+
 
 function openBatchCheckout(){
   const box = document.getElementById("batchCheckoutTableChecks");
