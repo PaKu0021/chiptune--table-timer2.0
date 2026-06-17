@@ -2,19 +2,10 @@
 import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 /*import { formatTime } from "./common.js";*/
-
+import { resetTable, formatTime } from "./common.js";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
-function formatTime(ms){
-  ms = Math.max(0, ms);
-  const totalSeconds = Math.floor(ms / 1000);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-
-  return `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-}
 
 
 let state = null;
@@ -37,11 +28,48 @@ function newTable(i){
     packageIndex: 0,
     type: "",
     pay: "",
+    payTiming: "prepaid",
+    paidJPY: 0,
+    paidRMB: 0,
+    paidAt: null,
     currency: "日元",
     customer: { name:"", phoneLast4:"" },
     alerted: false,
     alerting: false,
     pausedAt: null
+  };
+}  
+
+function resetTable(name){
+  return {
+    name,
+
+    start: null,
+    extra: 0,
+
+    packageIndex: 0,
+
+    type: "",
+    pay: "",
+
+    payTiming: "prepaid",
+    paidJPY: 0,
+    paidRMB: 0,
+    paidAt: null,
+
+    currency: "日元",
+
+    customer:{
+      name:"",
+      phoneLast4:""
+    },
+
+    alerted:false,
+    alerting:false,
+
+    pausedAt:null,
+
+    lastAction:""
   };
 }
 
@@ -77,6 +105,10 @@ onSnapshot(ref, snap=>{
   if(t.extra === undefined) t.extra = 0;
   if(t.pausedAt === undefined) t.pausedAt = null;
   if(t.pay === undefined) t.pay = "";
+  if(t.payTiming === undefined) t.payTiming = "prepaid";
+  if(t.paidJPY === undefined) t.paidJPY = 0;
+  if(t.paidRMB === undefined) t.paidRMB = 0;
+  if(t.paidAt === undefined) t.paidAt = null;
   if(t.type === undefined) t.type = "";
   if(t.lastAction === undefined) t.lastAction = "";
 });
@@ -173,6 +205,10 @@ function roundJPY(jpy){
 
 function getRMB(jpy){
   return Math.floor(jpy * RATE);
+}
+
+function getDueJPY(t){
+  return Math.max(0, getOriginalJPY(t) - Number(t.paidJPY || 0));
 }
 
 function getStatus(t){
@@ -284,6 +320,8 @@ filteredTables.forEach(({t,i})=>{
 
     const originalJPY = getOriginalJPY(t);
     const roundedJPY = roundJPY(originalJPY);
+    const paidJPY = Number(t.paidJPY || 0);
+    const dueJPY = getDueJPY(t);
 
     const div = document.createElement("div");
     div.className = "card " + status;
@@ -311,9 +349,12 @@ ${t.start ? `
       <div class="info">
         类型：${t.type || "-"}<br>
         客人：${t.customer.name || "-"} ${t.customer.phoneLast4 || ""}<br>
-        当前日元：¥${originalJPY.toLocaleString()}<br>
+        收款模式：${t.payTiming === "postpaid" ? "后付款" : "先付款"}<br>
+        已收金额：¥${paidJPY.toLocaleString()}<br>
+        当前应收：¥${originalJPY.toLocaleString()}<br>
+        需收/补收：¥${dueJPY.toLocaleString()}<br>
+        人民币参考：¥${getRMB(dueJPY).toLocaleString()}
         抹零参考：¥${roundedJPY.toLocaleString()}<br>
-        人民币参考：¥${getRMB(originalJPY).toLocaleString()}
       </div>
 
       <div class="row">
@@ -339,7 +380,11 @@ ${t.start ? `
           +1小时 → ¥${calcPriceByTotalMinutes((Number(p.minutes || 0) + Math.floor(Number(t.extra || 0) / 60000) + 60)).toLocaleString()}
         </button>
       `}
-
+      
+      <select onchange="setPayTiming(${i},this.value)" ${t.start ? "disabled" : ""}>
+       <option value="prepaid" ${t.payTiming==="prepaid"?"selected":""}>先付款</option>
+       <option value="postpaid" ${t.payTiming==="postpaid"?"selected":""}>后付款</option>
+      </select>
       <select onchange="setPay(${i},this.value)">
         <option value="">付款方式</option>
         <option value="现金" ${t.pay==="现金"?"selected":""}>现金</option>
@@ -542,6 +587,46 @@ function start(i){
   stopAlertLoop(i);
 
   t.start = startTime;
+  const p = getPackage(t);
+
+t.payTiming = t.payTiming || "prepaid";
+
+if(t.payTiming === "prepaid"){
+  if(!t.pay){
+    alert("先付款模式必须先选择付款方式");
+    return;
+  }
+
+  t.paidJPY = Number(p.price || 0);
+  t.paidRMB = getRMB(t.paidJPY);
+  t.paidAt = Date.now();
+
+  state.records.push({
+    timestamp: Date.now(),
+    time: new Date().toLocaleString(),
+    tableName: t.name,
+    customerName: t.customer?.name || "",
+    phoneLast4: t.customer?.phoneLast4 || "",
+    customerType: t.type || "walkin",
+    packageName: p.name,
+    packageMinutes: p.unlimited ? "不限时" : p.minutes,
+    packagePrice: p.price,
+    extraMinutes: 0,
+    extensionAmount: 0,
+    originalJPY: Number(p.price || 0),
+    totalJPY: Number(p.price || 0),
+    totalRMB: getRMB(Number(p.price || 0)),
+    pay: t.pay,
+    currency: t.currency || "日元",
+    roundRule: "不抹零",
+    recordType: "prepaid",
+    checkoutMethod: "先付款"
+  });
+}else{
+  t.paidJPY = 0;
+  t.paidRMB = 0;
+  t.paidAt = null;
+}
   t.pausedAt = null;
   t.alerted = false;
   t.alerting = false;
@@ -612,6 +697,11 @@ function addHour(i){
   save();
 }
 
+function setPayTiming(i,v){
+  state.tables[i].payTiming = v;
+  save();
+}
+
 function setPay(i,v){
   updateCustomer(i);
   state.tables[i].pay = v;
@@ -654,7 +744,8 @@ function updateCheckout(){
   const p = getPackage(t);
 
   const originalJPY = getOriginalJPY(t);
-  const finalJPY = useRound ? roundJPY(originalJPY) : originalJPY;
+  const dueJPY = getDueJPY(t);
+  const finalJPY = useRound ? roundJPY(dueJPY) : dueJPY;
   const totalRMB = getRMB(finalJPY);
 
   document.getElementById("checkoutInfo").innerHTML = `
@@ -731,23 +822,13 @@ t.currency = currency;
     totalRMB,
     pay: t.pay,
     currency: t.currency || "日元",
-    roundRule: useRound ? "500抹零" : "不抹零"
+    roundRule: useRound ? "500抹零" : "不抹零",
+
+    recordType: t.payTiming === "postpaid" ? "postpaid" : "additional",
+    checkoutMethod: t.payTiming === "postpaid" ? "后付款一次性结账" : "追加补收"
   });
 
-  state.tables[checkoutIndex] = {
-    name: t.name,
-    start: null,
-    extra: 0,
-    packageIndex: 0,
-    type: "",
-    pay: "",
-    currency: "日元",
-    customer:{ name:"", phoneLast4:"" },
-    alerted:false,
-    alerting:false,
-    pausedAt:null
-  };
-
+state.tables[checkoutIndex] = resetTable(t.name);
   save();
   closeCheckout();
 }
@@ -1112,21 +1193,8 @@ function confirmBatchCheckout(){
       checkoutMethod: "批量结账"      
     });
 
-    state.tables[i] = {
-      name: t.name,
-      start: null,
-      extra: 0,
-      packageIndex: 0,
-      type: "",
-      pay: "",
-      currency: "日元",
-      customer:{ name:"", phoneLast4:"" },
-      alerted:false,
-      alerting:false,
-      pausedAt:null,
-      lastAction:""
-    };
-  });
+state.tables[i] = resetTable(t.name);
+    });
 
   save();
   closeBatchCheckout();
@@ -1191,3 +1259,4 @@ window.updateCustomer = updateCustomer;
 window.toggleType = toggleType;
 window.roundBatchAmount = roundBatchAmount;
 window.render = render;
+window.setPayTiming = setPayTiming;

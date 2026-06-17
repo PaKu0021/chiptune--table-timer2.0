@@ -1,5 +1,7 @@
 import { db } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { resetTable } from "./common.js";
+
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -928,20 +930,8 @@ function saveBookingDetail(){
       type:"booking"
     };
 
-    state.tables[oldTableIndex] = {
-      name: oldTable.name,
-      start: null,
-      extra: 0,
-      packageIndex: 0,
-      type: "",
-      pay: "",
-      currency: "日元",
-      customer:{ name:"", phoneLast4:"" },
-      alerted:false,
-      alerting:false,
-      pausedAt:null,
-      lastAction:""
-    };
+state.tables[oldTableIndex] = resetTable(oldTable.name);
+
   }
 
   if(b.checkedIn && newTableIndex === oldTableIndex){
