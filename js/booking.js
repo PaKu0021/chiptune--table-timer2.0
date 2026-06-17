@@ -299,7 +299,6 @@ return `
 `}
 
     >
-  ${statusInfo ? `<span class="slot-time-label">${statusInfo.text}</span>` : ""}
 </div>
   `;
 }).join("")}
@@ -308,6 +307,7 @@ return `
   `;
 
   drawExistingBookings();
+  drawRunningTables();
   updateBookingLockUI();
 
 }
@@ -918,7 +918,55 @@ const realEndRow = endRow > startRow ? endRow : startRow + 1;
   });
 }
 
+function drawRunningTables(){
 
+  document.querySelectorAll(".running-block").forEach(el=>{
+    el.remove();
+  });
+
+  state.tables.forEach((t,tableIndex)=>{
+
+    if(!t.start) return;
+
+    const slots = getSlots();
+
+    let startRow = -1;
+    let endRow = -1;
+
+    for(let row=0; row<slots.length-1; row++){
+
+      if(isTableBusyAtSlot(t,row)){
+
+        if(startRow === -1){
+          startRow = row;
+        }
+
+        endRow = row;
+      }
+    }
+
+    if(startRow === -1) return;
+
+    const firstCell = document.querySelector(
+      `.slot-cell[data-table="${tableIndex}"][data-row="${startRow}"]`
+    );
+
+    if(!firstCell) return;
+
+    const status = getTableStatusText(t);
+
+    firstCell.innerHTML = `
+      <div class="running-block ${status.className}">
+        <div class="running-name">
+          ${t.customer?.name || t.name}
+        </div>
+        <div class="running-time">
+          ${status.text}
+        </div>
+      </div>
+    `;
+  });
+}
 
 
 function getBookingById(id){
