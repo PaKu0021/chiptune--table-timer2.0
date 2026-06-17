@@ -121,6 +121,7 @@ function findPackageIndexByDuration(startTime,endTime){
   return index >= 0 ? index : 0;
 }
 
+
 function isTableBusyAtSlot(t, rowIndex){
   if(!t.start) return false;
 
@@ -137,16 +138,30 @@ function isTableBusyAtSlot(t, rowIndex){
   const slotEnd = slotStart + SLOT_MINUTES * 60000;
 
   const p = state.packages?.[t.packageIndex] || {};
-  const baseMinutes = Number(p.minutes || 0);
-  const extraMinutes = Number(t.extra || 0) / 60000;
-
-  if(baseMinutes === 0) return false;
-
   const busyStart = Number(t.start);
-  const busyEnd = busyStart + (baseMinutes + extraMinutes) * 60000;
+
+  let busyEnd;
+
+  if(p.unlimited || Number(p.minutes || 0) === 0){
+    const closeDate = new Date(currentBookingDate);
+    closeDate.setHours(getBusinessHours().close, 0, 0, 0);
+    busyEnd = closeDate.getTime();
+  }else{
+    const baseMinutes = Number(p.minutes || 0);
+    const extraMinutes = Number(t.extra || 0) / 60000;
+    busyEnd = busyStart + (baseMinutes + extraMinutes) * 60000;
+  }
 
   return slotStart < busyEnd && slotEnd > busyStart;
 }
+
+
+
+
+
+
+
+
 
 function isTableUsedAtSlot(t,rowIndex){
   if(!t.start) return false;
