@@ -158,12 +158,48 @@ function isTableBusyAtSlot(t, rowIndex){
   return slotStart < busyEnd && slotEnd > busyStart;
 }
 
+function formatShortTime(ms){
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  return h > 0 ? `${h}:${String(m).padStart(2,"0")}` : `${m}分`;
+}
 
+function getTableStatusText(t){
+  if(!t.start) return "";
 
+  const p = state.packages?.[t.packageIndex] || {};
+  const elapsed = Date.now() - Number(t.start);
 
+  if(p.unlimited || Number(p.minutes || 0) === 0){
+    return {
+      text:`已用 ${formatShortTime(elapsed)}`,
+      className:"slot-running"
+    };
+  }
 
+  const limit = Number(p.minutes || 0) * 60000 + Number(t.extra || 0);
+  const remain = limit - elapsed;
 
+  if(remain <= 0){
+    return {
+      text:`超时 ${formatShortTime(Math.abs(remain))}`,
+      className:"slot-overtime"
+    };
+  }
 
+  if(remain <= 10 * 60000){
+    return {
+      text:`剩 ${formatShortTime(remain)}`,
+      className:"slot-warning"
+    };
+  }
+
+  return {
+    text:`剩 ${formatShortTime(remain)}`,
+    className:"slot-normal"
+  };
+}
 
 
 function isTableUsedAtSlot(t,rowIndex){
@@ -248,10 +284,10 @@ ${slots.slice(0,-1).map((time,rowIndex)=>`
 
           const busy = isTableBusyAtSlot(t,rowIndex);
           const used = isTableUsedAtSlot(t,rowIndex);
-
+          const statusInfo = busy ? getTableStatusText(t) : null;
 return `
   <div
-      class="slot-cell ${isPastTimeSlot(rowIndex) ? "past-slot" : ""} ${busy ? "disabled-slot" : ""} ${used ? "used-slot" : ""}"
+      class="slot-cell ${isPastTimeSlot(rowIndex) ? "past-slot" : ""} ${busy ? "disabled-slot" : ""} ${used ? "used-slot" : ""} ${statusInfo?.className || ""}"
       data-table="${tableIndex}"
       data-row="${rowIndex}"
 
@@ -262,8 +298,9 @@ return `
   onpointercancel="endSelectSlot(event)"
 `}
 
-
-    ></div>
+    >
+  ${statusInfo ? `<span class="slot-time-label">${statusInfo.text}</span>` : ""}
+</div>
   `;
 }).join("")}
 `).join("")}

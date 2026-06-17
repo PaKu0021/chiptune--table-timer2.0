@@ -782,11 +782,7 @@ button.selected-pop{
   color:#aaa !important;
 }
 
-.past-time-cell + .slot-cell,
-.slot-cell.past-slot{
-  background:#eeeeee !important;
-  color:#aaa !important;
-}
+
 
 .custom-calendar{
   display:grid;
@@ -861,4 +857,58 @@ button.selected-pop{
     transform:translate(-50%,50%);
     border-radius:28px;
   }
+}
+
+/* 过去时间：用半透明灰色蒙层，不直接覆盖原本颜色 */
+.slot-cell.past-slot{
+  position:relative;
+  overflow:hidden;
+}
+
+.slot-cell.past-slot::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:rgba(120,120,120,0.25);
+  pointer-events:none;
+  z-index:1;
+}
+
+/* 确保格子里的预约名字显示在蒙层上面 */
+.slot-cell.past-slot > *{
+  position:relative;
+  z-index:2;
+}
+.slot-cell{
+  position:relative;
+}
+
+.slot-time-label{
+  position:absolute;
+  left:4px;
+  top:4px;
+  z-index:3;
+  font-size:11px;
+  font-weight:900;
+  line-height:1.1;
+  padding:2px 4px;
+  border-radius:6px;
+  background:rgba(255,255,255,.72);
+  color:#332d24;
+}
+
+.slot-normal .slot-time-label{
+  color:#2b6fc9;
+}
+
+.slot-running .slot-time-label{
+  color:#168a45;
+}
+
+.slot-warning .slot-time-label{
+  color:#ff9800;
+}
+
+.slot-overtime .slot-time-label{
+  color:#e85d5d;
 }
