@@ -30,6 +30,8 @@ export function resetTable(name){
 
     packageIndex:0,
 
+    recordid:null,
+
     type:"",
     pay:"",
 
