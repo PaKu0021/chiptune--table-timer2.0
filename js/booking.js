@@ -11,6 +11,7 @@ let currentBookingDate = getTodayDate();
 let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = currentBookingDate;
+let bookingListOpen = false;
 
 const BOOKING_COLORS = [
   "#B7E4C7",
@@ -308,15 +309,34 @@ function toggleBookingLock(){
 
 function renderList(){
   const box = document.getElementById("list");
+  const summary = document.getElementById("bookingSummary");
+  const btn = document.getElementById("bookingListToggleBtn");
+
   if(!box) return;
 
   const bookings = (state.bookings || [])
-    .filter(b=>{
-      return (b.date || getTodayDate()) === currentBookingDate;
-    })
-    .sort((a,b)=>{
-      return String(a.startTime || "99:99").localeCompare(String(b.startTime || "99:99"));
-    });
+    .filter(b=>(b.date || getTodayDate()) === currentBookingDate)
+    .sort((a,b)=>String(a.startTime || "99:99").localeCompare(String(b.startTime || "99:99")));
+
+  const checked = bookings.filter(b=>b.checkedIn).length;
+  const waiting = bookings.filter(b=>!b.checkedIn).length;
+
+  const tableTotal = bookings.reduce((sum,b)=>{
+    return sum + (b.tableIndexes || [b.tableIndex])
+      .filter(v=>v !== undefined && v !== null)
+      .length;
+  },0);
+
+  if(summary){
+    summary.innerHTML =
+      `未到店：${waiting}组｜已到店：${checked}组｜预约桌数：${tableTotal}桌`;
+  }
+
+  if(btn){
+    btn.innerText = bookingListOpen ? "收起" : "展开";
+  }
+
+  box.style.display = bookingListOpen ? "block" : "none";
 
   if(bookings.length === 0){
     box.innerHTML = `<p style="color:#8a8174;">这一天暂无预约</p>`;
@@ -330,11 +350,8 @@ function renderList(){
       .filter(Boolean)
       .join("、");
 
-    const statusText = b.checkedIn ? "已到店" : "未到店";
-    const statusClass = b.checkedIn ? "booking-list-done" : "booking-list-wait";
-
     return `
-      <div class="booking-list-item ${statusClass}" onclick="${bookingLocked ? "" : `openBookingAction(${b.id})`}">
+      <div class="booking-list-item ${b.checkedIn ? "booking-list-done" : "booking-list-wait"}">
         <div class="booking-list-time">
           ${b.startTime || "-"} - ${b.endTime || "-"}
         </div>
@@ -345,13 +362,35 @@ function renderList(){
         </div>
 
         <div class="booking-list-sub">
-          桌位：${tables || "-"}｜${statusText}
+          桌位：${tables || "-"}｜${b.checkedIn ? "已到店" : "未到店"}
         </div>
+
+        ${bookingLocked ? "" : `
+          <div class="action-row" style="margin-top:10px;">
+            <button class="btn-success" onclick="checkInBookingById(${b.id})">到店开始</button>
+            <button class="btn-main" onclick="openBookingAction(${b.id})">修改</button>
+            <button class="btn-danger" onclick="cancelBookingById(${b.id})">取消</button>
+          </div>
+        `}
       </div>
     `;
   }).join("");
 }
 
+function toggleBookingList(){
+  bookingListOpen = !bookingListOpen;
+  renderList();
+}
+
+function checkInBookingById(id){
+  activeBookingId = id;
+  checkInBooking();
+}
+
+function cancelBookingById(id){
+  activeBookingId = id;
+  cancelBooking();
+}
 
 function startSelectSlot(e,tableIndex,rowIndex){
   if(bookingLocked) return;
@@ -1073,3 +1112,6 @@ window.toggleBookingLock = toggleBookingLock;
 window.changeCalendarMonth = changeCalendarMonth;
 window.selectCalendarDate = selectCalendarDate;
 window.toggleModalType = toggleModalType;
+window.toggleBookingList = toggleBookingList;
+window.checkInBookingById = checkInBookingById;
+window.cancelBookingById = cancelBookingById;

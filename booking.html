@@ -43,10 +43,15 @@
 <div id="bookingGrid" class="booking-grid-wrap locked-grid"></div>
 </div>
 
-  <div class="panel">
-    <h2>预约列表</h2>
-    <div id="list"></div>
+<div class="panel">
+  <div class="section-toggle" onclick="toggleBookingList()">
+    <h2>今日预约概览</h2>
+    <button id="bookingListToggleBtn" class="btn-ghost" type="button">展开</button>
   </div>
+
+  <div id="bookingSummary" style="margin-top:12px;font-weight:800;"></div>
+  <div id="list" style="display:none;margin-top:12px;"></div>
+</div>
 
 </div>
 
