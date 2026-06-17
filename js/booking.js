@@ -421,6 +421,12 @@ function endSelectSlot(e){
 
   const tip = document.getElementById("selectionTip");
   if(tip) tip.style.display = "none";
+  fillModalPackages();
+
+const modalType = document.getElementById("modalType");
+if(modalType) modalType.value = "booking";
+
+toggleModalType();
 
   document.getElementById("bookingModalBg").style.display = "block";
 }
@@ -508,26 +514,100 @@ function highlightSelection(){
   updateSelectionTip();
 }
 
+function toggleModalType(){
+  const type = document.getElementById("modalType")?.value || "booking";
+  const packageBox = document.getElementById("modalPackageBox");
+  const btn = document.getElementById("modalConfirmBtn");
 
+  if(packageBox){
+    packageBox.style.display = type === "walkin" ? "block" : "none";
+  }
 
+  if(btn){
+    btn.innerText = type === "walkin" ? "开始计时" : "确认预约";
+  }
+}
 
+function fillModalPackages(){
+  const box = document.getElementById("modalPackage");
+  if(!box) return;
+
+  box.innerHTML = (state.packages || []).map((p,i)=>`
+    <option value="${i}">
+      ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
+    </option>
+  `).join("");
+}
 
 function confirmGridBooking(){
   if(!selection) return;
 
+  const type = document.getElementById("modalType")?.value || "booking";
   const name = document.getElementById("modalName").value.trim();
   const phone = document.getElementById("modalPhone").value.trim();
+
+  const slots = getSlots();
+
+  const start = Math.min(selection.startRow, selection.endRow);
+  const end = Math.max(selection.startRow, selection.endRow) + 1;
+
+  const startTable = Math.min(selection.startTableIndex, selection.endTableIndex);
+  const endTable = Math.max(selection.startTableIndex, selection.endTableIndex);
+
+  const tableIndexes = Array.from(
+    { length: endTable - startTable + 1 },
+    (_,idx)=>startTable + idx
+  );
+
+  const busyTables = tableIndexes.filter(idx=>state.tables[idx]?.start);
+
+  if(busyTables.length){
+    alert("以下桌位正在使用中，不能操作：\n" + busyTables.map(i=>state.tables[i].name).join("、"));
+    return;
+  }
+
+  const startTime = slots[start];
+  const endTime = slots[end] || `${getBusinessHours().close}:00`;
+
+  if(type === "walkin"){
+    const packageIndex = Number(document.getElementById("modalPackage")?.value || 0);
+    const now = Date.now();
+
+    tableIndexes.forEach(idx=>{
+      const t = state.tables[idx];
+      if(!t) return;
+
+      t.type = "walkin";
+      t.packageIndex = packageIndex;
+      t.pay = "";
+      t.currency = "日元";
+      t.customer = {
+        name,
+        phoneLast4:String(phone || "").slice(-4)
+      };
+      t.start = now;
+      t.pausedAt = null;
+      t.extra = 0;
+      t.alerted = false;
+      t.alerting = false;
+      t.lastAction = "start";
+    });
+
+    save();
+
+    closeBookingModal();
+    renderBookingGrid();
+    renderList();
+
+    alert("Walk-in 已开始计时");
+    return;
+  }
 
   if(!name || !phone){
     alert("请填写姓名和手机号");
     return;
   }
 
-  const slots = getSlots();
-  const start = Math.min(selection.startRow, selection.endRow);
-  const end = Math.max(selection.startRow, selection.endRow) + 1;
-  const startTime = slots[start];
-  const endTime = slots[end] || `${getBusinessHours().close}:00`;
   const packageIndex = findPackageIndexByDuration(startTime,endTime);
 
   const booking = {
@@ -536,13 +616,7 @@ function confirmGridBooking(){
     color: getNextBookingColor(),
     name,
     phone,
-    tableIndexes:Array.from(
-  {
-    length:
-      Math.abs(selection.endTableIndex - selection.startTableIndex) + 1
-  },
-  (_,idx)=>Math.min(selection.startTableIndex, selection.endTableIndex) + idx
-),
+    tableIndexes,
     startTime,
     endTime,
     packageIndex,
@@ -574,6 +648,14 @@ function closeBookingModal(){
   selection = null;
   const tip = document.getElementById("selectionTip");
 if(tip) tip.style.display = "none";
+  const modalType = document.getElementById("modalType");
+if(modalType) modalType.value = "booking";
+
+const packageBox = document.getElementById("modalPackageBox");
+if(packageBox) packageBox.style.display = "none";
+
+const btn = document.getElementById("modalConfirmBtn");
+if(btn) btn.innerText = "确认预约";
 }
 
 function openDatePicker(){
@@ -1000,3 +1082,4 @@ window.saveBookingDetail = saveBookingDetail;
 window.toggleBookingLock = toggleBookingLock;
 window.changeCalendarMonth = changeCalendarMonth;
 window.selectCalendarDate = selectCalendarDate;
+window.toggleModalType = toggleModalType;

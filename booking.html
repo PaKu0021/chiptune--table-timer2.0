@@ -71,10 +71,22 @@
     <h2>创建预约</h2>
     <div id="selectedRangeText" style="margin-bottom:12px;font-weight:800;"></div>
 
-    <input id="modalName" placeholder="客人姓名">
-    <input id="modalPhone" placeholder="手机号">
 
-    <button class="btn-main full" onclick="confirmGridBooking()">确认预约</button>
+    <select id="modalType" onchange="toggleModalType()">
+  <option value="booking">创建预约</option>
+  <option value="walkin">Walk-in 并开始计时</option>
+</select>
+
+<input id="modalName" placeholder="客人姓名">
+<input id="modalPhone" placeholder="手机号">
+
+<div id="modalPackageBox" style="display:none;">
+  <select id="modalPackage"></select>
+</div>
+
+<button id="modalConfirmBtn" class="btn-main full" onclick="confirmGridBooking()">
+  确认预约
+</button>
     <button class="btn-ghost full" onclick="closeBookingModal()">取消</button>
   </div>
 </div>
