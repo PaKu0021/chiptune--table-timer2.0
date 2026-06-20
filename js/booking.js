@@ -60,6 +60,7 @@ onSnapshot(ref, snap=>{
   state = snap.data();
 
   if(!state.bookings) state.bookings = [];
+  if(!state.customers) state.customers = [];
 
   if(!Array.isArray(state.tables) || state.tables.length === 0){
     state.tables = Array.from({length:12},(_,i)=>({
@@ -81,6 +82,50 @@ function save(){
   setDoc(ref,state);
 }
 
+function getCustomerKey(name, phone){
+  name = String(name || "").trim();
+  phone = String(phone || "").slice(-4);
+
+  if(!name || !phone) return "";
+
+  return `${name}_${phone}`;
+}
+
+function addCustomerVisit({name, phone, packageIndex, tableIndexes, startTime, endTime}){
+  const key = getCustomerKey(name, phone);
+  if(!key) return;
+
+  if(!state.customers) state.customers = [];
+
+  let customer = state.customers.find(c=>c.key === key);
+
+  if(!customer){
+    customer = {
+      key,
+      name,
+      phoneLast4:String(phone || "").slice(-4),
+      visitCount:0,
+      visits:[]
+    };
+    state.customers.push(customer);
+  }
+
+  const p = state.packages?.[packageIndex] || {};
+  const tableNames = tableIndexes
+    .map(i=>state.tables[i]?.name)
+    .filter(Boolean)
+    .join("、");
+
+  customer.visitCount += 1;
+
+  customer.visits.push({
+    date: currentBookingDate,
+    packageName: p.name || "",
+    timeRange: `${startTime || "-"} - ${endTime || "-"}`,
+    tableNames,
+    createdAt: Date.now()
+  });
+}
 
 function getTodayDate(){
   const d = new Date();
@@ -704,10 +749,6 @@ function confirmGridBooking(){
     return;
   }
 
-  if(!name || !phone){
-    alert("请填写姓名和手机号");
-    return;
-  }
 
   const packageIndex = findPackageIndexByDuration(startTime,endTime);
 
@@ -1189,6 +1230,15 @@ function checkInBooking(){
   b.checkedIn = true;
   b.checkInTime = now;
   b.checkInTimeText = new Date(now).toLocaleString();
+
+  addCustomerVisit({
+  name:b.name,
+  phone:b.phone,
+  packageIndex:b.packageIndex,
+  tableIndexes:indexes,
+  startTime:b.startTime,
+  endTime:b.endTime
+});
 
   save();
   closeBookingAction();

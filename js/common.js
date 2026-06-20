@@ -30,10 +30,18 @@ export function resetTable(name){
 
     packageIndex:0,
 
-    recordid:null,
+    recordId:null,
+
+    bookingId:null,
+
+    activeColor:"",
+
+    customerKey:"",
 
     type:"",
+
     pay:"",
+
 
     payTiming:"prepaid",
     paidJPY:0,
