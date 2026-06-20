@@ -109,7 +109,7 @@
 
     <input id="detailPhone" placeholder="手机号">
 
-    <select id="detailTable"></select>
+    <div id="detailTablesBox"></div>
 
     <select id="detailPackage"></select>
 
@@ -125,6 +125,10 @@
       onclick="saveBookingDetail()">
       保存修改
     </button>
+
+    <button class="btn-blue full" onclick="openMoveTableModal()">
+  移动桌位
+</button>
 
     <button class="btn-success full"
       onclick="checkInBooking()">

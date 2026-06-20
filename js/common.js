@@ -45,6 +45,7 @@ export function resetTable(name){
     type:"",
 
     pay:"",
+    payNote:"",
 
 
     payTiming:"prepaid",

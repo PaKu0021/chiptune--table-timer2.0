@@ -498,6 +498,9 @@ function cancelBookingById(id){
 }
 
 function openMoveTableModal(id){
+
+  if(!id) id = activeBookingId;
+
   const b = getBookingById(id);
   if(!b) return;
 
@@ -1188,15 +1191,16 @@ function openBookingAction(id){
   document.getElementById("detailPay").value =
     b.pay || "";
 
-  document.getElementById("detailTable").innerHTML =
-    state.tables.map((t,i)=>`
-      <option
-        value="${i}"
-        ${i===tableIndex ? "selected" : ""}
-      >
-        ${t.name}
-      </option>
-    `).join("");
+  const indexes = (b.tableIndexes || [b.tableIndex])
+  .filter(v=>v !== undefined && v !== null)
+  .map(Number);
+
+document.getElementById("detailTablesBox").innerHTML = `
+  <div style="font-weight:800;margin:8px 0;">
+    预约桌位：${indexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
+  </div>
+`;
+
 
     document.getElementById("detailPackage").innerHTML =
   (state.packages || []).map((p,i)=>`
@@ -1212,61 +1216,33 @@ function saveBookingDetail(){
   const b = getBookingById(activeBookingId);
   if(!b) return;
 
-  const oldIndexes = (b.tableIndexes || [b.tableIndex])
-    .filter(v=>v !== undefined && v !== null)
-    .map(Number);
-
-  const oldTableIndex = oldIndexes[0];
-  const newTableIndex = Number(document.getElementById("detailTable").value);
-
   const newName = document.getElementById("detailName").value.trim();
   const newPhone = document.getElementById("detailPhone").value.trim();
   const newPay = document.getElementById("detailPay").value;
   const newPackageIndex = Number(document.getElementById("detailPackage").value || 0);
 
-
-  if(b.checkedIn && newTableIndex !== oldTableIndex){
-    const oldTable = state.tables[oldTableIndex];
-    const newTable = state.tables[newTableIndex];
-
-    if(newTable?.start){
-      alert("新桌位正在使用中，不能更换");
-      return;
-    }
-
-    state.tables[newTableIndex] = {
-      ...oldTable,
-      name: newTable.name,
-      customer:{
-        name:newName,
-        phoneLast4:String(newPhone || "").slice(-4)
-      },
-      pay:newPay || oldTable.pay || "",
-      type:"booking"
-    };
-
-state.tables[oldTableIndex] = resetTable(oldTable.name);
-
-  }
-
-  if(b.checkedIn && newTableIndex === oldTableIndex){
-    const t = state.tables[oldTableIndex];
-    if(t){
-      t.customer = {
-        name:newName,
-        phoneLast4:String(newPhone || "").slice(-4)
-      };
-      t.pay = newPay || t.pay || "";
-      t.type = "booking";
-    }
-  }
-
   b.name = newName;
   b.phone = newPhone;
   b.pay = newPay;
   b.packageIndex = newPackageIndex;
-  b.tableIndexes = [newTableIndex];
-  delete b.tableIndex;
+
+  const indexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+
+  indexes.forEach(idx=>{
+    const t = state.tables[idx];
+    if(!t || !t.start) return;
+
+    t.customer = {
+      name:newName,
+      phoneLast4:String(newPhone || "").slice(-4)
+    };
+
+    t.pay = newPay || t.pay || "";
+    t.packageIndex = newPackageIndex;
+    t.type = "booking";
+  });
 
   save();
   closeBookingAction();
@@ -1275,6 +1251,20 @@ state.tables[oldTableIndex] = resetTable(oldTable.name);
 
   alert("修改成功");
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 function closeBookingAction(){
   document.getElementById("bookingActionModalBg").style.display = "none";
