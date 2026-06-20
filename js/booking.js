@@ -12,6 +12,7 @@ let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = currentBookingDate;
 let bookingListOpen = false;
+let moveBookingId = null;
 
 const BOOKING_COLORS = [
   "#B7E4C7",
@@ -470,9 +471,10 @@ function renderList(){
 
         ${bookingLocked ? "" : `
           <div class="action-row" style="margin-top:10px;">
-          <button class="btn-success" onclick="openCheckInSelectModal(${b.id})">到店开始</button>
-          <button class="btn-main" onclick="openBookingAction(${b.id})">修改</button>
-          <button class="btn-danger" onclick="cancelBookingById(${b.id})">取消</button>
+            <button class="btn-success" onclick="openCheckInSelectModal(${b.id})">到店开始</button>
+            <button class="btn-main" onclick="openBookingAction(${b.id})">修改</button>
+            <button class="btn-ghost" onclick="openMoveTableModal(${b.id})">移动桌位</button>
+            <button class="btn-danger" onclick="cancelBookingById(${b.id})">取消</button>
           </div>
         `}
       </div>
@@ -493,6 +495,102 @@ function checkInBookingById(id){
 function cancelBookingById(id){
   activeBookingId = id;
   cancelBooking();
+}
+
+function openMoveTableModal(id){
+  const b = getBookingById(id);
+  if(!b) return;
+
+  moveBookingId = id;
+
+  const bookingIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+
+  const runningIndexes = bookingIndexes.filter(i=>{
+    return state.tables[i]?.start;
+  });
+
+  if(runningIndexes.length === 0){
+    alert("这个预约还没有开始计时，不能移动使用中的桌位");
+    return;
+  }
+
+  document.getElementById("moveTableInfo").innerHTML = `
+    客人：${b.name || "-"} ${String(b.phone || "").slice(-4) || ""}<br>
+    当前使用中：${runningIndexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
+  `;
+
+  document.getElementById("moveFromTable").innerHTML = runningIndexes.map(i=>`
+    <option value="${i}">${state.tables[i]?.name || (i+1)+"号桌"}</option>
+  `).join("");
+
+  document.getElementById("moveToTable").innerHTML = state.tables.map((t,i)=>{
+    const disabled = t.start ? "disabled" : "";
+    const text = t.start ? `${t.name}｜使用中` : `${t.name}｜空闲`;
+    return `<option value="${i}" ${disabled}>${text}</option>`;
+  }).join("");
+
+  document.getElementById("moveTableModalBg").style.display = "block";
+}
+
+function closeMoveTableModal(){
+  document.getElementById("moveTableModalBg").style.display = "none";
+  moveBookingId = null;
+}
+
+function confirmMoveTable(){
+  const b = getBookingById(moveBookingId);
+  if(!b) return;
+
+  const fromIndex = Number(document.getElementById("moveFromTable").value);
+  const toIndex = Number(document.getElementById("moveToTable").value);
+
+  if(fromIndex === toIndex){
+    alert("新桌位不能和原桌位一样");
+    return;
+  }
+
+  const fromTable = state.tables[fromIndex];
+  const toTable = state.tables[toIndex];
+
+  if(!fromTable?.start){
+    alert("原桌位没有正在计时");
+    return;
+  }
+
+  if(toTable?.start){
+    alert("目标桌位正在使用中，不能移动");
+    return;
+  }
+
+  const oldToName = toTable.name;
+  const oldFromName = fromTable.name;
+
+  state.tables[toIndex] = {
+    ...fromTable,
+    name: oldToName
+  };
+
+  state.tables[fromIndex] = resetTable(oldFromName);
+
+  b.tableIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number)
+    .map(i=>i === fromIndex ? toIndex : i);
+
+  if(b.checkedInTableIndexes){
+    b.checkedInTableIndexes = b.checkedInTableIndexes
+      .map(Number)
+      .map(i=>i === fromIndex ? toIndex : i);
+  }
+
+  delete b.tableIndex;
+
+  save();
+  closeMoveTableModal();
+  renderBookingGrid();
+  renderList();
 }
 
 function startSelectSlot(e,tableIndex,rowIndex){
@@ -1376,3 +1474,6 @@ window.openCheckInSelectModal = openCheckInSelectModal;
 window.toggleCheckInMode = toggleCheckInMode;
 window.closeCheckInSelectModal = closeCheckInSelectModal;
 window.confirmCheckInSelected = confirmCheckInSelected;
+window.openMoveTableModal = openMoveTableModal;
+window.closeMoveTableModal = closeMoveTableModal;
+window.confirmMoveTable = confirmMoveTable;

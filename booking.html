@@ -167,6 +167,26 @@
   </div>
 </div>
 
+<div id="moveTableModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>移动桌位</h2>
+
+    <div id="moveTableInfo" style="margin-bottom:12px;font-weight:800;"></div>
+
+    <select id="moveFromTable"></select>
+    <select id="moveToTable"></select>
+
+    <button class="btn-main full" onclick="confirmMoveTable()">
+      确认移动
+    </button>
+
+    <button class="btn-ghost full" onclick="closeMoveTableModal()">
+      取消
+    </button>
+  </div>
+</div>
+
+
 <script type="module">
   import { renderNav } from "./js/nav.js";
 
