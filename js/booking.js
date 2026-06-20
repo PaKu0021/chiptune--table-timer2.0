@@ -33,6 +33,27 @@ function getNextBookingColor(){
   return BOOKING_COLORS[count % BOOKING_COLORS.length];
 }
 
+function darkenColor(hex, amount = 28){
+  hex = String(hex || "#B7E4C7").replace("#","");
+  const num = parseInt(hex,16);
+
+  let r = (num >> 16) - amount;
+  let g = ((num >> 8) & 255) - amount;
+  let b = (num & 255) - amount;
+
+  r = Math.max(0,r);
+  g = Math.max(0,g);
+  b = Math.max(0,b);
+
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b)
+    .toString(16)
+    .slice(1);
+}
+
+function getRunningColor(t){
+  return t.activeColor || "#B7E4C7";
+}
+
 onSnapshot(ref, snap=>{
   if(!snap.exists()) return;
 
@@ -650,12 +671,14 @@ function confirmGridBooking(){
   if(type === "walkin"){
     const packageIndex = Number(document.getElementById("modalPackage")?.value || 0);
     const now = Date.now();
-
+    const walkinColor = getNextBookingColor();
     tableIndexes.forEach(idx=>{
       const t = state.tables[idx];
       if(!t) return;
 
       t.type = "walkin";
+      t.activeColor = walkinColor;
+      t.bookingId = null;
       t.packageIndex = packageIndex;
       t.pay = "";
       t.currency = "日元";
@@ -866,16 +889,17 @@ function drawExistingBookings(){
       .map(Number);
 
     const startRow = slots.indexOf(b.startTime);
-
     let endRow = slots.indexOf(b.endTime);
 
-if(startRow < 0) return;
+    if(startRow < 0) return;
 
-if(endRow < 0 && b.endTime === `${getBusinessHours().close}:00`){
-  endRow = slots.length;
-}
+    if(endRow < 0 && b.endTime === `${getBusinessHours().close}:00`){
+      endRow = slots.length;
+    }
 
-const realEndRow = endRow > startRow ? endRow : startRow + 1;
+    const realEndRow = endRow > startRow ? endRow : startRow + 1;
+    const baseColor = b.color || "#B7E4C7";
+    const bgColor = b.checkedIn ? darkenColor(baseColor, 35) : baseColor;
 
     tableIndexes.forEach(tableIndex=>{
       for(let rowIndex = startRow; rowIndex < realEndRow; rowIndex++){
@@ -886,27 +910,20 @@ const realEndRow = endRow > startRow ? endRow : startRow + 1;
         if(!cell) continue;
 
         cell.classList.add(b.checkedIn ? "checked-in-booking" : "booked");
-        if(b.checkedIn){
-        cell.style.background = "#f2c94c";
+        cell.style.background = bgColor;
         cell.style.color = "#332d24";
-}else{
-        cell.style.background = b.color || "#54a66b";
-        cell.style.color = "#332d24";
-}
+
         cell.onpointerdown = null;
         cell.onpointermove = null;
         cell.onpointerup = null;
         cell.onpointercancel = null;
 
         cell.onclick = (e)=>{
-  e.preventDefault();
-  e.stopPropagation();
-
-  if(bookingLocked) return;
-
-  openBookingAction(b.id);
-};
-
+          e.preventDefault();
+          e.stopPropagation();
+          if(bookingLocked) return;
+          openBookingAction(b.id);
+        };
 
         if(rowIndex === startRow){
           cell.innerHTML = b.checkedIn
@@ -918,14 +935,30 @@ const realEndRow = endRow > startRow ? endRow : startRow + 1;
   });
 }
 
-function drawRunningTables(){
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+function drawRunningTables(){
   document.querySelectorAll(".running-block").forEach(el=>{
     el.remove();
   });
 
   state.tables.forEach((t,tableIndex)=>{
-
     if(!t.start) return;
 
     const slots = getSlots();
@@ -934,18 +967,25 @@ function drawRunningTables(){
     let endRow = -1;
 
     for(let row=0; row<slots.length-1; row++){
-
       if(isTableBusyAtSlot(t,row)){
-
-        if(startRow === -1){
-          startRow = row;
-        }
-
+        if(startRow === -1) startRow = row;
         endRow = row;
       }
     }
 
     if(startRow === -1) return;
+
+    const bgColor = darkenColor(getRunningColor(t), 35);
+
+    for(let row=startRow; row<=endRow; row++){
+      const cell = document.querySelector(
+        `.slot-cell[data-table="${tableIndex}"][data-row="${row}"]`
+      );
+
+      if(cell){
+        cell.style.background = bgColor;
+      }
+    }
 
     const firstCell = document.querySelector(
       `.slot-cell[data-table="${tableIndex}"][data-row="${startRow}"]`
@@ -967,6 +1007,18 @@ function drawRunningTables(){
     `;
   });
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 function getBookingById(id){
@@ -1117,6 +1169,8 @@ function checkInBooking(){
     if(!t) return;
 
     t.type = "booking";
+    t.bookingId = b.id;
+    t.activeColor = b.color || getNextBookingColor(); 
     t.pay = b.pay || "";
     t.packageIndex = Number(b.packageIndex || 0);
     t.customer = {

@@ -671,7 +671,6 @@ button.selected-pop{
 }
 
 .disabled-slot{
-  background:#d9d9d9 !important;
   cursor:not-allowed !important;
   pointer-events:none !important;
 }
@@ -940,22 +939,29 @@ button.selected-pop{
   margin-top:2px;
 }
 
-.slot-normal .running-block{
-  background:#dff4e5;
+.running-block{
+  background:rgba(255,255,255,.72);
+  color:#332d24;
+  border:1px solid rgba(255,255,255,.8);
+}
+
+.running-time{
+  font-weight:900;
+}
+
+.slot-normal .running-time{
+  color:#2b6fc9;
+}
+
+.slot-running .running-time{
   color:#188038;
 }
 
-.slot-warning .running-block{
-  background:#fff0d8;
+.slot-warning .running-time{
   color:#ff9800;
 }
 
-.slot-overtime .running-block{
-  background:#ffe1e1;
+.slot-overtime .running-time{
   color:#d93025;
 }
 
-.slot-running .running-block{
-  background:#dff4e5;
-  color:#188038;
-}
