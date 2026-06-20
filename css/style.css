@@ -918,36 +918,21 @@ button.selected-pop{
   border-radius:10px;
   padding:4px 6px;
   display:flex;
-  flex-direction:column;
   justify-content:center;
   align-items:center;
   font-size:12px;
-  font-weight:700;
-  pointer-events:none;
-}
-
-.running-name{
-  font-size:12px;
-  line-height:1.1;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-
-.running-time{
-  font-size:11px;
-  margin-top:2px;
-}
-
-.running-block{
-  background:rgba(255,255,255,.72);
-  color:#332d24;
-  border:1px solid rgba(255,255,255,.8);
-}
-
-.running-time{
   font-weight:900;
+  pointer-events:none;
+  text-align:center;
 }
+
+.running-time{
+  font-size:12px;
+  line-height:1.2;
+}
+
+
+
 
 .slot-normal .running-time{
   color:#2b6fc9;

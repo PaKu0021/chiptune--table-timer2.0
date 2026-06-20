@@ -927,9 +927,9 @@ function drawExistingBookings(){
 
         if(rowIndex === startRow){
           cell.innerHTML = b.checkedIn
-            ? "✅ " + (b.name || "")
-            : (b.name || "");
-        }
+            ? ""
+             : (b.name || "");
+        }        
       }
     });
   });
@@ -987,25 +987,27 @@ function drawRunningTables(){
       }
     }
 
-    const firstCell = document.querySelector(
-      `.slot-cell[data-table="${tableIndex}"][data-row="${startRow}"]`
-    );
+    const middleRow = Math.floor((startRow + endRow) / 2);
 
-    if(!firstCell) return;
+const middleCell = document.querySelector(
+  `.slot-cell[data-table="${tableIndex}"][data-row="${middleRow}"]`
+);
 
-    const status = getTableStatusText(t);
+if(!middleCell) return;
 
-    firstCell.innerHTML = `
-      <div class="running-block ${status.className}">
-        <div class="running-name">
-          ${t.customer?.name || t.name}
-        </div>
-        <div class="running-time">
-          ${status.text}
-        </div>
-      </div>
-    `;
-  });
+const status = getTableStatusText(t);
+
+middleCell.innerHTML = `
+  <div class="running-block ${status.className}">
+    <div class="running-time">
+      ${status.text}
+    </div>
+  </div>
+`;
+
+
+
+      });
 }
 
 
