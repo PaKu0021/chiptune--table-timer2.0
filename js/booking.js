@@ -470,9 +470,9 @@ function renderList(){
 
         ${bookingLocked ? "" : `
           <div class="action-row" style="margin-top:10px;">
-            <button class="btn-success" onclick="checkInBookingById(${b.id})">到店开始</button>
-            <button class="btn-main" onclick="openBookingAction(${b.id})">修改</button>
-            <button class="btn-danger" onclick="cancelBookingById(${b.id})">取消</button>
+          <button class="btn-success" onclick="openCheckInSelectModal(${b.id})">到店开始</button>
+          <button class="btn-main" onclick="openBookingAction(${b.id})">修改</button>
+          <button class="btn-danger" onclick="cancelBookingById(${b.id})">取消</button>
           </div>
         `}
       </div>
@@ -966,11 +966,9 @@ function drawExistingBookings(){
           openBookingAction(b.id);
         };
 
-        if(rowIndex === startRow){
-          cell.innerHTML = b.checkedIn
-            ? ""
-             : (b.name || "");
-        }        
+        if(rowIndex === startRow && tableIndex === tableIndexes[0]){
+  cell.innerHTML = b.checkedIn ? "" : (b.name || "");
+}               
       }
     });
   });
@@ -1185,23 +1183,77 @@ function closeBookingAction(){
   activeBookingId = null;
 }
 
-function checkInBooking(){
-  const b = getBookingById(activeBookingId);
+function openCheckInSelectModal(id){
+  const b = getBookingById(id);
   if(!b) return;
 
-  if(b.checkedIn){
-    alert("这个预约已经到店了");
-    return;
-  }
+  activeBookingId = id;
 
   const indexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
 
+  document.getElementById("checkInSelectInfo").innerHTML = `
+    ${b.name || "-"}｜${b.startTime || "-"} - ${b.endTime || "-"}<br>
+    预约桌位：${indexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
+  `;
+
+  document.getElementById("checkInMode").value = "all";
+
+  const box = document.getElementById("checkInTableChecks");
+  box.style.display = "none";
+
+  box.innerHTML = indexes.map(i=>`
+    <label class="table-check-card">
+      <input type="checkbox" class="checkin-table-check" value="${i}" checked>
+      ${state.tables[i]?.name || (i+1)+"号桌"}
+    </label>
+  `).join("");
+
+  document.getElementById("checkInSelectModalBg").style.display = "block";
+}
+
+function toggleCheckInMode(){
+  const mode = document.getElementById("checkInMode").value;
+  const box = document.getElementById("checkInTableChecks");
+
+  box.style.display = mode === "partial" ? "grid" : "none";
+}
+
+function closeCheckInSelectModal(){
+  document.getElementById("checkInSelectModalBg").style.display = "none";
+}
+
+function checkInBooking(){
+  openCheckInSelectModal(activeBookingId);
+}
+
+function confirmCheckInSelected(){
+  const b = getBookingById(activeBookingId);
+  if(!b) return;
+
+  const allIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+
+  const mode = document.getElementById("checkInMode").value;
+
+  let indexes = allIndexes;
+
+  if(mode === "partial"){
+    indexes = [...document.querySelectorAll(".checkin-table-check:checked")]
+      .map(el=>Number(el.value));
+
+    if(indexes.length === 0){
+      alert("请至少选择一张桌开始计时");
+      return;
+    }
+  }
+
   const busy = indexes.filter(idx=>state.tables[idx]?.start);
 
   if(busy.length){
-    alert("以下桌位正在使用中，不能直接到店：\n" + busy.map(i=>state.tables[i].name).join("、"));
+    alert("以下桌位正在使用中，不能开始：\n" + busy.map(i=>state.tables[i].name).join("、"));
     return;
   }
 
@@ -1213,13 +1265,17 @@ function checkInBooking(){
 
     t.type = "booking";
     t.bookingId = b.id;
-    t.activeColor = b.color || getNextBookingColor(); 
+    t.activeColor = b.color || getNextBookingColor();
+    t.customerKey = getCustomerKey(b.name, b.phone);
+
     t.pay = b.pay || "";
     t.packageIndex = Number(b.packageIndex || 0);
+
     t.customer = {
-      name:b.name,
+      name:b.name || "",
       phoneLast4:String(b.phone || "").slice(-4)
     };
+
     t.start = now;
     t.pausedAt = null;
     t.alerted = false;
@@ -1227,20 +1283,30 @@ function checkInBooking(){
     t.lastAction = "start";
   });
 
-  b.checkedIn = true;
-  b.checkInTime = now;
-  b.checkInTimeText = new Date(now).toLocaleString();
+  if(!b.checkedInTableIndexes){
+    b.checkedInTableIndexes = [];
+  }
+
+  b.checkedInTableIndexes = Array.from(new Set([
+    ...b.checkedInTableIndexes.map(Number),
+    ...indexes
+  ]));
+
+  b.checkedIn = b.checkedInTableIndexes.length >= allIndexes.length;
+  b.checkInTime = b.checkInTime || now;
+  b.checkInTimeText = b.checkInTimeText || new Date(now).toLocaleString();
 
   addCustomerVisit({
-  name:b.name,
-  phone:b.phone,
-  packageIndex:b.packageIndex,
-  tableIndexes:indexes,
-  startTime:b.startTime,
-  endTime:b.endTime
-});
+    name:b.name,
+    phone:b.phone,
+    packageIndex:b.packageIndex,
+    tableIndexes:indexes,
+    startTime:b.startTime,
+    endTime:b.endTime
+  });
 
   save();
+  closeCheckInSelectModal();
   closeBookingAction();
   renderBookingGrid();
   renderList();
@@ -1306,3 +1372,7 @@ window.toggleModalType = toggleModalType;
 window.toggleBookingList = toggleBookingList;
 window.checkInBookingById = checkInBookingById;
 window.cancelBookingById = cancelBookingById;
+window.openCheckInSelectModal = openCheckInSelectModal;
+window.toggleCheckInMode = toggleCheckInMode;
+window.closeCheckInSelectModal = closeCheckInSelectModal;
+window.confirmCheckInSelected = confirmCheckInSelected;

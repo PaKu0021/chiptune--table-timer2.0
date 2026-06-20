@@ -144,6 +144,29 @@
   </div>
 </div>
 
+<div id="checkInSelectModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>到店开始</h2>
+
+    <div id="checkInSelectInfo" style="margin-bottom:12px;font-weight:800;"></div>
+
+    <select id="checkInMode" onchange="toggleCheckInMode()">
+      <option value="all">一起开始</option>
+      <option value="partial">分开开始</option>
+    </select>
+
+    <div id="checkInTableChecks" class="table-check-grid" style="display:none;"></div>
+
+    <button class="btn-success full" onclick="confirmCheckInSelected()">
+      确认开始计时
+    </button>
+
+    <button class="btn-ghost full" onclick="closeCheckInSelectModal()">
+      取消
+    </button>
+  </div>
+</div>
+
 <script type="module">
   import { renderNav } from "./js/nav.js";
 
