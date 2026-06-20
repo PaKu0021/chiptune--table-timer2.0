@@ -34,7 +34,8 @@ const defaultState = {
   ],
   tables: Array.from({length:8},(_,i)=>newTable(i+1)),
   records:[],
-  bookings:[]
+  bookings:[],
+  customers:{}
 };
 
 onSnapshot(ref, snap=>{
@@ -46,6 +47,7 @@ onSnapshot(ref, snap=>{
     if(!state.records) state.records = [];
     if(!state.bookings) state.bookings = [];
     if(!state.tables) state.tables = defaultState.tables;
+    if(!state.customers) state.customers = {};
 
     state.tables.forEach((t,i)=>{
   if(!t.name) t.name = (i+1) + "号桌";
@@ -64,6 +66,12 @@ onSnapshot(ref, snap=>{
   if(t.type === undefined) t.type = "";
   if(t.lastAction === undefined) t.lastAction = "";
   if(t.recordId === undefined) t.recordId = null;
+  if(t.customerKey === undefined) t.customerKey = "";
+  if(t.visitId === undefined) t.visitId = null;
+  if(t.visitDate === undefined) t.visitDate = "";
+  if(t.visitRange === undefined) t.visitRange = "";
+  if(t.bookingId === undefined) t.bookingId = null;
+  if(t.activeColor === undefined) t.activeColor = "";
 });
 
     /*alert("准备render");*/
@@ -169,6 +177,105 @@ function getTableRecord(t){
   return state.records.find(r=>r.id === t.recordId) || null;
 }
 
+function makeCustomerKey(name, phoneLast4){
+  const n = String(name || "").trim();
+  const p = String(phoneLast4 || "").trim();
+
+  if(!n || !p) return "";
+
+  return `${n}_${p}`;
+}
+
+function getDateText(ts){
+  const d = new Date(ts || Date.now());
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+function getVisitRangeText(t){
+  const start = t.start ? new Date(t.start) : new Date();
+  const now = new Date();
+
+  const s = `${String(start.getHours()).padStart(2,"0")}:${String(start.getMinutes()).padStart(2,"0")}`;
+  const e = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+
+  return `${s}-${e}`;
+}
+
+function createOrUpdateCustomerVisit(t){
+  const key = makeCustomerKey(t.customer?.name, t.customer?.phoneLast4);
+
+  if(!key) return null;
+
+  if(!state.customers) state.customers = {};
+
+  if(!state.customers[key]){
+    state.customers[key] = {
+      key,
+      name:t.customer?.name || "",
+      phoneLast4:t.customer?.phoneLast4 || "",
+      visitCount:0,
+      firstVisitAt:Date.now(),
+      lastVisitAt:Date.now(),
+      visits:[]
+    };
+  }
+
+  const customer = state.customers[key];
+
+  t.customerKey = key;
+
+  let visit = null;
+
+  if(t.visitId){
+    visit = customer.visits.find(v=>v.id === t.visitId);
+  }
+
+  if(!visit){
+    const id = "visit_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
+
+    t.visitId = id;
+
+    visit = {
+      id,
+      date:getDateText(t.start || Date.now()),
+      startAt:t.start || Date.now(),
+      endAt:null,
+      range:"",
+      tableName:t.name,
+      customerType:t.type || "walkin",
+      packageName:"",
+      packageMinutes:"",
+      extraMinutes:0,
+      totalJPY:0,
+      pay:"",
+      closed:false
+    };
+
+    customer.visits.push(visit);
+    customer.visitCount = customer.visits.length;
+  }
+
+  const p = getPackage(t);
+
+  visit.date = getDateText(t.start || Date.now());
+  visit.range = getVisitRangeText(t);
+  visit.tableName = t.name;
+  visit.customerType = t.type || "walkin";
+  visit.packageName = p.name;
+  visit.packageMinutes = p.unlimited ? "不限时" : p.minutes;
+  visit.extraMinutes = Math.floor(Number(t.extra || 0) / 60000);
+  visit.totalJPY = getOriginalJPY(t);
+  visit.pay = t.pay || "";
+  visit.lastUpdatedAt = Date.now();
+
+  customer.name = t.customer?.name || customer.name;
+  customer.phoneLast4 = t.customer?.phoneLast4 || customer.phoneLast4;
+  customer.lastVisitAt = Date.now();
+  customer.visitCount = customer.visits.length;
+
+  return visit;
+}
+
 function createOrUpdateRecord(t){
   const p = getPackage(t);
   const originalJPY = getOriginalJPY(t);
@@ -220,6 +327,16 @@ function createOrUpdateRecord(t){
   record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
   record.checkoutMethod = t.payTiming === "postpaid" ? "后付款" : "先付款";
   record.roundRule = record.roundRule || "不抹零";
+
+  const visit = createOrUpdateCustomerVisit(t);
+
+if(visit){
+  record.customerKey = t.customerKey;
+  record.visitId = t.visitId;
+  record.visitDate = visit.date;
+  record.visitRange = visit.range;
+}
+
 
   return record;
 }
@@ -816,6 +933,14 @@ record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
 record.closedAt = Date.now();
 record.closedTime = new Date().toLocaleString();
 
+const visit = createOrUpdateCustomerVisit(t);
+if(visit){
+  visit.endAt = Date.now();
+  visit.range = getVisitRangeText(t);
+  visit.closed = true;
+  visit.finalJPY = t.paidJPY;
+  visit.closedTime = new Date().toLocaleString();
+}
 
 state.tables[checkoutIndex] = resetTable(t.name);
   save();

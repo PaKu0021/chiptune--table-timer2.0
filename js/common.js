@@ -38,6 +38,10 @@ export function resetTable(name){
 
     customerKey:"",
 
+    visitId:null,
+    visitDate:"",
+    visitRange:"",
+
     type:"",
 
     pay:"",
