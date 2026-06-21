@@ -13,8 +13,17 @@ let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = currentBookingDate;
 let bookingListOpen = false;
 let moveBookingId = null;
-let moveFromIndex = null;
-let moveToIndex = null;
+let movePairs = [];
+let draggingMoveFrom = null;
+
+const MOVE_LINE_COLORS = [
+  "#e85d5d",
+  "#2b6fc9",
+  "#54a66b",
+  "#ff9800",
+  "#8e44ad",
+  "#00a6a6"
+];
 
 const BOOKING_COLORS = [
   "#B7E4C7",
@@ -529,8 +538,8 @@ function openMoveTableModal(id){
   if(!b) return;
 
   moveBookingId = id;
-  moveFromIndex = null;
-  moveToIndex = null;
+  movePairs = [];
+  draggingMoveFrom = null;
 
   const bookingIndexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
@@ -542,87 +551,185 @@ function openMoveTableModal(id){
     当前桌位：${bookingIndexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
   `;
 
-  document.getElementById("moveFromTableBox").innerHTML = bookingIndexes.map(i=>{
-    const running = state.tables[i]?.start ? "已开始" : "未开始";
+  document.getElementById("moveLineArea").innerHTML = `
+    <svg id="moveSvg"></svg>
 
-    return `
-      <button
-        class="move-table-btn"
-        onclick="selectMoveFrom(${i})"
-        id="move-from-${i}"
-      >
-        ${state.tables[i]?.name || (i+1)+"号桌"}<br>
-        <small>${running}</small>
-      </button>
-    `;
-  }).join("");
+    <div class="move-row-title">按住要移动的桌位，拖到下面目标桌位</div>
+    <div id="moveFromTableBox" class="move-drag-grid">
+      ${bookingIndexes.map(i=>{
+        const running = state.tables[i]?.start ? "已开始" : "未开始";
 
-  document.getElementById("moveToTableBox").innerHTML = state.tables.map((t,i)=>{
-    const isSameBookingTable = bookingIndexes.includes(i);
-    const occupied = !!t.start && !isSameBookingTable;
-    const conflict = hasBookingConflict(i, b, b.id) && !isSameBookingTable;
+        return `
+          <button
+            class="move-table-btn move-from-btn"
+            data-index="${i}"
+            id="move-from-${i}"
+            onpointerdown="startMoveDrag(event,${i})"
+          >
+            ${state.tables[i]?.name || (i+1)+"号桌"}<br>
+            <small>${running}</small>
+          </button>
+        `;
+      }).join("")}
+    </div>
 
-    let disabled = occupied || conflict;
-    let sub = "可移动";
+    <div class="move-row-title">拖到这里选择目标桌位</div>
+    <div id="moveToTableBox" class="move-drag-grid">
+      ${state.tables.map((t,i)=>{
+        const isSameBookingTable = bookingIndexes.includes(i);
+        const occupied = !!t.start && !isSameBookingTable;
+        const conflict = hasBookingConflict(i, b, b.id) && !isSameBookingTable;
 
-    if(occupied) sub = "使用中";
-    else if(conflict) sub = "已有预约";
-    else if(isSameBookingTable) sub = "当前预约桌";
+        let disabled = occupied || conflict;
+        let sub = "可移动";
 
-    return `
-      <button
-        class="move-table-btn ${disabled ? "disabled" : ""}"
-        onclick="${disabled ? "" : `selectMoveTo(${i})`}"
-        id="move-to-${i}"
-        ${disabled ? "disabled" : ""}
-      >
-        ${t.name}<br>
-        <small>${sub}</small>
-      </button>
-    `;
-  }).join("");
+        if(occupied) sub = "使用中";
+        else if(conflict) sub = "已有预约";
+        else if(isSameBookingTable) sub = "当前预约桌";
+
+        return `
+          <button
+            class="move-table-btn move-to-btn ${disabled ? "disabled" : ""}"
+            data-index="${i}"
+            id="move-to-${i}"
+            ${disabled ? "disabled" : ""}
+          >
+            ${t.name}<br>
+            <small>${sub}</small>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
 
   document.getElementById("moveTableModalBg").style.display = "block";
+  setTimeout(drawMoveLines, 50);
 }
 
-function selectMoveFrom(i){
-  moveFromIndex = Number(i);
+function startMoveDrag(e, fromIndex){
+  e.preventDefault();
 
-  document.querySelectorAll("#moveFromTableBox .move-table-btn")
-    .forEach(btn=>btn.classList.remove("selected"));
+  draggingMoveFrom = Number(fromIndex);
 
-  document.getElementById("move-from-" + i)?.classList.add("selected");
+  document.querySelectorAll(".move-from-btn")
+    .forEach(btn=>btn.classList.remove("dragging"));
+
+  document.getElementById("move-from-" + fromIndex)?.classList.add("dragging");
+
+  window.addEventListener("pointermove", moveDragLine);
+  window.addEventListener("pointerup", endMoveDrag);
 }
 
-function selectMoveTo(i){
-  moveToIndex = Number(i);
-
-  document.querySelectorAll("#moveToTableBox .move-table-btn")
-    .forEach(btn=>btn.classList.remove("selected"));
-
-  document.getElementById("move-to-" + i)?.classList.add("selected");
+function moveDragLine(e){
+  if(draggingMoveFrom === null) return;
+  drawMoveLines(e.clientX, e.clientY);
 }
+
+function endMoveDrag(e){
+  if(draggingMoveFrom === null) return;
+
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+  const toBtn = target?.closest?.(".move-to-btn");
+
+  if(toBtn && !toBtn.disabled){
+    const toIndex = Number(toBtn.dataset.index);
+
+    if(draggingMoveFrom === toIndex){
+      alert("新桌位不能和原桌位一样");
+    }else{
+      movePairs = movePairs.filter(p=>{
+        return p.from !== draggingMoveFrom && p.to !== toIndex;
+      });
+
+      movePairs.push({
+        from: draggingMoveFrom,
+        to: toIndex
+      });
+    }
+  }
+
+  document.querySelectorAll(".move-from-btn")
+    .forEach(btn=>btn.classList.remove("dragging"));
+
+  draggingMoveFrom = null;
+
+  window.removeEventListener("pointermove", moveDragLine);
+  window.removeEventListener("pointerup", endMoveDrag);
+
+  drawMoveLines();
+}
+
+function drawMoveLines(pointerX = null, pointerY = null){
+  const svg = document.getElementById("moveSvg");
+  const area = document.getElementById("moveLineArea");
+  if(!svg || !area) return;
+
+  const rect = area.getBoundingClientRect();
+
+  svg.innerHTML = "";
+
+  function centerOf(el){
+    const r = el.getBoundingClientRect();
+    return {
+      x: r.left + r.width / 2 - rect.left,
+      y: r.top + r.height / 2 - rect.top
+    };
+  }
+
+  movePairs.forEach((pair,idx)=>{
+    const fromEl = document.getElementById("move-from-" + pair.from);
+    const toEl = document.getElementById("move-to-" + pair.to);
+    if(!fromEl || !toEl) return;
+
+    fromEl.classList.add("selected");
+    toEl.classList.add("selected");
+
+    const a = centerOf(fromEl);
+    const b = centerOf(toEl);
+    const color = MOVE_LINE_COLORS[idx % MOVE_LINE_COLORS.length];
+
+    svg.innerHTML += `
+      <line
+        x1="${a.x}"
+        y1="${a.y}"
+        x2="${b.x}"
+        y2="${b.y}"
+        stroke="${color}"
+        stroke-width="5"
+        stroke-linecap="round"
+      />
+    `;
+  });
+
+  if(draggingMoveFrom !== null && pointerX !== null && pointerY !== null){
+    const fromEl = document.getElementById("move-from-" + draggingMoveFrom);
+    if(fromEl){
+      const a = centerOf(fromEl);
+      const color = MOVE_LINE_COLORS[movePairs.length % MOVE_LINE_COLORS.length];
+
+      svg.innerHTML += `
+        <line
+          x1="${a.x}"
+          y1="${a.y}"
+          x2="${pointerX - rect.left}"
+          y2="${pointerY - rect.top}"
+          stroke="${color}"
+          stroke-width="5"
+          stroke-linecap="round"
+          stroke-dasharray="8 6"
+        />
+      `;
+    }
+  }
+}
+
 
 function confirmMoveTable(){
   const b = getBookingById(moveBookingId);
   if(!b) return;
 
-
-  if(moveFromIndex === null){
-  alert("请选择要移动的桌位");
-  return;
-}
-
-if(moveToIndex === null){
-  alert("请选择移动到哪桌");
-  return;
-}
-
-const fromIndex = moveFromIndex;
-const toIndex = moveToIndex;
-
-  if(fromIndex === toIndex){
-    alert("新桌位不能和原桌位一样");
+  if(movePairs.length === 0){
+    alert("请先拖线选择要移动的桌位");
     return;
   }
 
@@ -630,46 +737,59 @@ const toIndex = moveToIndex;
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
 
-  if(!bookingIndexes.includes(fromIndex)){
-    alert("原桌位不属于这个预约");
-    return;
+  for(const pair of movePairs){
+    if(!bookingIndexes.includes(pair.from)){
+      alert("有原桌位不属于这个预约");
+      return;
+    }
+
+    if(pair.from === pair.to){
+      alert("新桌位不能和原桌位一样");
+      return;
+    }
+
+    const toTable = state.tables[pair.to];
+
+    if(toTable?.start){
+      alert(`${toTable.name} 正在使用中，不能移动`);
+      return;
+    }
+
+    if(hasBookingConflict(pair.to, b, b.id)){
+      alert(`${toTable.name} 在这个时间段已有预约，不能移动`);
+      return;
+    }
   }
 
-  const fromTable = state.tables[fromIndex];
-  const toTable = state.tables[toIndex];
+  movePairs.forEach(pair=>{
+    const fromTable = state.tables[pair.from];
+    const toTable = state.tables[pair.to];
 
-  if(toTable?.start){
-    alert("目标桌位正在使用中，不能移动");
-    return;
-  }
+    if(fromTable?.start){
+      const oldFromName = fromTable.name;
+      const oldToName = toTable.name;
 
-  if(hasBookingConflict(toIndex, b, b.id)){
-    alert("目标桌位在这个时间段已有预约，不能移动");
-    return;
-  }
+      state.tables[pair.to] = {
+        ...fromTable,
+        name: oldToName
+      };
 
-  const fromStarted = !!fromTable?.start;
-
-  if(fromStarted){
-    const oldFromName = fromTable.name;
-    const oldToName = toTable.name;
-
-    state.tables[toIndex] = {
-      ...fromTable,
-      name: oldToName
-    };
-
-    state.tables[fromIndex] = resetTable(oldFromName);
-  }
+      state.tables[pair.from] = resetTable(oldFromName);
+    }
+  });
 
   b.tableIndexes = bookingIndexes.map(i=>{
-    return i === fromIndex ? toIndex : i;
+    const pair = movePairs.find(p=>p.from === i);
+    return pair ? pair.to : i;
   });
 
   if(b.checkedInTableIndexes){
     b.checkedInTableIndexes = b.checkedInTableIndexes
       .map(Number)
-      .map(i=>i === fromIndex ? toIndex : i);
+      .map(i=>{
+        const pair = movePairs.find(p=>p.from === i);
+        return pair ? pair.to : i;
+      });
   }
 
   delete b.tableIndex;
@@ -686,10 +806,9 @@ const toIndex = moveToIndex;
 function closeMoveTableModal(){
   document.getElementById("moveTableModalBg").style.display = "none";
   moveBookingId = null;
+  movePairs = [];
+  draggingMoveFrom = null;
 }
-
-
-
 
 function startSelectSlot(e,tableIndex,rowIndex){
   if(bookingLocked) return;
@@ -1162,7 +1281,6 @@ function drawExistingBookings(){
           openBookingAction(b.id);
         };
 
-        if(rowIndex === startRow && tableIndex === tableIndexes[0]){
   if(rowIndex === startRow && tableIndex === tableIndexes[0]){
   const phoneLast4 = String(b.phone || "").slice(-4);
 
@@ -1173,29 +1291,11 @@ function drawExistingBookings(){
       <div class="booking-cell-phone">${phoneLast4 || ""}</div>
     `;
 }
-}               
+               
       }
     });
   });
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  
-
-
 
 function drawRunningTables(){
   document.querySelectorAll(".running-block").forEach(el=>{
@@ -1571,5 +1671,4 @@ window.confirmCheckInSelected = confirmCheckInSelected;
 window.openMoveTableModal = openMoveTableModal;
 window.closeMoveTableModal = closeMoveTableModal;
 window.confirmMoveTable = confirmMoveTable;
-window.selectMoveFrom = selectMoveFrom;
-window.selectMoveTo = selectMoveTo;
+window.startMoveDrag = startMoveDrag;

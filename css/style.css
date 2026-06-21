@@ -998,3 +998,60 @@ button.selected-pop{
   background:#ddd !important;
   color:#999 !important;
 }
+
+.move-line-area{
+  position:relative;
+  min-height:360px;
+  padding:10px 0;
+}
+
+#moveSvg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  pointer-events:none;
+  z-index:1;
+}
+
+.move-row-title{
+  position:relative;
+  z-index:2;
+  font-weight:900;
+  margin:12px 0 8px;
+}
+
+.move-drag-grid{
+  position:relative;
+  z-index:2;
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;
+  margin-bottom:24px;
+}
+
+.move-table-btn{
+  min-height:64px;
+  background:#fff;
+  color:#332d24;
+  border:1px solid var(--line);
+  font-weight:900;
+}
+
+.move-table-btn small{
+  color:#8a8174;
+  font-weight:800;
+}
+
+.move-table-btn.selected,
+.move-table-btn.dragging{
+  background:#f2c94c !important;
+  border-color:#d8a900 !important;
+  color:#332d24 !important;
+}
+
+.move-table-btn.disabled{
+  background:#ddd !important;
+  color:#999 !important;
+  border-color:#ccc !important;
+}
