@@ -15,6 +15,9 @@ let bookingListOpen = false;
 let moveBookingId = null;
 let movePairs = [];
 let draggingMoveFrom = null;
+let moveLineRAF = null;
+let lastMovePointer = null;
+
 
 const MOVE_LINE_COLORS = [
   "#e85d5d",
@@ -684,7 +687,24 @@ function startMoveDrag(e, fromIndex){
 
 function moveDragLine(e){
   if(draggingMoveFrom === null) return;
-  drawMoveLines(e.clientX, e.clientY);
+
+  lastMovePointer = {
+    x:e.clientX,
+    y:e.clientY
+  };
+
+  if(moveLineRAF) return;
+
+  moveLineRAF = requestAnimationFrame(()=>{
+    moveLineRAF = null;
+
+    if(lastMovePointer){
+      drawMoveLines(
+        lastMovePointer.x,
+        lastMovePointer.y
+      );
+    }
+  });
 }
 
 function endMoveDrag(e){
@@ -716,9 +736,17 @@ function endMoveDrag(e){
   draggingMoveFrom = null;
 
   window.removeEventListener("pointermove", moveDragLine);
-  window.removeEventListener("pointerup", endMoveDrag);
+window.removeEventListener("pointerup", endMoveDrag);
 
-  drawMoveLines();
+lastMovePointer = null;
+
+if(moveLineRAF){
+  cancelAnimationFrame(moveLineRAF);
+  moveLineRAF = null;
+}
+
+drawMoveLines();
+
 }
 
 function drawMoveLines(pointerX = null, pointerY = null){
@@ -727,8 +755,9 @@ function drawMoveLines(pointerX = null, pointerY = null){
   if(!svg || !area) return;
 
   const rect = area.getBoundingClientRect();
+  const ns = "http://www.w3.org/2000/svg";
 
-  svg.innerHTML = "";
+  const nodes = [];
 
   function centerOf(el){
     const r = el.getBoundingClientRect();
@@ -737,6 +766,9 @@ function drawMoveLines(pointerX = null, pointerY = null){
       y: r.top + r.height / 2 - rect.top
     };
   }
+
+  document.querySelectorAll(".move-table-btn.selected")
+    .forEach(btn=>btn.classList.remove("selected"));
 
   movePairs.forEach((pair,idx)=>{
     const fromEl = document.getElementById("move-from-" + pair.from);
@@ -750,41 +782,41 @@ function drawMoveLines(pointerX = null, pointerY = null){
     const b = centerOf(toEl);
     const color = MOVE_LINE_COLORS[idx % MOVE_LINE_COLORS.length];
 
-    svg.innerHTML += `
-      <line
-        x1="${a.x}"
-        y1="${a.y}"
-        x2="${b.x}"
-        y2="${b.y}"
-        stroke="${color}"
-        stroke-width="5"
-        stroke-linecap="round"
-      />
-    `;
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", a.x);
+    line.setAttribute("y1", a.y);
+    line.setAttribute("x2", b.x);
+    line.setAttribute("y2", b.y);
+    line.setAttribute("stroke", color);
+    line.setAttribute("stroke-width", "5");
+    line.setAttribute("stroke-linecap", "round");
+
+    nodes.push(line);
   });
 
   if(draggingMoveFrom !== null && pointerX !== null && pointerY !== null){
     const fromEl = document.getElementById("move-from-" + draggingMoveFrom);
+
     if(fromEl){
       const a = centerOf(fromEl);
       const color = MOVE_LINE_COLORS[movePairs.length % MOVE_LINE_COLORS.length];
 
-      svg.innerHTML += `
-        <line
-          x1="${a.x}"
-          y1="${a.y}"
-          x2="${pointerX - rect.left}"
-          y2="${pointerY - rect.top}"
-          stroke="${color}"
-          stroke-width="5"
-          stroke-linecap="round"
-          stroke-dasharray="8 6"
-        />
-      `;
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("x1", a.x);
+      line.setAttribute("y1", a.y);
+      line.setAttribute("x2", pointerX - rect.left);
+      line.setAttribute("y2", pointerY - rect.top);
+      line.setAttribute("stroke", color);
+      line.setAttribute("stroke-width", "5");
+      line.setAttribute("stroke-linecap", "round");
+      line.setAttribute("stroke-dasharray", "8 6");
+
+      nodes.push(line);
     }
   }
-}
 
+  svg.replaceChildren(...nodes);
+}
 
 function confirmMoveTable(){
   const b = getBookingById(moveBookingId);
