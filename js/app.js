@@ -277,10 +277,20 @@ function createOrUpdateCustomerVisit(t){
 }
 
 function createOrUpdateRecord(t){
+
   const p = getPackage(t);
-  const originalJPY = getOriginalJPY(t);
-  const paidJPY = Number(t.paidJPY || 0);
-  const dueJPY = Math.max(0, originalJPY - paidJPY);
+const originalJPY = getOriginalJPY(t);
+
+let paidJPY = Number(t.paidJPY || 0);
+
+if((t.payTiming || "prepaid") === "prepaid"){
+  paidJPY = originalJPY;
+  t.paidJPY = originalJPY;
+  t.paidRMB = getRMB(originalJPY);
+  t.paidAt = Date.now();
+}
+
+const dueJPY = Math.max(0, originalJPY - paidJPY);
 
   let record = getTableRecord(t);
 
@@ -644,7 +654,14 @@ function notifyLocal(title,body){
 }
 
 function setPackage(i,v){
-  state.tables[i].packageIndex = Number(v);
+  const t = state.tables[i];
+
+  t.packageIndex = Number(v);
+
+  if(t.start){
+    createOrUpdateRecord(t);
+  }
+
   save();
 }
 
@@ -815,12 +832,25 @@ function setPayTiming(i,v){
 
 function setPay(i,v){
   updateCustomer(i);
-  state.tables[i].pay = v;
+
+  const t = state.tables[i];
+  t.pay = v;
+
+  if(t.start){
+    createOrUpdateRecord(t);
+  }
+
   save();
 }
 
 function setCurrency(i,v){
-  state.tables[i].currency = v;
+  const t = state.tables[i];
+  t.currency = v;
+
+  if(t.start){
+    createOrUpdateRecord(t);
+  }
+
   save();
 }
 
