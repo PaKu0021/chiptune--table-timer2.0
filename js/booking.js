@@ -497,8 +497,30 @@ function cancelBookingById(id){
   cancelBooking();
 }
 
-function openMoveTableModal(id){
+function hasBookingConflict(targetIndex, booking, excludeBookingId){
+  const target = Number(targetIndex);
 
+  const startA = timeToMinutes(booking.startTime);
+  const endA = timeToMinutes(booking.endTime);
+
+  return (state.bookings || []).some(b=>{
+    if(Number(b.id) === Number(excludeBookingId)) return false;
+    if((b.date || currentBookingDate) !== currentBookingDate) return false;
+
+    const indexes = (b.tableIndexes || [b.tableIndex])
+      .filter(v=>v !== undefined && v !== null)
+      .map(Number);
+
+    if(!indexes.includes(target)) return false;
+
+    const startB = timeToMinutes(b.startTime);
+    const endB = timeToMinutes(b.endTime);
+
+    return startA < endB && endA > startB;
+  });
+}
+
+function openMoveTableModal(id){
   if(!id) id = activeBookingId;
 
   const b = getBookingById(id);
@@ -510,36 +532,39 @@ function openMoveTableModal(id){
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
 
-  const runningIndexes = bookingIndexes.filter(i=>{
-    return state.tables[i]?.start;
-  });
-
-  if(runningIndexes.length === 0){
-    alert("这个预约还没有开始计时，不能移动使用中的桌位");
+  if(bookingIndexes.length === 0){
+    alert("这个预约没有桌位数据");
     return;
   }
 
   document.getElementById("moveTableInfo").innerHTML = `
     客人：${b.name || "-"} ${String(b.phone || "").slice(-4) || ""}<br>
-    当前使用中：${runningIndexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
+    预约时间：${b.startTime || "-"} - ${b.endTime || "-"}<br>
+    当前桌位：${bookingIndexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
   `;
 
-  document.getElementById("moveFromTable").innerHTML = runningIndexes.map(i=>`
-    <option value="${i}">${state.tables[i]?.name || (i+1)+"号桌"}</option>
-  `).join("");
+  document.getElementById("moveFromTable").innerHTML = bookingIndexes.map(i=>{
+    const running = state.tables[i]?.start ? "｜已开始" : "｜未开始";
+    return `<option value="${i}">${state.tables[i]?.name || (i+1)+"号桌"}${running}</option>`;
+  }).join("");
 
   document.getElementById("moveToTable").innerHTML = state.tables.map((t,i)=>{
-    const disabled = t.start ? "disabled" : "";
-    const text = t.start ? `${t.name}｜使用中` : `${t.name}｜空闲`;
+    const isSameBookingTable = bookingIndexes.includes(i);
+    const occupied = !!t.start && !isSameBookingTable;
+    const conflict = hasBookingConflict(i, b, b.id) && !isSameBookingTable;
+
+    const disabled = occupied || conflict ? "disabled" : "";
+
+    let text = t.name;
+    if(occupied) text += "｜使用中";
+    else if(conflict) text += "｜已有预约";
+    else if(isSameBookingTable) text += "｜当前预约桌";
+    else text += "｜可移动";
+
     return `<option value="${i}" ${disabled}>${text}</option>`;
   }).join("");
 
   document.getElementById("moveTableModalBg").style.display = "block";
-}
-
-function closeMoveTableModal(){
-  document.getElementById("moveTableModalBg").style.display = "none";
-  moveBookingId = null;
 }
 
 function confirmMoveTable(){
@@ -554,33 +579,45 @@ function confirmMoveTable(){
     return;
   }
 
-  const fromTable = state.tables[fromIndex];
-  const toTable = state.tables[toIndex];
+  const bookingIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
 
-  if(!fromTable?.start){
-    alert("原桌位没有正在计时");
+  if(!bookingIndexes.includes(fromIndex)){
+    alert("原桌位不属于这个预约");
     return;
   }
+
+  const fromTable = state.tables[fromIndex];
+  const toTable = state.tables[toIndex];
 
   if(toTable?.start){
     alert("目标桌位正在使用中，不能移动");
     return;
   }
 
-  const oldToName = toTable.name;
-  const oldFromName = fromTable.name;
+  if(hasBookingConflict(toIndex, b, b.id)){
+    alert("目标桌位在这个时间段已有预约，不能移动");
+    return;
+  }
 
-  state.tables[toIndex] = {
-    ...fromTable,
-    name: oldToName
-  };
+  const fromStarted = !!fromTable?.start;
 
-  state.tables[fromIndex] = resetTable(oldFromName);
+  if(fromStarted){
+    const oldFromName = fromTable.name;
+    const oldToName = toTable.name;
 
-  b.tableIndexes = (b.tableIndexes || [b.tableIndex])
-    .filter(v=>v !== undefined && v !== null)
-    .map(Number)
-    .map(i=>i === fromIndex ? toIndex : i);
+    state.tables[toIndex] = {
+      ...fromTable,
+      name: oldToName
+    };
+
+    state.tables[fromIndex] = resetTable(oldFromName);
+  }
+
+  b.tableIndexes = bookingIndexes.map(i=>{
+    return i === fromIndex ? toIndex : i;
+  });
 
   if(b.checkedInTableIndexes){
     b.checkedInTableIndexes = b.checkedInTableIndexes
@@ -594,7 +631,18 @@ function confirmMoveTable(){
   closeMoveTableModal();
   renderBookingGrid();
   renderList();
+
+  alert("桌位已移动");
 }
+
+
+function closeMoveTableModal(){
+  document.getElementById("moveTableModalBg").style.display = "none";
+  moveBookingId = null;
+}
+
+
+
 
 function startSelectSlot(e,tableIndex,rowIndex){
   if(bookingLocked) return;
