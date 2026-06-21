@@ -139,6 +139,68 @@ function addCustomerVisit({name, phone, packageIndex, tableIndexes, startTime, e
   });
 }
 
+function createOrUpdateTableRecord(t, {
+  customerType = "walkin",
+  checkoutMethod = "开始计时"
+} = {}){
+  if(!state.records) state.records = [];
+
+  const p = state.packages?.[Number(t.packageIndex || 0)] || {};
+  const paidJPY = Number(p.price || 0);
+  const now = Date.now();
+
+  let record = t.recordId
+    ? state.records.find(r=>r.id === t.recordId)
+    : null;
+
+  if(!record){
+    record = {
+      id:"rec_" + now + "_" + Math.random().toString(36).slice(2,8),
+      timestamp:now,
+      time:new Date(now).toLocaleString()
+    };
+
+    state.records.push(record);
+    t.recordId = record.id;
+  }
+
+  record.timestamp = record.timestamp || now;
+  record.time = record.time || new Date(now).toLocaleString();
+
+  record.tableName = t.name;
+  record.customerName = t.customer?.name || "";
+  record.phoneLast4 = t.customer?.phoneLast4 || "";
+  record.customerType = customerType;
+
+  record.packageName = p.name || "";
+  record.packageMinutes = p.unlimited ? "不限时" : p.minutes;
+  record.packagePrice = paidJPY;
+
+  record.extraMinutes = Math.floor(Number(t.extra || 0) / 60000);
+  record.extensionAmount = 0;
+  record.originalJPY = paidJPY;
+
+  record.paidJPY = paidJPY;
+  record.dueJPY = 0;
+  record.totalJPY = paidJPY;
+  record.totalRMB = Math.floor(paidJPY * 0.044);
+
+  record.pay = t.pay || "未记录";
+  record.currency = t.currency || "日元";
+  record.payTiming = "prepaid";
+
+  record.paidStatus = "已结清";
+  record.recordType = "prepaid";
+  record.checkoutMethod = checkoutMethod;
+  record.roundRule = "不抹零";
+
+  t.paidJPY = paidJPY;
+  t.paidRMB = Math.floor(paidJPY * 0.044);
+  t.paidAt = now;
+
+  return record;
+}
+
 function getTodayDate(){
   const d = new Date();
   const y = d.getFullYear();
@@ -1052,6 +1114,10 @@ function confirmGridBooking(){
       t.alerted = false;
       t.alerting = false;
       t.lastAction = "start";
+      createOrUpdateTableRecord(t, {
+  customerType:"walkin",
+  checkoutMethod:"Walk-in开始计时"
+});
     });
 
     save();
@@ -1573,6 +1639,13 @@ function confirmCheckInSelected(){
     t.alerted = false;
     t.alerting = false;
     t.lastAction = "start";
+
+    createOrUpdateTableRecord(t, {
+  customerType:"booking",
+  checkoutMethod:"预约到店开始计时"
+});
+
+
   });
 
   if(!b.checkedInTableIndexes){
