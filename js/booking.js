@@ -76,17 +76,33 @@ onSnapshot(ref, snap=>{
 
   if(!state.bookings) state.bookings = [];
   if(!state.customers) state.customers = [];
+  if(!state.records) state.records = [];
 
   if(!Array.isArray(state.tables) || state.tables.length === 0){
     state.tables = Array.from({length:12},(_,i)=>({
       name:(i+1)+"号桌"
     }));
   }
+  let needSave = false;
 
-  try{
-    renderList();
-    renderBookingGrid();
-  }catch(e){
+state.tables.forEach(t=>{
+  if(t.start && !t.recordId){
+    createOrUpdateTableRecord(t,{
+      customerType: t.type === "booking" ? "booking" : "walkin",
+      checkoutMethod: "补写开始计时账单"
+    });
+    needSave = true;
+  }
+});
+
+if(needSave){
+  save();
+}
+
+try{
+  renderList();
+  renderBookingGrid();
+}catch(e){
     alert("预约页面错误：" + e.message);
   }
 });
