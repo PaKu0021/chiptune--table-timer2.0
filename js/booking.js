@@ -1116,7 +1116,16 @@ function drawExistingBookings(){
         };
 
         if(rowIndex === startRow && tableIndex === tableIndexes[0]){
-  cell.innerHTML = b.checkedIn ? "" : (b.name || "");
+  if(rowIndex === startRow && tableIndex === tableIndexes[0]){
+  const phoneLast4 = String(b.phone || "").slice(-4);
+
+  cell.innerHTML = b.checkedIn
+    ? ""
+    : `
+      <div class="booking-cell-name">${b.name || "-"}</div>
+      <div class="booking-cell-phone">${phoneLast4 || ""}</div>
+    `;
+}
 }               
       }
     });

@@ -950,3 +950,15 @@ button.selected-pop{
   color:#d93025;
 }
 
+.booking-cell-name{
+  font-weight:900;
+  font-size:14px;
+  line-height:1.2;
+}
+
+.booking-cell-phone{
+  font-size:12px;
+  font-weight:800;
+  color:#555;
+  margin-top:2px;
+}
