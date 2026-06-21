@@ -942,6 +942,27 @@ if(visit){
   visit.closedTime = new Date().toLocaleString();
 }
 
+if(t.bookingId){
+  const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
+
+  if(b){
+    if(!Array.isArray(b.finishedTableIndexes)){
+      b.finishedTableIndexes = [];
+    }
+
+    b.finishedTableIndexes = Array.from(new Set([
+      ...b.finishedTableIndexes.map(Number),
+      checkoutIndex
+    ]));
+
+    if(Array.isArray(b.checkedInTableIndexes)){
+      b.checkedInTableIndexes = b.checkedInTableIndexes
+        .map(Number)
+        .filter(i=>i !== checkoutIndex);
+    }
+  }
+}
+
 state.tables[checkoutIndex] = resetTable(t.name);
   save();
   closeCheckout();

@@ -1354,9 +1354,12 @@ function drawExistingBookings(){
   });
 
   dayBookings.forEach(b=>{
+    const finished = (b.finishedTableIndexes || []).map(Number);
+
     const tableIndexes = (b.tableIndexes || [b.tableIndex])
       .filter(v=>v !== undefined && v !== null)
-      .map(Number);
+      .map(Number)
+      .filter(i=>!finished.includes(i));
 
     const startRow = slots.indexOf(b.startTime);
     let endRow = slots.indexOf(b.endTime);
