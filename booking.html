@@ -177,8 +177,15 @@
 
     <div id="moveTableInfo" style="margin-bottom:12px;font-weight:800;"></div>
 
-    <select id="moveFromTable"></select>
-    <select id="moveToTable"></select>
+    <div>
+  <div class="move-title">选择要移动的桌位</div>
+  <div id="moveFromTableBox" class="move-table-grid"></div>
+</div>
+
+<div>
+  <div class="move-title">选择移动到哪桌</div>
+  <div id="moveToTableBox" class="move-table-grid"></div>
+</div>
 
     <button class="btn-main full" onclick="confirmMoveTable()">
       确认移动

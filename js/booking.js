@@ -13,6 +13,8 @@ let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = currentBookingDate;
 let bookingListOpen = false;
 let moveBookingId = null;
+let moveFromIndex = null;
+let moveToIndex = null;
 
 const BOOKING_COLORS = [
   "#B7E4C7",
@@ -527,15 +529,12 @@ function openMoveTableModal(id){
   if(!b) return;
 
   moveBookingId = id;
+  moveFromIndex = null;
+  moveToIndex = null;
 
   const bookingIndexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
-
-  if(bookingIndexes.length === 0){
-    alert("这个预约没有桌位数据");
-    return;
-  }
 
   document.getElementById("moveTableInfo").innerHTML = `
     客人：${b.name || "-"} ${String(b.phone || "").slice(-4) || ""}<br>
@@ -543,36 +542,84 @@ function openMoveTableModal(id){
     当前桌位：${bookingIndexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
   `;
 
-  document.getElementById("moveFromTable").innerHTML = bookingIndexes.map(i=>{
-    const running = state.tables[i]?.start ? "｜已开始" : "｜未开始";
-    return `<option value="${i}">${state.tables[i]?.name || (i+1)+"号桌"}${running}</option>`;
+  document.getElementById("moveFromTableBox").innerHTML = bookingIndexes.map(i=>{
+    const running = state.tables[i]?.start ? "已开始" : "未开始";
+
+    return `
+      <button
+        class="move-table-btn"
+        onclick="selectMoveFrom(${i})"
+        id="move-from-${i}"
+      >
+        ${state.tables[i]?.name || (i+1)+"号桌"}<br>
+        <small>${running}</small>
+      </button>
+    `;
   }).join("");
 
-  document.getElementById("moveToTable").innerHTML = state.tables.map((t,i)=>{
+  document.getElementById("moveToTableBox").innerHTML = state.tables.map((t,i)=>{
     const isSameBookingTable = bookingIndexes.includes(i);
     const occupied = !!t.start && !isSameBookingTable;
     const conflict = hasBookingConflict(i, b, b.id) && !isSameBookingTable;
 
-    const disabled = occupied || conflict ? "disabled" : "";
+    let disabled = occupied || conflict;
+    let sub = "可移动";
 
-    let text = t.name;
-    if(occupied) text += "｜使用中";
-    else if(conflict) text += "｜已有预约";
-    else if(isSameBookingTable) text += "｜当前预约桌";
-    else text += "｜可移动";
+    if(occupied) sub = "使用中";
+    else if(conflict) sub = "已有预约";
+    else if(isSameBookingTable) sub = "当前预约桌";
 
-    return `<option value="${i}" ${disabled}>${text}</option>`;
+    return `
+      <button
+        class="move-table-btn ${disabled ? "disabled" : ""}"
+        onclick="${disabled ? "" : `selectMoveTo(${i})`}"
+        id="move-to-${i}"
+        ${disabled ? "disabled" : ""}
+      >
+        ${t.name}<br>
+        <small>${sub}</small>
+      </button>
+    `;
   }).join("");
 
   document.getElementById("moveTableModalBg").style.display = "block";
+}
+
+function selectMoveFrom(i){
+  moveFromIndex = Number(i);
+
+  document.querySelectorAll("#moveFromTableBox .move-table-btn")
+    .forEach(btn=>btn.classList.remove("selected"));
+
+  document.getElementById("move-from-" + i)?.classList.add("selected");
+}
+
+function selectMoveTo(i){
+  moveToIndex = Number(i);
+
+  document.querySelectorAll("#moveToTableBox .move-table-btn")
+    .forEach(btn=>btn.classList.remove("selected"));
+
+  document.getElementById("move-to-" + i)?.classList.add("selected");
 }
 
 function confirmMoveTable(){
   const b = getBookingById(moveBookingId);
   if(!b) return;
 
-  const fromIndex = Number(document.getElementById("moveFromTable").value);
-  const toIndex = Number(document.getElementById("moveToTable").value);
+
+  if(moveFromIndex === null){
+  alert("请选择要移动的桌位");
+  return;
+}
+
+if(moveToIndex === null){
+  alert("请选择移动到哪桌");
+  return;
+}
+
+const fromIndex = moveFromIndex;
+const toIndex = moveToIndex;
 
   if(fromIndex === toIndex){
     alert("新桌位不能和原桌位一样");
@@ -1524,3 +1571,5 @@ window.confirmCheckInSelected = confirmCheckInSelected;
 window.openMoveTableModal = openMoveTableModal;
 window.closeMoveTableModal = closeMoveTableModal;
 window.confirmMoveTable = confirmMoveTable;
+window.selectMoveFrom = selectMoveFrom;
+window.selectMoveTo = selectMoveTo;

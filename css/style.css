@@ -962,3 +962,39 @@ button.selected-pop{
   color:#555;
   margin-top:2px;
 }
+
+.move-title{
+  font-weight:900;
+  margin:14px 0 8px;
+}
+
+.move-table-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;
+}
+
+.move-table-btn{
+  min-height:64px;
+  background:#fff;
+  color:#332d24;
+  border:1px solid #e6dccb;
+  border-radius:14px;
+  font-weight:900;
+}
+
+.move-table-btn small{
+  color:#8a8174;
+  font-weight:800;
+}
+
+.move-table-btn.selected{
+  background:#f2c94c !important;
+  border-color:#d8a900 !important;
+  color:#332d24 !important;
+}
+
+.move-table-btn.disabled{
+  background:#ddd !important;
+  color:#999 !important;
+}
