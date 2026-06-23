@@ -1243,15 +1243,15 @@ function openBatchCheckout(){
 
           <select id="batch-pay-${i}">
             <option value="">付款方式</option>
-            <option value="现金">现金</option>
-            <option value="PayPay">PayPay</option>
-            <option value="微信">微信</option>
-            <option value="支付宝">支付宝</option>
+            <option value="现金" ${t.pay==="现金"?"selected":""}>现金</option>
+            <option value="PayPay" ${t.pay==="PayPay"?"selected":""}>PayPay</option>
+            <option value="微信" ${t.pay==="微信"?"selected":""}>微信</option>
+            <option value="支付宝" ${t.pay==="支付宝"?"selected":""}>支付宝</option>            
           </select>
 
           <select id="batch-currency-${i}">
-            <option value="日元">日元</option>
-            <option value="人民币">人民币</option>
+            <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
+            <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
           </select>
 
           <input
