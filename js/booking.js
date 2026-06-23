@@ -1452,9 +1452,18 @@ function drawRunningTables(){
         `.slot-cell[data-table="${tableIndex}"][data-row="${row}"]`
       );
 
-      if(cell){
-        cell.style.background = bgColor;
-      }
+    if(cell){
+  cell.style.background = bgColor;
+
+  cell.onclick = (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+
+    if(bookingLocked) return;
+
+    openRunningTablePay(tableIndex);
+  };
+}      
     }
 
     const middleRow = Math.floor((startRow + endRow) / 2);
@@ -1482,7 +1491,49 @@ middleCell.innerHTML = `
 
 
 
+function openRunningTablePay(tableIndex){
+  const t = state.tables[tableIndex];
+  if(!t || !t.start) return;
 
+  const pay = prompt(
+    `${t.name} 选择付款方式：\n\n1 = 现金\n2 = PayPay\n3 = 微信\n4 = 支付宝`,
+    t.pay || ""
+  );
+
+  if(pay === null) return;
+
+  const map = {
+    "1":"现金",
+    "2":"PayPay",
+    "3":"微信",
+    "4":"支付宝",
+    "现金":"现金",
+    "PayPay":"PayPay",
+    "微信":"微信",
+    "支付宝":"支付宝"
+  };
+
+  const value = map[pay];
+
+  if(!value){
+    alert("付款方式无效");
+    return;
+  }
+
+  t.pay = value;
+
+  if(t.recordId){
+    const r = state.records.find(x=>x.id === t.recordId);
+    if(r){
+      r.pay = value;
+    }
+  }
+
+  save();
+  renderBookingGrid();
+
+  alert(`${t.name} 已设置付款方式：${value}`);
+}
 
 
 
@@ -1805,3 +1856,4 @@ window.openMoveTableModal = openMoveTableModal;
 window.closeMoveTableModal = closeMoveTableModal;
 window.confirmMoveTable = confirmMoveTable;
 window.startMoveDrag = startMoveDrag;
+window.openRunningTablePay = openRunningTablePay;
