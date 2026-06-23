@@ -17,6 +17,7 @@
     </div>
 
     <div class="header-actions">
+        <div id="globalNav"></div>
       <button class="btn-ghost" onclick="location.href='./index.html'">首页</button>
       <button
   class="btn-ghost"
@@ -80,7 +81,10 @@ function goOwner(){
 </script>
 
 
+<script type="module">
+import { renderNav } from "./js/nav.js";
 
-<script type="module" src="./js/today-bill.js"></script>
+renderNav("bill");
+</script>
 </body>
 </html>
