@@ -205,5 +205,29 @@
   });
 </script>
 
+<div id="runningPayModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>付款方式</h2>
+
+    <div id="runningPayInfo" style="font-weight:900;margin-bottom:12px;"></div>
+
+    <select id="runningPaySelect">
+      <option value="">请选择付款方式</option>
+      <option value="现金">现金</option>
+      <option value="PayPay">PayPay</option>
+      <option value="微信">微信</option>
+      <option value="支付宝">支付宝</option>
+    </select>
+
+    <button class="btn-main full" onclick="confirmRunningTablePay()">
+      保存付款方式
+    </button>
+
+    <button class="btn-ghost full" onclick="closeRunningTablePay()">
+      关闭
+    </button>
+  </div>
+</div>
+
 </body>
 </html>

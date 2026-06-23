@@ -17,7 +17,7 @@ let movePairs = [];
 let draggingMoveFrom = null;
 let moveLineRAF = null;
 let lastMovePointer = null;
-
+let runningPayTableIndex = null;
 
 const MOVE_LINE_COLORS = [
   "#e85d5d",
@@ -1490,33 +1490,35 @@ middleCell.innerHTML = `
 }
 
 
-
 function openRunningTablePay(tableIndex){
   const t = state.tables[tableIndex];
   if(!t || !t.start) return;
 
-  const pay = prompt(
-    `${t.name} 选择付款方式：\n\n1 = 现金\n2 = PayPay\n3 = 微信\n4 = 支付宝`,
-    t.pay || ""
-  );
+  runningPayTableIndex = tableIndex;
 
-  if(pay === null) return;
+  document.getElementById("runningPayInfo").innerHTML = `
+    ${t.name}<br>
+    当前付款方式：${t.pay || "未记录"}
+  `;
 
-  const map = {
-    "1":"现金",
-    "2":"PayPay",
-    "3":"微信",
-    "4":"支付宝",
-    "现金":"现金",
-    "PayPay":"PayPay",
-    "微信":"微信",
-    "支付宝":"支付宝"
-  };
+  document.getElementById("runningPaySelect").value = t.pay || "";
 
-  const value = map[pay];
+  document.getElementById("runningPayModalBg").style.display = "block";
+}
+
+function closeRunningTablePay(){
+  document.getElementById("runningPayModalBg").style.display = "none";
+  runningPayTableIndex = null;
+}
+
+function confirmRunningTablePay(){
+  if(runningPayTableIndex === null) return;
+
+  const t = state.tables[runningPayTableIndex];
+  const value = document.getElementById("runningPaySelect").value;
 
   if(!value){
-    alert("付款方式无效");
+    alert("请选择付款方式");
     return;
   }
 
@@ -1530,14 +1532,11 @@ function openRunningTablePay(tableIndex){
   }
 
   save();
+  closeRunningTablePay();
   renderBookingGrid();
 
   alert(`${t.name} 已设置付款方式：${value}`);
 }
-
-
-
-
 
 
 
@@ -1857,3 +1856,6 @@ window.closeMoveTableModal = closeMoveTableModal;
 window.confirmMoveTable = confirmMoveTable;
 window.startMoveDrag = startMoveDrag;
 window.openRunningTablePay = openRunningTablePay;
+window.openRunningTablePay = openRunningTablePay;
+window.closeRunningTablePay = closeRunningTablePay;
+window.confirmRunningTablePay = confirmRunningTablePay;
