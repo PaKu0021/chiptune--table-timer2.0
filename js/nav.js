@@ -35,4 +35,4 @@ window.goOwner = function(){
   }
 
   location.href = "./owner.html";
-}
+};
