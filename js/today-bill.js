@@ -1,6 +1,7 @@
 import { doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
-import { db } from "./firebase.js";
+import { db, storage } from "./firebase.js";
 
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
@@ -134,12 +135,59 @@ function renderTodayBill(){
 }
 
 function uploadReceipt(recordId){
-  alert("下一步要接收款截图上传功能：需要配合 today-bill.html 加 input。");
+  const input = document.getElementById("receiptInput");
+  if(!input){
+    alert("找不到 receiptInput，请先在 today-bill.html 加上传 input");
+    return;
+  }
+
+  input.value = "";
+  input.dataset.recordId = recordId;
+  input.click();
+}
+
+async function handleReceiptFileChange(e){
+  const file = e.target.files?.[0];
+  const recordId = e.target.dataset.recordId;
+
+  if(!file || !recordId) return;
+
+  const r = state.records.find(x => x.id === recordId);
+  if(!r){
+    alert("找不到这条账单");
+    return;
+  }
+
+  try{
+    const path = `receipts/${recordId}_${Date.now()}_${file.name}`;
+    const fileRef = storageRef(storage, path);
+
+    await uploadBytes(fileRef, file);
+
+    const url = await getDownloadURL(fileRef);
+
+    r.receiptImage = url;
+    r.receiptFileName = file.name;
+    r.receiptUploadedAt = Date.now();
+    r.receiptUploadedTime = new Date().toLocaleString();
+
+    await save();
+
+    alert("收款截图已上传");
+  }catch(err){
+    console.error(err);
+    alert("上传失败：" + err.message);
+  }
 }
 
 function confirmExtension(recordId){
   const r = state.records.find(x => x.id === recordId);
   if(!r) return;
+
+  if(!r.receiptImage){
+    const ok = confirm("这笔续费还没有上传收款截图，确定先确认吗？");
+    if(!ok) return;
+  }
 
   r.extensionConfirmed = true;
   r.extensionConfirmedAt = Date.now();
@@ -151,3 +199,4 @@ function confirmExtension(recordId){
 
 window.confirmExtension = confirmExtension;
 window.uploadReceipt = uploadReceipt;
+window.handleReceiptFileChange = handleReceiptFileChange;
