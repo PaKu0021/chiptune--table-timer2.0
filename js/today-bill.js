@@ -1,10 +1,14 @@
+import { doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
 import { db } from "./firebase.js";
-import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 
 let state = null;
+function save(){
+  return setDoc(ref, state);
+}
 
 onSnapshot(ref, snap => {
   if(!snap.exists()) return;
@@ -108,7 +112,42 @@ function renderTodayBill(){
         <td>${r.pay || ""}</td>
         <td>${r.currency || ""}</td>
         <td>${r.roundRule || ""}</td>
+<td>
+  ${r.receiptImage
+    ? `<img src="${r.receiptImage}" style="width:60px;border-radius:8px;">`
+    : `<button class="btn-ghost" onclick="uploadReceipt('${r.id}')">上传</button>`
+  }
+</td>
+<td>
+  ${Number(r.extraMinutes || 0) > 0
+    ? (
+        r.extensionConfirmed
+          ? `已确认<br><small>${r.extensionConfirmedTime || ""}</small>`
+          : `<button class="btn-main" onclick="confirmExtension('${r.id}')">续费确认</button>`
+      )
+    : "-"
+  }
+</td>        
       </tr>
     `;
   }).join("");
 }
+
+function uploadReceipt(recordId){
+  alert("下一步要接收款截图上传功能：需要配合 today-bill.html 加 input。");
+}
+
+function confirmExtension(recordId){
+  const r = state.records.find(x => x.id === recordId);
+  if(!r) return;
+
+  r.extensionConfirmed = true;
+  r.extensionConfirmedAt = Date.now();
+  r.extensionConfirmedTime = new Date().toLocaleString();
+
+  save();
+  alert("续费已确认");
+}
+
+window.confirmExtension = confirmExtension;
+window.uploadReceipt = uploadReceipt;
