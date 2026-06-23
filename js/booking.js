@@ -989,13 +989,22 @@ function endSelectSlot(e){
     `${tableNames.join("、")}｜${startTime} - ${endTime}`;
 
   const tip = document.getElementById("selectionTip");
-  if(tip) tip.style.display = "none";
-  fillModalPackages();
+if(tip) tip.style.display = "none";
+
+fillModalPackages();
+
+const autoPackageIndex = findPackageIndexByDuration(startTime, endTime);
+const modalPackage = document.getElementById("modalPackage");
+
+if(modalPackage){
+  modalPackage.value = String(autoPackageIndex);
+}
 
 const modalType = document.getElementById("modalType");
 if(modalType) modalType.value = "booking";
 
 toggleModalType();
+
 
   document.getElementById("bookingModalBg").style.display = "block";
 }
