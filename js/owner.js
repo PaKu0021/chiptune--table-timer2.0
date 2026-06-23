@@ -3,7 +3,6 @@ import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.1
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
 
-const OWNER_PASSWORD = "prompt";
 const ref = doc(db,"shop","main");
 const RATE = 0.044;
 
