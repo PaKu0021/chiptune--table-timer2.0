@@ -51,6 +51,44 @@ function toRMB(r){
   return Math.floor(toJPY(r) * RATE);
 }
 
+function compressImage(file, maxWidth = 800, quality = 0.6){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = e=>{
+      img.src = e.target.result;
+    };
+
+    img.onload = ()=>{
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(blob=>{
+        if(!blob){
+          reject(new Error("图片压缩失败"));
+          return;
+        }
+
+        resolve(new File(
+          [blob],
+          file.name.replace(/\.[^.]+$/, "") + ".jpg",
+          { type:"image/jpeg" }
+        ));
+      }, "image/jpeg", quality);
+    };
+
+    img.onerror = reject;
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function renderTodayBill(){
   const list = getTodayRecords();
 
@@ -159,15 +197,18 @@ async function handleReceiptFileChange(e){
   }
 
   try{
-    const path = `receipts/${recordId}_${Date.now()}_${file.name}`;
+    const compressedFile = await compressImage(file, 800, 0.6);
+
+    const path = `receipts/${recordId}_${Date.now()}.jpg`;
     const fileRef = storageRef(storage, path);
 
-    await uploadBytes(fileRef, file);
+    await uploadBytes(fileRef, compressedFile);
 
     const url = await getDownloadURL(fileRef);
 
     r.receiptImage = url;
-    r.receiptFileName = file.name;
+    r.receiptPath = path;
+    r.receiptFileName = compressedFile.name;
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
 
@@ -179,6 +220,7 @@ async function handleReceiptFileChange(e){
     alert("上传失败：" + err.message);
   }
 }
+
 
 function confirmExtension(recordId){
   const r = state.records.find(x => x.id === recordId);
@@ -197,6 +239,28 @@ function confirmExtension(recordId){
   alert("续费已确认");
 }
 
+function cleanupOldReceipts(){
+  if(!confirm("确定清理90天前的收款截图记录吗？图片文件可能仍保留在 Storage，但账单里将不再显示。")) return;
+
+  const limit = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  let count = 0;
+
+  state.records.forEach(r=>{
+    if(r.receiptUploadedAt && r.receiptUploadedAt < limit){
+      delete r.receiptImage;
+      delete r.receiptPath;
+      delete r.receiptFileName;
+      delete r.receiptUploadedAt;
+      delete r.receiptUploadedTime;
+      count++;
+    }
+  });
+
+  save();
+  alert(`已清理 ${count} 条90天前截图记录`);
+}
+
 window.confirmExtension = confirmExtension;
 window.uploadReceipt = uploadReceipt;
 window.handleReceiptFileChange = handleReceiptFileChange;
+window.cleanupOldReceipts = cleanupOldReceipts;

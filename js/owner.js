@@ -431,34 +431,80 @@ function uploadReceipt(recordId){
   input.click();
 }
 
+async function compressImage(file){
+  return new Promise(resolve=>{
+    const img = new Image();
+
+    img.onload = ()=>{
+      const canvas = document.createElement("canvas");
+
+      const maxWidth = 800;
+
+      const scale = Math.min(1,maxWidth / img.width);
+
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+
+      canvas.toBlob(
+        blob=>resolve(blob),
+        "image/jpeg",
+        0.6
+      );
+      
+    };
+
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 async function handleOwnerReceiptFileChange(e){
   const file = e.target.files?.[0];
+
   if(!file || !uploadingRecordId) return;
 
-  const path = `receipts/${uploadingRecordId}_${Date.now()}_${file.name}`;
-  const imgRef = storageRef(storage, path);
-
-  await uploadBytes(imgRef, file);
-
-  const url = await getDownloadURL(imgRef);
-
-  const record = state.records.find(r=>r.id === uploadingRecordId);
-  if(record){
-    record.receiptImage = url;
-    record.receiptFileName = file.name;
-    record.receiptUploadedAt = Date.now();
-    record.receiptUploadedTime = new Date().toLocaleString();
+  const r = state.records.find(x => x.id === uploadingRecordId);
+  if(!r){
+    alert("找不到这条账单");
+    return;
   }
 
-  uploadingRecordId = null;
+  try{
+    const compressedBlob = await compressImage(file);
 
-  await save();
-  alert("收款截图已上传");
+    const path = `receipts/${uploadingRecordId}_${Date.now()}.jpg`;
+    const fileRef = storageRef(storage, path);
+
+    await uploadBytes(fileRef, compressedBlob);
+
+    const url = await getDownloadURL(fileRef);
+
+    r.receiptImage = url;
+    r.receiptPath = path;
+    r.receiptFileName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    r.receiptUploadedAt = Date.now();
+    r.receiptUploadedTime = new Date().toLocaleString();
+
+    await save();
+
+    uploadingRecordId = null;
+    alert("收款截图已上传");
+  }catch(err){
+    console.error(err);
+    alert("上传失败：" + err.message);
+  }
 }
 
 function confirmExtension(recordId){
   const r = state.records.find(x=>x.id === recordId);
   if(!r) return;
+
+  if(!r.receiptImage){
+    const ok = confirm("这笔续费还没有上传收款截图，确定先确认吗？");
+    if(!ok) return;
+  }
 
   r.extensionConfirmed = true;
   r.extensionConfirmedAt = Date.now();
@@ -467,6 +513,7 @@ function confirmExtension(recordId){
   save();
   alert("续费已确认");
 }
+
 
 function collectPackagesFromInputs(){
   state.packages = state.packages.map((p,i)=>({
