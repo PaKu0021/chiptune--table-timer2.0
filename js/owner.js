@@ -1,5 +1,7 @@
-import { db } from "./firebase.js";
+import { db, storage } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
+
 
 const OWNER_PASSWORD = "prompt";
 
@@ -364,14 +366,14 @@ function renderRecords(){
     const phone = r.phoneLast4 || "";
     const type = (r.customerType || r.type) === "booking" ? "预约" : "Walk-in";
     const packageName = r.packageName || "";
-    const extra = r.extraMinutes || 0;
+    const extra = Number(r.extraMinutes || 0);
     const original = r.originalJPY || r.totalJPY || r.jpy || 0;
     const jpy = toJPY(r);
     const rmb = toRMB(r);
 
     return `
       <tr>
-        <td>${r.time || ""}</td>
+        <td>${r.closedTime || r.time || ""}</td>
         <td>${table}</td>
         <td>${name}${phone ? "("+phone+")" : ""}</td>
         <td>${type}</td>
@@ -383,9 +385,87 @@ function renderRecords(){
         <td>${r.pay || ""}</td>
         <td>${r.currency || ""}</td>
         <td>${r.roundRule || ""}</td>
+
+        <td>
+          ${r.receiptImage
+            ? `<img src="${r.receiptImage}" style="width:60px;border-radius:8px;">`
+            : `<button class="btn-ghost" onclick="uploadReceipt('${r.id}')">上传</button>`
+          }
+        </td>
+
+        <td>
+          ${extra > 0
+            ? (
+                r.extensionConfirmed
+                  ? `已确认<br><small>${r.extensionConfirmedTime || ""}</small>`
+                  : `<button class="btn-main" onclick="confirmExtension('${r.id}')">续费确认</button>`
+              )
+            : "-"
+          }
+        </td>
       </tr>
     `;
   }).join("");
+}
+
+let uploadingRecordId = null;
+
+function uploadReceipt(recordId){
+  uploadingRecordId = recordId;
+
+  let input = document.getElementById("ownerReceiptInput");
+
+  if(!input){
+    input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.id = "ownerReceiptInput";
+    input.style.display = "none";
+
+    input.onchange = handleOwnerReceiptFileChange;
+
+    document.body.appendChild(input);
+  }
+
+  input.value = "";
+  input.click();
+}
+
+async function handleOwnerReceiptFileChange(e){
+  const file = e.target.files?.[0];
+  if(!file || !uploadingRecordId) return;
+
+  const path = `receipts/${uploadingRecordId}_${Date.now()}_${file.name}`;
+  const imgRef = storageRef(storage, path);
+
+  await uploadBytes(imgRef, file);
+
+  const url = await getDownloadURL(imgRef);
+
+  const record = state.records.find(r=>r.id === uploadingRecordId);
+  if(record){
+    record.receiptImage = url;
+    record.receiptFileName = file.name;
+    record.receiptUploadedAt = Date.now();
+    record.receiptUploadedTime = new Date().toLocaleString();
+  }
+
+  uploadingRecordId = null;
+
+  await save();
+  alert("收款截图已上传");
+}
+
+function confirmExtension(recordId){
+  const r = state.records.find(x=>x.id === recordId);
+  if(!r) return;
+
+  r.extensionConfirmed = true;
+  r.extensionConfirmedAt = Date.now();
+  r.extensionConfirmedTime = new Date().toLocaleString();
+
+  save();
+  alert("续费已确认");
 }
 
 function collectPackagesFromInputs(){
@@ -621,3 +701,5 @@ window.saveTableCount = saveTableCount;
 window.exportCSV = exportCSV;
 window.openQrPage = openQrPage;
 window.openCashierPage = openCashierPage;
+window.uploadReceipt = uploadReceipt;
+window.confirmExtension = confirmExtension;
