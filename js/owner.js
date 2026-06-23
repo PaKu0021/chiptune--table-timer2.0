@@ -428,7 +428,7 @@ async function compressImage(file){
     img.onload = ()=>{
       const canvas = document.createElement("canvas");
 
-      const maxWidth = 800;
+      const maxWidth = 600;
 
       const scale = Math.min(1,maxWidth / img.width);
 
@@ -441,7 +441,7 @@ async function compressImage(file){
       canvas.toBlob(
         blob=>resolve(blob),
         "image/jpeg",
-        0.6
+        0.45
       );
       
     };

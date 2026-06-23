@@ -51,7 +51,7 @@ function toRMB(r){
   return Math.floor(toJPY(r) * RATE);
 }
 
-function compressImage(file, maxWidth = 800, quality = 0.6){
+function compressImage(file, maxWidth = 600, quality = 0.45){
   return new Promise((resolve, reject)=>{
     const img = new Image();
     const reader = new FileReader();
