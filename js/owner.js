@@ -2,16 +2,6 @@ import { db, storage } from "./firebase.js";
 import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
-
-const OWNER_PASSWORD = "prompt";
-
-const ok = sessionStorage.getItem("owner_auth");
-
-if(ok !== "1"){
-  location.href = "./index.html";
-  throw new Error("owner auth required");
-}
-
 const ref = doc(db,"shop","main");
 const RATE = 0.044;
 
@@ -694,6 +684,7 @@ function saveBusinessHours(){
 
 function logoutOwner(){
   sessionStorage.removeItem("owner_auth");
+  sessionStorage.removeItem("owner_auth_time");
   location.href="./index.html";
 }
 

@@ -18,7 +18,12 @@
 
     <div class="header-actions">
       <button class="btn-ghost" onclick="location.href='./index.html'">首页</button>
-      <button class="btn-ghost" onclick="location.href='./owner.html'">老板模式</button>
+      <button
+  class="btn-ghost"
+  onclick="goOwner()"
+>
+  老板模式
+</button>
     </div>
   </div>
 
@@ -68,6 +73,30 @@
   style="display:none"
   onchange="handleReceiptFileChange(event)"
 >
+
+<script>
+function goOwner(){
+  sessionStorage.removeItem("owner_auth");
+  sessionStorage.removeItem("owner_auth_time");
+  location.href="./owner.html";
+}
+</script>
+
+<script>
+
+window.goOwner = function(){
+
+  const pw = prompt("请输入老板密码");
+
+  if(pw !== "prompt"){
+    alert("密码错误");
+    return;
+  }
+
+  location.href="./owner.html";
+};
+
+</script>
 <script type="module" src="./js/today-bill.js"></script>
 </body>
 </html>

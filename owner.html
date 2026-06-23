@@ -170,12 +170,20 @@
 
 </div>
 <script type="module">
-  import { renderNav } from "./js/nav.js";
 
-  window.addEventListener("DOMContentLoaded", async ()=>{
-    renderNav("owner");
-    await import("./js/owner.js");
-  });
+const pw = prompt("请输入老板密码");
+
+if(pw !== "prompt"){
+  alert("密码错误");
+  location.href="./index.html";
+}else{
+  const { renderNav } = await import("./js/nav.js");
+
+  renderNav("owner");
+
+  await import("./js/owner.js");
+}
+
 </script>
 </body>
 </html>
