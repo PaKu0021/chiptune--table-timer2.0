@@ -421,6 +421,28 @@ function applyDateFilter(){
   renderCashier();
 }
 
+
+async function cleanupOldReceipts(){
+  if(!confirm("确定清理90天前的收款截图记录吗？图片文件可能仍保留在 Storage，但账单里将不再显示。")) return;
+
+  const limit = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  let count = 0;
+
+  state.records.forEach(r=>{
+    if(r.receiptUploadedAt && r.receiptUploadedAt < limit){
+      delete r.receiptImage;
+      delete r.receiptPath;
+      delete r.receiptFileName;
+      delete r.receiptUploadedAt;
+      delete r.receiptUploadedTime;
+      count++;
+    }
+  });
+
+  save();
+  alert(`已清理 ${count} 条90天前截图记录`);
+}
+
 window.applyDateFilter = applyDateFilter;
 window.setQuickRange = setQuickRange;
 window.renderCashier = renderCashier;
@@ -429,3 +451,4 @@ window.printCashier = printCashier;
 window.uploadReceipt = uploadReceipt;
 window.viewReceipt = viewReceipt;
 window.closeReceiptPreview = closeReceiptPreview;
+window.cleanupOldReceipts = cleanupOldReceipts;

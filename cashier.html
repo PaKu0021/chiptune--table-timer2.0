@@ -15,12 +15,34 @@
       <h1>收银记录</h1>
       <p>日期筛选 / 支付方式统计 / 导出表格 / 打印</p>
     </div>
-
     <div class="header-actions">
-      <button class="btn-ghost" onclick="location.href='./owner.html'">返回老板模式</button>
-      <button class="btn-main" onclick="printCashier()">打印</button>
-      <button class="btn-success" onclick="exportCashierCSV()">导出表格</button>
-    </div>
+
+  <button
+    class="btn-danger"
+    onclick="cleanupOldReceipts()">
+    清理90天前截图
+  </button>
+
+  <button
+    class="btn-ghost"
+    onclick="location.href='./owner.html'">
+    返回老板模式
+  </button>
+
+  <button
+    class="btn-main"
+    onclick="window.print()">
+    打印
+  </button>
+
+  <button
+    class="btn-success"
+    onclick="exportCashierCSV()">
+    导出表格
+  </button>
+
+</div>
+
   </div>
 
 <div class="panel">
