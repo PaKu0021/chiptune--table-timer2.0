@@ -41,32 +41,35 @@
     </div>
   </div>
 </div>
-  <div class="home-grid">
-    <button class="home-card primary" onclick="go('./app.html')">
-      <span class="emoji">⏱️</span>
-      <strong>进入计时系统</strong>
-      <small>桌位计时 / 结账 / 二维码 / 超时提醒</small>
-    </button>
+<div class="home-grid">
 
+  <button class="home-card" onclick="go('./booking.html')">
+    <span class="emoji">📅</span>
+    <strong>预约系统</strong>
+    <small>客人预约 / 指定桌位 / 调整座位</small>
+  </button>
 
-    <button class="home-card" onclick="location.href='./today-bill.html'">
-  <div class="emoji">🧾</div>
-  <strong>今日账单</strong>
-  <small>只查看今天收款记录</small>
-</button>
+  <button class="home-card primary" onclick="go('./app.html')">
+    <span class="emoji">⏱️</span>
+    <strong>进入计时系统</strong>
+    <small>桌位计时 / 结账 / 二维码 / 超时提醒</small>
+  </button>
 
-    <button class="home-card" onclick="goOwner()">
-      <span class="emoji">📊</span>
-      <strong>老板模式</strong>
-      <small>收入统计 / 报表 / CSV导出</small>
-    </button>
+  <button class="home-card" onclick="location.href='./today-bill.html'">
+    <div class="emoji">🧾</div>
+    <strong>今日账单</strong>
+    <small>只查看今天收款记录</small>
+  </button>
 
-    <button class="home-card" onclick="go('./booking.html')">
-      <span class="emoji">📅</span>
-      <strong>预约系统</strong>
-      <small>客人预约 / 指定桌位 / 调整座位</small>
-    </button>
-  </div>
+  <button class="home-card" onclick="goOwner()">
+    <span class="emoji">📊</span>
+    <strong>老板模式</strong>
+    <small>收入统计 / 报表 / CSV导出</small>
+  </button>
+
+</div>
+
+      
 </div>
  
 <script type="module">
