@@ -1055,3 +1055,15 @@ button.selected-pop{
   color:#999 !important;
   border-color:#ccc !important;
 }
+
+.unlocked-grid .slot-cell.disabled-slot.slot-normal,
+.unlocked-grid .slot-cell.disabled-slot.slot-warning,
+.unlocked-grid .slot-cell.disabled-slot.slot-overtime,
+.unlocked-grid .slot-cell.disabled-slot.slot-running{
+  pointer-events:auto !important;
+  cursor:pointer !important;
+}
+
+.running-block{
+  pointer-events:none !important;
+}
