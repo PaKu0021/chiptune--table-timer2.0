@@ -170,5 +170,18 @@
 
 </div>
 
+<script type="module">
+  import { renderNav } from "./js/nav.js";
+
+  window.addEventListener("DOMContentLoaded", async ()=>{
+    renderNav("owner");
+
+    import("./js/owner.js").catch(e=>{
+      alert("owner.js 加载失败：\n" + e.message);
+      console.error(e);
+    });
+  });
+</script>
+
 </body>
 </html>
