@@ -16,17 +16,11 @@
       <p>只显示今天的收款记录</p>
     </div>
 
-    <div class="header-actions">
-        <div id="globalNav"></div>
-      <button class="btn-ghost" onclick="location.href='./index.html'">首页</button>
-      <button
-  class="btn-ghost"
-  onclick="goOwner()"
->
-  老板模式
-</button>
-    </div>
-  </div>
+<div class="header-actions">
+  <div id="globalNav"></div>
+</div>
+
+</div>
 
   <div class="panel">
     <h2>今日收入</h2>
@@ -72,19 +66,13 @@
   onchange="handleReceiptFileChange(event)"
 >
 
-<script>
-function goOwner(){
-  sessionStorage.removeItem("owner_auth");
-  sessionStorage.removeItem("owner_auth_time");
-  location.href="./owner.html";
-}
-</script>
-
-
 <script type="module">
 import { renderNav } from "./js/nav.js";
 
 renderNav("bill");
+import("./js/today-bill.js");
 </script>
+
+
 </body>
 </html>
