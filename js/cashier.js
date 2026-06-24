@@ -1,31 +1,53 @@
+import { db, storage } from "./firebase.js";
 
-import { db } from "./firebase.js";
-import { doc, onSnapshot, setDoc, collection} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import {
+  doc,
+  onSnapshot,
+  setDoc,
+  collection
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
+import {
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
 async function uploadReceipt(timestamp,file){
+
   if(!file) return;
 
-  const img = await imageToBase64(file);
+  const record = records.find(
+    r=>Number(r.timestamp) === Number(timestamp)
+  );
 
-  const record = records.find(r=>Number(r.timestamp) === Number(timestamp));
   if(!record){
     alert("找不到这条收银记录");
     return;
   }
 
-  record.receiptImage = img;
+  const path =
+    `receipts/${record.id}/${Date.now()}_${file.name}`;
+
+  const imgRef = storageRef(storage,path);
+
+  await uploadBytes(imgRef,file);
+
+  const url = await getDownloadURL(imgRef);
+
+  record.receiptImage = url;
+  record.receiptPath = path;
   record.receiptFileName = file.name || "";
   record.receiptUploadedAt = Date.now();
 
   await setDoc(
-  doc(db,"records",record.id),
-  record
-);
+    doc(db,"records",record.id),
+    record
+  );
 
   alert("截图已保存");
-  renderCashier();
 }
+
 
 function viewReceipt(timestamp){
   const record = records.find(r=>Number(r.timestamp) === Number(timestamp));
@@ -158,41 +180,6 @@ function getFilteredRecords(){
   }).sort((a,b)=>getRecordTime(a) - getRecordTime(b));
 }
 
-function imageToBase64(file){
-  return new Promise((resolve,reject)=>{
-    if(!file){
-      resolve("");
-      return;
-    }
-
-    const reader = new FileReader();
-
-    reader.onload = e=>{
-      const img = new Image();
-
-      img.onload = ()=>{
-        const canvas = document.createElement("canvas");
-
-        const maxWidth = 900;
-        const scale = Math.min(1, maxWidth / img.width);
-
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img,0,0,canvas.width,canvas.height);
-
-        resolve(canvas.toDataURL("image/jpeg",0.65));
-      };
-
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 function renderCashier(){
   const rows = getFilteredRecords();
