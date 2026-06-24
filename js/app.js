@@ -1,6 +1,6 @@
 /*alert("app.js 已加载");*/
 import { db } from "./firebase.js";
-import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 /*import { formatTime } from "./common.js";*/
 import { resetTable, formatTime } from "./common.js";
 const ref = doc(db, "shop", "main");
@@ -172,9 +172,11 @@ function getDueJPY(t){
   return Math.max(0, getOriginalJPY(t) - Number(t.paidJPY || 0));
 }
 
-function getTableRecord(t){
+async function getTableRecord(t){
   if(!t.recordId) return null;
-  return state.records.find(r=>r.id === t.recordId) || null;
+
+  const snap = await getDoc(doc(db, "records", t.recordId));
+  return snap.exists() ? snap.data() : null;
 }
 
 function makeCustomerKey(name, phoneLast4){
@@ -276,7 +278,7 @@ function createOrUpdateCustomerVisit(t){
   return visit;
 }
 
-function createOrUpdateRecord(t){
+async function createOrUpdateRecord(t){
 
   const p = getPackage(t);
 const originalJPY = getOriginalJPY(t);
@@ -292,7 +294,7 @@ if((t.payTiming || "prepaid") === "prepaid"){
 
 const dueJPY = Math.max(0, originalJPY - paidJPY);
 
-  let record = getTableRecord(t);
+  let record = await getTableRecord(t);
 
   if(!record){
     const id = "rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
@@ -307,7 +309,6 @@ const dueJPY = Math.max(0, originalJPY - paidJPY);
       receiptFileName:"",
     };
 
-    state.records.push(record);
   }
 
   record.tableName = t.name;
@@ -347,7 +348,7 @@ if(visit){
   record.visitRange = visit.range;
 }
 
-
+await setDoc(doc(db, "records", record.id), record);
   return record;
 }
 
@@ -659,7 +660,7 @@ function setPackage(i,v){
   t.packageIndex = Number(v);
 
   if(t.start){
-    createOrUpdateRecord(t);
+    await createOrUpdateRecord(t);
   }
 
   save();
@@ -726,7 +727,7 @@ function updateCustomer(i){
   save();
 }
 
-function start(i){
+async function start(i){
   const pre = Number(document.getElementById("pre-"+i).value || 0);
   const t = state.tables[i];
   const startTime = Date.now() - pre * 60000;
@@ -753,7 +754,7 @@ if(t.payTiming === "prepaid"){
   t.paidAt = null;
 }
 
-createOrUpdateRecord(t);
+await createOrUpdateRecord(t);
 
   t.pausedAt = null;
   t.alerted = false;
@@ -813,7 +814,7 @@ function resume(i){
   save();
 }
 
-function addHour(i){
+async function addHour(i){
   const t = state.tables[i];
 
   stopAlertLoop(i);
@@ -821,7 +822,7 @@ function addHour(i){
   t.extra += 60 * 60 * 1000;
   t.alerted = false;
   t.alerting = false;
-  createOrUpdateRecord(t);
+  await createOrUpdateRecord(t);
   save();
 }
 
@@ -837,7 +838,7 @@ function setPay(i,v){
   t.pay = v;
 
   if(t.start){
-    createOrUpdateRecord(t);
+    await createOrUpdateRecord(t);
   }
 
   save();
@@ -848,7 +849,7 @@ function setCurrency(i,v){
   t.currency = v;
 
   if(t.start){
-    createOrUpdateRecord(t);
+    await createOrUpdateRecord(t);
   }
 
   save();
@@ -917,7 +918,7 @@ function updateCheckout(){
 
 
 
-function confirmCheckout(){
+async function confirmCheckout(){
   const t = state.tables[checkoutIndex];
   const p = getPackage(t);
 
@@ -943,7 +944,7 @@ t.currency = currency;
   const totalRMB = getRMB(finalJPY);
   const now = new Date();
 
-  const record = createOrUpdateRecord(t);
+  const record = await createOrUpdateRecord(t);
 
 t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
 t.paidRMB = getRMB(t.paidJPY);
@@ -1169,7 +1170,7 @@ function closeBatchStart(){
   document.getElementById("batchStartModalBg").style.display = "none";
 }
 
-function confirmBatchStart(){
+async function confirmBatchStart(){
   const packageIndex = Number(document.getElementById("batchPackageSelect").value);
   const pay = document.getElementById("batchPaySelect").value;
 
@@ -1202,7 +1203,7 @@ function confirmBatchStart(){
     t.paidAt = Date.now();
     t.payTiming = "prepaid";
 
-createOrUpdateRecord(t);
+await createOrUpdateRecord(t);
   });
 
   save();
@@ -1298,7 +1299,7 @@ function closeBatchCheckout(){
   document.getElementById("batchCheckoutModalBg").style.display = "none";
 }
 
-function confirmBatchCheckout(){
+async function confirmBatchCheckout(){
   const indexes = [...document.querySelectorAll(".batch-checkout-table:checked")]
     .map(el=>Number(el.value));
 
@@ -1343,7 +1344,7 @@ function confirmBatchCheckout(){
 
     stopAlertLoop(i);
 
-    const record = createOrUpdateRecord(t);
+    const record = await createOrUpdateRecord(t);
 
 t.pay = pay;
 t.currency = currency;
