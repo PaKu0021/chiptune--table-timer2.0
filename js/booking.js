@@ -1,5 +1,5 @@
 import { db } from "./firebase.js";
-import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 import { resetTable } from "./common.js";
 
 
@@ -79,7 +79,6 @@ onSnapshot(ref, snap=>{
 
   if(!state.bookings) state.bookings = [];
   if(!state.customers) state.customers = [];
-  if(!state.records) state.records = [];
 
   if(!Array.isArray(state.tables) || state.tables.length === 0){
     state.tables = Array.from({length:12},(_,i)=>({
@@ -88,19 +87,22 @@ onSnapshot(ref, snap=>{
   }
   let needSave = false;
 
-state.tables.forEach(t=>{
-  if(t.start && !t.recordId){
-    createOrUpdateTableRecord(t,{
-      customerType: t.type === "booking" ? "booking" : "walkin",
-      checkoutMethod: "补写开始计时账单"
-    });
-    needSave = true;
+Promise.all(
+  state.tables.map(async t=>{
+    if(t.start && !t.recordId){
+      await createOrUpdateTableRecord(t,{
+        customerType: t.type === "booking" ? "booking" : "walkin",
+        checkoutMethod: "补写开始计时账单"
+      });
+      needSave = true;
+    }
+  })
+).then(()=>{
+  if(needSave){
+    save();
   }
 });
 
-if(needSave){
-  save();
-}
 
 try{
   renderList();
@@ -161,28 +163,33 @@ function addCustomerVisit({name, phone, packageIndex, tableIndexes, startTime, e
   });
 }
 
-function createOrUpdateTableRecord(t, {
+async function createOrUpdateTableRecord(t, {
   customerType = "walkin",
   checkoutMethod = "开始计时"
 } = {}){
-  if(!state.records) state.records = [];
 
   const p = state.packages?.[Number(t.packageIndex || 0)] || {};
   const paidJPY = Number(p.price || 0);
   const now = Date.now();
 
-  let record = t.recordId
-    ? state.records.find(r=>r.id === t.recordId)
-    : null;
+  let record = null;
+
+  if(t.recordId){
+    const snap = await getDoc(doc(db, "records", t.recordId));
+    if(snap.exists()){
+      record = snap.data();
+    }
+  }
 
   if(!record){
     record = {
       id:"rec_" + now + "_" + Math.random().toString(36).slice(2,8),
       timestamp:now,
-      time:new Date(now).toLocaleString()
+      time:new Date(now).toLocaleString(),
+      receiptImage:"",
+      receiptFileName:""
     };
 
-    state.records.push(record);
     t.recordId = record.id;
   }
 
@@ -220,8 +227,11 @@ function createOrUpdateTableRecord(t, {
   t.paidRMB = Math.floor(paidJPY * 0.044);
   t.paidAt = now;
 
+  await setDoc(doc(db, "records", record.id), record);
+
   return record;
 }
+
 
 function getTodayDate(){
   const d = new Date();
@@ -1172,7 +1182,7 @@ function fillModalPackages(){
   `).join("");
 }
 
-function confirmGridBooking(){
+  async function confirmGridBooking(){
   if(!selection) return;
 
   const type = document.getElementById("modalType")?.value || "booking";
@@ -1206,7 +1216,7 @@ function confirmGridBooking(){
     const packageIndex = Number(document.getElementById("modalPackage")?.value || 0);
     const now = Date.now();
     const walkinColor = getNextBookingColor();
-    tableIndexes.forEach(idx=>{
+      for(const idx of tableIndexes){
       const t = state.tables[idx];
       if(!t) return;
 
@@ -1226,11 +1236,11 @@ function confirmGridBooking(){
       t.alerted = false;
       t.alerting = false;
       t.lastAction = "start";
-      createOrUpdateTableRecord(t, {
+      await createOrUpdateTableRecord(t, {
   customerType:"walkin",
   checkoutMethod:"Walk-in开始计时"
 });
-    });
+    }
 
     save();
 
@@ -1566,7 +1576,7 @@ function closeRunningTablePay(){
   runningPayTableIndex = null;
 }
 
-function confirmRunningTablePay(){
+async function confirmRunningTablePay(){
   if(runningPayTableIndex === null) return;
 
   const t = state.tables[runningPayTableIndex];
@@ -1579,12 +1589,15 @@ function confirmRunningTablePay(){
 
   t.pay = value;
 
-  if(t.recordId){
-    const r = state.records.find(x=>x.id === t.recordId);
-    if(r){
-      r.pay = value;
-    }
+if(t.recordId){
+  const snap = await getDoc(doc(db, "records", t.recordId));
+
+  if(snap.exists()){
+    const r = snap.data();
+    r.pay = value;
+    await setDoc(doc(db, "records", r.id), r);
   }
+}
 
   save();
   closeRunningTablePay();
@@ -1751,7 +1764,7 @@ function checkInBooking(){
   openCheckInSelectModal(activeBookingId);
 }
 
-function confirmCheckInSelected(){
+async function confirmCheckInSelected(){
   const b = getBookingById(activeBookingId);
   if(!b) return;
 
@@ -1782,7 +1795,7 @@ function confirmCheckInSelected(){
 
   const now = Date.now();
 
-  indexes.forEach(idx=>{
+    for(const idx of indexes){
     const t = state.tables[idx];
     if(!t) return;
 
@@ -1805,13 +1818,13 @@ function confirmCheckInSelected(){
     t.alerting = false;
     t.lastAction = "start";
 
-    createOrUpdateTableRecord(t, {
+    await createOrUpdateTableRecord(t, {
   customerType:"booking",
   checkoutMethod:"预约到店开始计时"
 });
 
 
-  });
+  }
 
   if(!b.checkedInTableIndexes){
     b.checkedInTableIndexes = [];

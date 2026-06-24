@@ -1,12 +1,16 @@
-import { doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, onSnapshot, setDoc, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
 import { db, storage } from "./firebase.js";
 
 const ref = doc(db, "shop", "main");
+const recordsRef = collection(db, "records");
 const RATE = 0.044;
 
 let state = null;
+let records = [];
+
 function save(){
   return setDoc(ref, state);
 }
@@ -16,7 +20,13 @@ onSnapshot(ref, snap => {
 
   state = snap.data();
 
-  if(!state.records) state.records = [];
+  renderTodayBill();
+});
+
+onSnapshot(recordsRef, snap => {
+  records = snap.docs
+    .map(d => d.data())
+    .filter(r => r.id !== "init");
 
   renderTodayBill();
 });
@@ -31,8 +41,8 @@ function getRecordTime(r){
 }
 
 function getTodayRecords(){
-  return state.records.filter(r=>{
-    const d = new Date(getRecordTime(r));
+  return records.filter(r=>{
+const d = new Date(getRecordTime(r));
     if(isNaN(d.getTime())) return false;
     return dateKey(d.getTime()) === dateKey(Date.now());
   });
@@ -190,7 +200,7 @@ async function handleReceiptFileChange(e){
 
   if(!file || !recordId) return;
 
-  const r = state.records.find(x => x.id === recordId);
+  const r = records.find(x => x.id === recordId);
   if(!r){
     alert("找不到这条账单");
     return;
@@ -212,7 +222,7 @@ async function handleReceiptFileChange(e){
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
 
-    await save();
+    await setDoc(doc(db, "records", r.id), r);
 
     alert("收款截图已上传");
   }catch(err){
@@ -223,7 +233,8 @@ async function handleReceiptFileChange(e){
 
 
 function confirmExtension(recordId){
-  const r = state.records.find(x => x.id === recordId);
+const r = records.find(x => x.id === recordId);
+
   if(!r) return;
 
   if(!r.receiptImage){
@@ -235,7 +246,7 @@ function confirmExtension(recordId){
   r.extensionConfirmedAt = Date.now();
   r.extensionConfirmedTime = new Date().toLocaleString();
 
-  save();
+  setDoc(doc(db, "records", r.id), r);
   alert("续费已确认");
 }
 

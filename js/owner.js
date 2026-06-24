@@ -1,15 +1,17 @@
 import { db, storage } from "./firebase.js";
-import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
 
 const ref = doc(db,"shop","main");
+const recordsRef = collection(db,"records");
 const RATE = 0.044;
 
 let state = null;
 let currentFilter = "today";
 let currencyMode = "CONVERTED";
 let packagePanelOpen = false;
+let records = [];
 
 
 function newTable(i){
@@ -33,7 +35,6 @@ onSnapshot(ref,snap=>{
 
   state = snap.data();
 
-  if(!state.records) state.records = [];
   if(!state.packages) state.packages = [];
   if(!state.tables) state.tables = [];
 
@@ -48,6 +49,14 @@ onSnapshot(ref,snap=>{
 
   render();
   renderBusinessHours();
+});
+
+onSnapshot(recordsRef, snap=>{
+  records = snap.docs
+    .map(d=>d.data())
+    .filter(r=>r.id !== "init");
+
+  render();
 });
 
 function save(){
@@ -66,8 +75,8 @@ function getRecordTime(r){
 function getFilteredRecords(){
   const now = new Date();
 
-  return state.records.filter(r=>{
-    const d = new Date(getRecordTime(r));
+return records.filter(r=>{
+  const d = new Date(getRecordTime(r));
     if(isNaN(d.getTime())) return currentFilter === "all";
 
     if(currentFilter === "today"){
@@ -456,7 +465,7 @@ async function handleOwnerReceiptFileChange(e){
 
   if(!file || !uploadingRecordId) return;
 
-  const r = state.records.find(x => x.id === uploadingRecordId);
+  const r = records.find(x => x.id === uploadingRecordId);
   if(!r){
     alert("找不到这条账单");
     return;
@@ -478,7 +487,7 @@ async function handleOwnerReceiptFileChange(e){
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
 
-    await save();
+    await setDoc(doc(db, "records", r.id), r);
 
     uploadingRecordId = null;
     alert("收款截图已上传");
@@ -489,7 +498,7 @@ async function handleOwnerReceiptFileChange(e){
 }
 
 function confirmExtension(recordId){
-  const r = state.records.find(x=>x.id === recordId);
+const r = records.find(x=>x.id === recordId);  
   if(!r) return;
 
   if(!r.receiptImage){
@@ -501,7 +510,7 @@ function confirmExtension(recordId){
   r.extensionConfirmedAt = Date.now();
   r.extensionConfirmedTime = new Date().toLocaleString();
 
-  save();
+  setDoc(doc(db, "records", r.id), r);
   alert("续费已确认");
 }
 

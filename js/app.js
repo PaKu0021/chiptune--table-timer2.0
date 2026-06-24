@@ -33,7 +33,6 @@ const defaultState = {
     {name:"不限时", minutes:0, price:5500, extensionPrice:0, unlimited:true}
   ],
   tables: Array.from({length:8},(_,i)=>newTable(i+1)),
-  records:[],
   bookings:[],
   customers:{}
 };
@@ -44,7 +43,6 @@ onSnapshot(ref, snap=>{
 /*alert("Firestore已读取");*/
     
     if(!state.packages) state.packages = defaultState.packages;
-    if(!state.records) state.records = [];
     if(!state.bookings) state.bookings = [];
     if(!state.tables) state.tables = defaultState.tables;
     if(!state.customers) state.customers = {};
@@ -352,6 +350,10 @@ await setDoc(doc(db, "records", record.id), record);
   return record;
 }
 
+async function updateRecordOnly(record){
+  await setDoc(doc(db, "records", record.id), record);
+}
+
 function getStatus(t){
   if(!t.start) return "idle";
 
@@ -654,7 +656,7 @@ function notifyLocal(title,body){
   }catch(e){}
 }
 
-function setPackage(i,v){
+async function setPackage(i,v){
   const t = state.tables[i];
 
   t.packageIndex = Number(v);
@@ -831,7 +833,7 @@ function setPayTiming(i,v){
   save();
 }
 
-function setPay(i,v){
+async function setPay(i,v){
   updateCustomer(i);
 
   const t = state.tables[i];
@@ -844,7 +846,7 @@ function setPay(i,v){
   save();
 }
 
-function setCurrency(i,v){
+async function setCurrency(i,v){
   const t = state.tables[i];
   t.currency = v;
 
@@ -916,88 +918,86 @@ function updateCheckout(){
   `;
 }
 
-
-
 async function confirmCheckout(){
   const t = state.tables[checkoutIndex];
-  const p = getPackage(t);
 
   const pay = document.getElementById("checkoutPay")?.value || "";
-const currency = document.getElementById("checkoutCurrency")?.value || "日元";
+  const currency = document.getElementById("checkoutCurrency")?.value || "日元";
 
-if(!pay){
-  alert("请选择付款方式");
-  return;
-}
-
-t.pay = pay;
-t.currency = currency;
+  if(!pay){
+    alert("请选择付款方式");
+    return;
+  }
 
   if(!confirm("确认结账？")){
     return;
   }
 
   stopAlertLoop(checkoutIndex);
-  const originalJPY = getOriginalJPY(t);
+
+  t.pay = pay;
+  t.currency = currency;
+
   const dueJPY = getDueJPY(t);
   const finalJPY = useRound ? roundJPY(dueJPY) : dueJPY;
-  const totalRMB = getRMB(finalJPY);
-  const now = new Date();
+
+  t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
+  t.paidRMB = getRMB(t.paidJPY);
+  t.paidAt = Date.now();
 
   const record = await createOrUpdateRecord(t);
 
-t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
-t.paidRMB = getRMB(t.paidJPY);
-t.paidAt = Date.now();
+  record.totalJPY = t.paidJPY;
+  record.totalRMB = getRMB(t.paidJPY);
+  record.paidJPY = t.paidJPY;
+  record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
+  record.pay = t.pay;
+  record.currency = t.currency || "日元";
+  record.roundRule = useRound ? "500抹零" : "不抹零";
+  record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+  record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
+  record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
+  record.closedAt = Date.now();
+  record.closedTime = new Date().toLocaleString();
 
-record.totalJPY = t.paidJPY;
-record.totalRMB = getRMB(t.paidJPY);
-record.paidJPY = t.paidJPY;
-record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
+  await updateRecordOnly(record);
 
-record.pay = t.pay;
-record.currency = t.currency || "日元";
-record.roundRule = useRound ? "500抹零" : "不抹零";
-record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
-record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
-record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
-record.closedAt = Date.now();
-record.closedTime = new Date().toLocaleString();
+  const visit = createOrUpdateCustomerVisit(t);
+  if(visit){
+    visit.endAt = Date.now();
+    visit.range = getVisitRangeText(t);
+    visit.closed = true;
+    visit.finalJPY = t.paidJPY;
+    visit.closedTime = new Date().toLocaleString();
+  }
 
-const visit = createOrUpdateCustomerVisit(t);
-if(visit){
-  visit.endAt = Date.now();
-  visit.range = getVisitRangeText(t);
-  visit.closed = true;
-  visit.finalJPY = t.paidJPY;
-  visit.closedTime = new Date().toLocaleString();
-}
+  if(t.bookingId){
+    const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
 
-if(t.bookingId){
-  const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
+    if(b){
+      if(!Array.isArray(b.finishedTableIndexes)){
+        b.finishedTableIndexes = [];
+      }
 
-  if(b){
-    if(!Array.isArray(b.finishedTableIndexes)){
-      b.finishedTableIndexes = [];
-    }
+      b.finishedTableIndexes = Array.from(new Set([
+        ...b.finishedTableIndexes.map(Number),
+        checkoutIndex
+      ]));
 
-    b.finishedTableIndexes = Array.from(new Set([
-      ...b.finishedTableIndexes.map(Number),
-      checkoutIndex
-    ]));
-
-    if(Array.isArray(b.checkedInTableIndexes)){
-      b.checkedInTableIndexes = b.checkedInTableIndexes
-        .map(Number)
-        .filter(i=>i !== checkoutIndex);
+      if(Array.isArray(b.checkedInTableIndexes)){
+        b.checkedInTableIndexes = b.checkedInTableIndexes
+          .map(Number)
+          .filter(i=>i !== checkoutIndex);
+      }
     }
   }
-}
 
-state.tables[checkoutIndex] = resetTable(t.name);
+  state.tables[checkoutIndex] = resetTable(t.name);
+
   save();
   closeCheckout();
 }
+
 
 function closeCheckout(){
   document.getElementById("checkoutModalBg").style.display = "none";
@@ -1187,25 +1187,24 @@ async function confirmBatchStart(){
     return;
   }
 
-  indexes.forEach(i=>{
-    const t = state.tables[i];
-    if(!t || t.start) return;
+for(const i of indexes){
+  const t = state.tables[i];
+  if(!t || t.start) continue;
 
-    t.packageIndex = packageIndex;
-    t.pay = pay;
-    t.start = Date.now();
-    t.pausedAt = null;
-    t.alerted = false;
-    t.alerting = false;
-    t.lastAction = "start";
-    t.paidJPY = Number(getPackage(t).price || 0);
-    t.paidRMB = getRMB(t.paidJPY);
-    t.paidAt = Date.now();
-    t.payTiming = "prepaid";
+  t.packageIndex = packageIndex;
+  t.pay = pay;
+  t.start = Date.now();
+  t.pausedAt = null;
+  t.alerted = false;
+  t.alerting = false;
+  t.lastAction = "start";
+  t.paidJPY = Number(getPackage(t).price || 0);
+  t.paidRMB = getRMB(t.paidJPY);
+  t.paidAt = Date.now();
+  t.payTiming = "prepaid";
 
-await createOrUpdateRecord(t);
-  });
-
+  await createOrUpdateRecord(t);
+}
   save();
   closeBatchStart();
   render();
@@ -1319,59 +1318,47 @@ async function confirmBatchCheckout(){
 
   if(!confirm(`确认批量结账 ${indexes.length} 桌吗？`)) return;
 
-  indexes.forEach(i=>{
+  for(const i of indexes){
     const t = state.tables[i];
-    const p = getPackage(t);
-
-    const originalJPY = getOriginalJPY(t);
-    const defaultRMB = getRMB(originalJPY);
 
     const pay = document.getElementById(`batch-pay-${i}`).value;
     const currency = document.getElementById(`batch-currency-${i}`).value;
     const manualAmount = Number(document.getElementById(`batch-amount-${i}`).value || 0);
 
-    const finalJPY =
-      currency === "日元"
-        ? (manualAmount > 0 ? manualAmount : originalJPY)
-        : originalJPY;
-
-    const totalRMB =
-      currency === "人民币"
-        ? (manualAmount > 0 ? manualAmount : defaultRMB)
-        : defaultRMB;
-
-    const now = new Date();
-
     stopAlertLoop(i);
+
+    t.pay = pay;
+    t.currency = currency;
+
+    const dueJPY = getDueJPY(t);
+
+    const finalPaidJPY =
+      currency === "日元"
+        ? (manualAmount > 0 ? manualAmount : dueJPY)
+        : dueJPY;
+
+    t.paidJPY = Number(t.paidJPY || 0) + finalPaidJPY;
+    t.paidRMB = getRMB(t.paidJPY);
+    t.paidAt = Date.now();
 
     const record = await createOrUpdateRecord(t);
 
-t.pay = pay;
-t.currency = currency;
+    record.totalJPY = t.paidJPY;
+    record.totalRMB = getRMB(t.paidJPY);
+    record.paidJPY = t.paidJPY;
+    record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
+    record.pay = pay;
+    record.currency = currency;
+    record.roundRule = "不抹零";
+    record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+    record.checkoutMethod = "批量结账";
+    record.closedAt = Date.now();
+    record.closedTime = new Date().toLocaleString();
 
-const dueJPY = Math.max(0, originalJPY - Number(t.paidJPY || 0));
-const finalPaidJPY = currency === "日元"
-  ? (manualAmount > 0 ? manualAmount : dueJPY)
-  : dueJPY;
+    await updateRecordOnly(record);
 
-t.paidJPY = Number(t.paidJPY || 0) + finalPaidJPY;
-t.paidRMB = getRMB(t.paidJPY);
-t.paidAt = Date.now();
-
-record.totalJPY = t.paidJPY;
-record.totalRMB = getRMB(t.paidJPY);
-record.paidJPY = t.paidJPY;
-record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
-record.pay = pay;
-record.currency = currency;
-record.roundRule = "不抹零";
-record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
-record.checkoutMethod = "批量结账";
-record.closedAt = Date.now();
-record.closedTime = new Date().toLocaleString();
-
-state.tables[i] = resetTable(t.name);
-    });
+    state.tables[i] = resetTable(t.name);
+  }
 
   save();
   closeBatchCheckout();

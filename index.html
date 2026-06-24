@@ -89,7 +89,7 @@ onSnapshot(ref,snap=>{
   const state = snap.data();
   const tables = state.tables || [];
   const bookings = state.bookings || [];
-  const records = state.records || [];
+  const records = [];
 
   const usingCount = tables.filter(t=>t.start).length;
   const freeCount = tables.length - usingCount;
