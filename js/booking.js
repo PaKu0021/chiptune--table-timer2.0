@@ -277,15 +277,36 @@ function timeToMinutes(time){
 }
 
 function findPackageIndexByDuration(startTime,endTime){
-  const minutes = timeToMinutes(endTime) - timeToMinutes(startTime);
+  const minutes =
+    timeToMinutes(endTime) - timeToMinutes(startTime);
 
-  const index = (state.packages || []).findIndex(p=>{
-    return Number(p.minutes || 0) === minutes;
+  const packages = state.packages || [];
+
+  const d = new Date(currentBookingDate);
+  const day = d.getDay();
+  const isWeekend = day === 0 || day === 6;
+
+  const exactIndex = packages.findIndex(p=>{
+    return !p.unlimited &&
+           Number(p.minutes || 0) === minutes;
   });
 
-  return index >= 0 ? index : 0;
-}
+  if(exactIndex >= 0){
+    return exactIndex;
+  }
 
+  if(!isWeekend){
+    const unlimitedIndex = packages.findIndex(p=>{
+      return p.unlimited;
+    });
+
+    if(unlimitedIndex >= 0){
+      return unlimitedIndex;
+    }
+  }
+
+  return 0;
+}
 
 function isTableBusyAtSlot(t, rowIndex){
   if(!t.start) return false;
