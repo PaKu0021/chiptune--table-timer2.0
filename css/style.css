@@ -1067,3 +1067,13 @@ button.selected-pop{
 .running-block{
   pointer-events:none !important;
 }
+
+.move-line-area,
+.move-drag-grid,
+.move-table-btn{
+  touch-action:none !important;
+}
+
+#moveSvg line{
+  pointer-events:none;
+}

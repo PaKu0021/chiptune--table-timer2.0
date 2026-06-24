@@ -18,6 +18,9 @@ let draggingMoveFrom = null;
 let moveLineRAF = null;
 let lastMovePointer = null;
 let runningPayTableIndex = null;
+let dragTempLine = null;
+let moveAreaRect = null;
+let dragFromCenter = null;
 
 const MOVE_LINE_COLORS = [
   "#e85d5d",
@@ -695,33 +698,55 @@ function startMoveDrag(e, fromIndex){
   document.querySelectorAll(".move-from-btn")
     .forEach(btn=>btn.classList.remove("dragging"));
 
-  document.getElementById("move-from-" + fromIndex)?.classList.add("dragging");
+  const fromEl = document.getElementById("move-from-" + fromIndex);
+  fromEl?.classList.add("dragging");
 
-  window.addEventListener("pointermove", moveDragLine);
+  const area = document.getElementById("moveLineArea");
+  const svg = document.getElementById("moveSvg");
+  if(!area || !svg || !fromEl) return;
+
+  moveAreaRect = area.getBoundingClientRect();
+
+  const r = fromEl.getBoundingClientRect();
+  dragFromCenter = {
+    x: r.left + r.width / 2 - moveAreaRect.left,
+    y: r.top + r.height / 2 - moveAreaRect.top
+  };
+
+  const ns = "http://www.w3.org/2000/svg";
+  dragTempLine = document.createElementNS(ns, "line");
+
+  const color = MOVE_LINE_COLORS[movePairs.length % MOVE_LINE_COLORS.length];
+
+  dragTempLine.setAttribute("x1", dragFromCenter.x);
+  dragTempLine.setAttribute("y1", dragFromCenter.y);
+  dragTempLine.setAttribute("x2", dragFromCenter.x);
+  dragTempLine.setAttribute("y2", dragFromCenter.y);
+  dragTempLine.setAttribute("stroke", color);
+  dragTempLine.setAttribute("stroke-width", "5");
+  dragTempLine.setAttribute("stroke-linecap", "round");
+  dragTempLine.setAttribute("stroke-dasharray", "8 6");
+
+  svg.appendChild(dragTempLine);
+
+  window.addEventListener("pointermove", moveDragLine, {passive:false});
   window.addEventListener("pointerup", endMoveDrag);
 }
 
+
 function moveDragLine(e){
   if(draggingMoveFrom === null) return;
+  if(!dragTempLine || !moveAreaRect) return;
 
-  lastMovePointer = {
-    x:e.clientX,
-    y:e.clientY
-  };
+  e.preventDefault();
 
-  if(moveLineRAF) return;
+  const x = e.clientX - moveAreaRect.left;
+  const y = e.clientY - moveAreaRect.top;
 
-  moveLineRAF = requestAnimationFrame(()=>{
-    moveLineRAF = null;
-
-    if(lastMovePointer){
-      drawMoveLines(
-        lastMovePointer.x,
-        lastMovePointer.y
-      );
-    }
-  });
+  dragTempLine.setAttribute("x2", x);
+  dragTempLine.setAttribute("y2", y);
 }
+
 
 function endMoveDrag(e){
   if(draggingMoveFrom === null) return;
@@ -761,7 +786,16 @@ if(moveLineRAF){
   moveLineRAF = null;
 }
 
+if(dragTempLine){
+  dragTempLine.remove();
+  dragTempLine = null;
+}
+
+moveAreaRect = null;
+dragFromCenter = null;
+
 drawMoveLines();
+
 
 }
 
