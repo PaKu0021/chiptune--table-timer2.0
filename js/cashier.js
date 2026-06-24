@@ -4,7 +4,9 @@ import {
   doc,
   onSnapshot,
   setDoc,
-  collection
+  collection,
+  query,
+  where
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 import {
@@ -84,13 +86,21 @@ function closeReceiptPreview(){
     
 
 const ref = doc(db, "shop", "main");
-const recordsRef = collection(db,"records");
 const RATE = 0.044;
 
 let state = null;
 let records = [];
 let quickRange = "today";
 let initialized = false; 
+
+function get90DaysAgo(){
+
+  const d = new Date();
+
+  d.setDate(d.getDate() - 90);
+
+  return d.getTime();
+}
 
 function dateKey(ts){
   const d = new Date(ts);
@@ -402,7 +412,12 @@ onSnapshot(ref, snap=>{
   }
 });
 
-onSnapshot(recordsRef, snap=>{
+const recordsQuery = query(
+  collection(db,"records"),
+  where("timestamp",">=",get90DaysAgo())
+);
+
+onSnapshot(recordsQuery,snap=>{
 
   records = snap.docs
     .map(d=>d.data())
@@ -412,6 +427,7 @@ onSnapshot(recordsRef, snap=>{
     renderCashier();
   }
 });
+
 
 function applyDateFilter(){
   renderCashier();
