@@ -283,13 +283,6 @@ const originalJPY = getOriginalJPY(t);
 
 let paidJPY = Number(t.paidJPY || 0);
 
-if((t.payTiming || "prepaid") === "prepaid"){
-  paidJPY = originalJPY;
-  t.paidJPY = originalJPY;
-  t.paidRMB = getRMB(originalJPY);
-  t.paidAt = Date.now();
-}
-
 const dueJPY = Math.max(0, originalJPY - paidJPY);
 
   let record = await getTableRecord(t);

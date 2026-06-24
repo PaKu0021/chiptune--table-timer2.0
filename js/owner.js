@@ -47,7 +47,10 @@ onSnapshot(ref,snap=>{
   };
 }
 
-  render();
+    if(records.length){
+    render();
+  }
+
   renderBusinessHours();
 });
 
@@ -56,7 +59,9 @@ onSnapshot(recordsRef, snap=>{
     .map(d=>d.data())
     .filter(r=>r.id !== "init");
 
-  render();
+  if(state){
+    render();
+  }  
 });
 
 function save(){

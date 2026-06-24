@@ -1924,6 +1924,5 @@ window.closeMoveTableModal = closeMoveTableModal;
 window.confirmMoveTable = confirmMoveTable;
 window.startMoveDrag = startMoveDrag;
 window.openRunningTablePay = openRunningTablePay;
-window.openRunningTablePay = openRunningTablePay;
 window.closeRunningTablePay = closeRunningTablePay;
 window.confirmRunningTablePay = confirmRunningTablePay;

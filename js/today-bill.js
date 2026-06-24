@@ -11,9 +11,6 @@ const RATE = 0.044;
 let state = null;
 let records = [];
 
-function save(){
-  return setDoc(ref, state);
-}
 
 onSnapshot(ref, snap => {
   if(!snap.exists()) return;

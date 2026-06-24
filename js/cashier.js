@@ -421,9 +421,10 @@ onSnapshot(recordsRef, snap=>{
     .map(d=>d.data())
     .filter(r=>r.id !== "init");
 
-  renderCashier();
+  if(state){
+    renderCashier();
+  }
 });
-
 
 function applyDateFilter(){
   renderCashier();
@@ -447,7 +448,7 @@ records.forEach(r=>{
     }
   });
 
-Promise.all(
+await Promise.all(
   records.map(r=>
     setDoc(doc(db,"records",r.id),r)
   )
