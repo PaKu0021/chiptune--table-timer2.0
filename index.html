@@ -74,9 +74,13 @@
  
 <script type="module">
 import { db } from "./js/firebase.js";
-import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-
+import { doc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 const ref = doc(db,"shop","main");
+const recordsRef = collection(db,"records");
+
+let homeState = null;
+let allRecords = [];
+
 
 function getTodayDate(){
   const d = new Date();
@@ -86,10 +90,24 @@ function getTodayDate(){
 onSnapshot(ref,snap=>{
   if(!snap.exists()) return;
 
-  const state = snap.data();
-  const tables = state.tables || [];
-  const bookings = state.bookings || [];
-  const records = [];
+  homeState = snap.data();
+  updateHome();
+});
+
+onSnapshot(recordsRef,snap=>{
+  allRecords = snap.docs
+    .map(d=>d.data())
+    .filter(r=>r.id !== "init");
+
+  updateHome();
+});
+
+function updateHome(){
+  if(!homeState) return;
+
+  const tables = homeState.tables || [];
+  const bookings = homeState.bookings || [];
+  const records = allRecords;
 
   const usingCount = tables.filter(t=>t.start).length;
   const freeCount = tables.length - usingCount;
@@ -102,8 +120,9 @@ onSnapshot(ref,snap=>{
 
   const todayRevenue = records
     .filter(r=>{
-      const ts = r.timestamp || r.time || r.date;
+      const ts = r.timestamp || r.closedAt || r.paidAt || r.time || r.date;
       if(!ts) return false;
+
       const d = new Date(ts);
       if(isNaN(d.getTime())) return false;
 
@@ -116,7 +135,7 @@ onSnapshot(ref,snap=>{
   document.getElementById("homeFreeCount").innerText = `${freeCount}桌`;
   document.getElementById("homeBookingCount").innerText = `${todayBookingCount}组`;
   document.getElementById("homeRevenue").innerText = `¥${todayRevenue.toLocaleString()}`;
-});
+}
 
 window.go = function(page, cardId){
   localStorage.setItem("home_active", cardId);
