@@ -143,6 +143,52 @@
 
   <div class="panel">
     <h2>收银记录</h2>
+
+<div class="panel">
+  <div class="section-toggle" onclick="toggleCustomerPanel()">
+    <div>
+      <h2>客户管理</h2>
+      <p style="color:#8a8174;margin:6px 0 0;">
+        查看客户来店次数 / 累计消费 / 最近来店记录
+      </p>
+    </div>
+
+    <button id="customerToggleBtn" class="btn-ghost" type="button">展开</button>
+  </div>
+
+  <div id="customerPanelBody" style="display:none;margin-top:16px;">
+
+    <div class="action-row">
+      <input
+        id="customerSearch"
+        placeholder="搜索姓名或手机尾号"
+        oninput="setCustomerSearch(this.value)"
+      >
+    </div>
+
+    <div id="customerSummary" style="font-weight:900;margin:10px 0;color:#8a8174;">
+      加载中...
+    </div>
+
+    <div style="overflow:auto;">
+      <table class="record-table">
+        <thead>
+          <tr>
+            <th>客人</th>
+            <th>手机尾号</th>
+            <th>来店次数</th>
+            <th>累计消费</th>
+            <th>最近来店</th>
+            <th>最近套餐</th>
+          </tr>
+        </thead>
+        <tbody id="customerRows"></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
     <div style="overflow:auto;">
       <table class="record-table">
         <thead>

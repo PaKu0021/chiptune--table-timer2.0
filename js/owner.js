@@ -12,6 +12,8 @@ let currentFilter = "today";
 let currencyMode = "CONVERTED";
 let packagePanelOpen = false;
 let records = [];
+let customerPanelOpen = false;
+let customerSearch = "";
 
 
 function newTable(i){
@@ -156,7 +158,7 @@ function render(){
   renderChart();
   renderPackages();
   renderRecords();
-
+  renderCustomers();
   const tableInput = document.getElementById("tableCount");
   if(tableInput) tableInput.value = state.tables.length || 0;
 
@@ -169,6 +171,16 @@ if(packageBody){
 
 if(packageBtn){
   packageBtn.innerText = packagePanelOpen ? "收起" : "展开";
+}
+const customerBody = document.getElementById("customerPanelBody");
+const customerBtn = document.getElementById("customerToggleBtn");
+
+if(customerBody){
+  customerBody.style.display = customerPanelOpen ? "block" : "none";
+}
+
+if(customerBtn){
+  customerBtn.innerText = customerPanelOpen ? "收起" : "展开";
 }
 }
 
@@ -411,6 +423,105 @@ function renderRecords(){
       </tr>
     `;
   }).join("");
+
+}
+
+function buildCustomerStats(){
+  const map = {};
+
+  records.forEach(r=>{
+    const name = r.customerName || r.name || "";
+    const phone = r.phoneLast4 || "";
+    const key = r.customerKey || `${name}_${phone}`;
+
+    if(!name && !phone) return;
+
+    if(!map[key]){
+      map[key] = {
+        key,
+        name,
+        phone,
+        visitCount:0,
+        totalJPY:0,
+        lastTime:0,
+        lastTimeText:"",
+        lastPackage:""
+      };
+    }
+
+    const ts = getRecordTime(r);
+    const jpy = toJPY(r);
+
+    map[key].visitCount += 1;
+    map[key].totalJPY += Number(jpy || 0);
+
+    if(ts > map[key].lastTime){
+      map[key].lastTime = ts;
+      map[key].lastTimeText = r.closedTime || r.time || "";
+      map[key].lastPackage = r.packageName || "";
+    }
+  });
+
+  return Object.values(map)
+    .sort((a,b)=>b.totalJPY - a.totalJPY);
+}
+
+function renderCustomers(){
+  const summary = document.getElementById("customerSummary");
+  const tbody = document.getElementById("customerRows");
+
+  if(!summary || !tbody) return;
+
+  let list = buildCustomerStats();
+
+  const kw = customerSearch.trim().toLowerCase();
+
+  if(kw){
+    list = list.filter(c=>{
+      return [
+        c.name,
+        c.phone,
+        c.key
+      ].join(" ").toLowerCase().includes(kw);
+    });
+  }
+
+  const totalCustomers = list.length;
+  const totalVisits = list.reduce((sum,c)=>sum + c.visitCount,0);
+  const totalAmount = list.reduce((sum,c)=>sum + c.totalJPY,0);
+
+  summary.innerHTML =
+    `客户数：${totalCustomers}人｜来店记录：${totalVisits}次｜累计消费：¥${Math.floor(totalAmount).toLocaleString()}`;
+
+  if(!list.length){
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6">暂无客户记录</td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = list.map(c=>`
+    <tr>
+      <td>${c.name || "-"}</td>
+      <td>${c.phone || "-"}</td>
+      <td>${c.visitCount}</td>
+      <td>¥${Math.floor(c.totalJPY).toLocaleString()}</td>
+      <td>${c.lastTimeText || "-"}</td>
+      <td>${c.lastPackage || "-"}</td>
+    </tr>
+  `).join("");
+}
+
+function toggleCustomerPanel(){
+  customerPanelOpen = !customerPanelOpen;
+  render();
+}
+
+function setCustomerSearch(v){
+  customerSearch = v || "";
+  renderCustomers();
 }
 
 let uploadingRecordId = null;
@@ -756,3 +867,5 @@ window.openQrPage = openQrPage;
 window.openCashierPage = openCashierPage;
 window.uploadReceipt = uploadReceipt;
 window.confirmExtension = confirmExtension;
+window.toggleCustomerPanel = toggleCustomerPanel;
+window.setCustomerSearch = setCustomerSearch;
