@@ -1115,7 +1115,7 @@ button.selected-pop{
 
 .cashier-filter-card{
   display:grid !important;
-  grid-template-columns:repeat(4, minmax(0, 1fr)) !important;
+  grid-template-columns:1fr 1fr 1.2fr 90px !important;
   gap:12px !important;
   align-items:end !important;
 }
@@ -1130,16 +1130,22 @@ button.selected-pop{
   max-width:100% !important;
   box-sizing:border-box !important;
   display:block !important;
+  height:54px !important;
 }
 
 .cashier-search-btn{
-  width:100% !important;
-  height:48px !important;
+  width:90px !important;
+  height:54px !important;
   margin:5px 0 !important;
+  padding:0 !important;
 }
 
 @media(max-width:760px){
   .cashier-filter-card{
     grid-template-columns:1fr !important;
+  }
+
+  .cashier-search-btn{
+    width:100% !important;
   }
 }
