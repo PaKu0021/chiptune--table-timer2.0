@@ -112,11 +112,10 @@ try{
   }
 });
 
-
-
-function save(){
-  setDoc(ref,state);
+async function save(){
+  await setDoc(ref,state);
 }
+
 
 function getCustomerKey(name, phone){
   name = String(name || "").trim();
@@ -1242,11 +1241,11 @@ function fillModalPackages(){
 });
     }
 
-    save();
+await save();
 
-    closeBookingModal();
-    renderBookingGrid();
-    renderList();
+closeBookingModal();
+renderBookingGrid();
+renderList();
 
     alert("Walk-in 已开始计时");
     return;
@@ -1273,11 +1272,12 @@ function fillModalPackages(){
 
   state.bookings.push(booking);
 
-  save();
+await save();
 
-  closeBookingModal();
-  renderBookingGrid();
-  renderList();
+closeBookingModal();
+renderBookingGrid();
+renderList();
+  
 }
 
 function closeBookingModal(){
@@ -1593,12 +1593,17 @@ if(t.recordId){
   const snap = await getDoc(doc(db, "records", t.recordId));
 
   if(snap.exists()){
-    const r = snap.data();
+    const r = {
+      id: snap.id,
+      ...snap.data()
+    };
+
     r.pay = value;
+    r.currency = t.currency || r.currency || "日元";
+
     await setDoc(doc(db, "records", r.id), r);
   }
 }
-
   save();
   closeRunningTablePay();
   renderBookingGrid();
@@ -1848,9 +1853,9 @@ async function confirmCheckInSelected(){
     endTime:b.endTime
   });
 
-  save();
-  closeCheckInSelectModal();
-  closeBookingAction();
+await save();
+closeCheckInSelectModal();
+closeBookingAction();  
   renderBookingGrid();
   renderList();
 }
