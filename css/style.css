@@ -1112,3 +1112,32 @@ button.selected-pop{
     break-inside:avoid;
   }
 }
+
+.cashier-filter-card{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr auto;
+  gap:12px;
+  align-items:end;
+}
+
+.cashier-date-item input,
+.cashier-date-item select{
+  width:100%;
+  max-width:100%;
+}
+
+.cashier-search-btn{
+  height:46px;
+  min-width:72px;
+  margin-bottom:5px;
+}
+
+@media(max-width:760px){
+  .cashier-filter-card{
+    grid-template-columns:1fr;
+  }
+
+  .cashier-search-btn{
+    width:100%;
+  }
+}
