@@ -15,13 +15,13 @@ import {
   getDownloadURL
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
-async function uploadReceipt(timestamp,file){
+
+async function uploadReceipt(recordId,file){
 
   if(!file) return;
 
-  const record = records.find(
-    r=>Number(r.timestamp) === Number(timestamp)
-  );
+const record = records.find(r=>r.id === recordId);
+
 
   if(!record){
     alert("找不到这条收银记录");
@@ -112,8 +112,9 @@ function getTodayDate(){
 }
 
 function getRecordTime(r){
-  return r.timestamp || r.time || r.date || 0;
+  return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || 0;
 }
+
 
 function toJPY(r){
   if(r.currency === "人民币"){
@@ -228,7 +229,7 @@ function renderCashier(){
       <input
           type="file"
           accept="image/*"
-          onchange="uploadReceipt(${r.timestamp}, this.files[0])"
+          onchange="uploadReceipt('${r.id}',this.files[0])"          
         >
       `
   }
@@ -419,9 +420,12 @@ const recordsQuery = query(
 
 onSnapshot(recordsQuery,snap=>{
 
-  records = snap.docs
-    .map(d=>d.data())
-    .filter(r=>r.id !== "init");
+records = snap.docs
+  .map(d=>({
+    id: d.id,
+    ...d.data()
+  }))
+  .filter(r=>r.id !== "init");    
 
   if(state){
     renderCashier();
