@@ -21,9 +21,14 @@ onSnapshot(ref, snap => {
 });
 
 onSnapshot(recordsRef, snap => {
+
   records = snap.docs
-    .map(d => d.data())
-    .filter(r => r.id !== "init");
+  .map(d => ({
+    id: d.id,
+    ...d.data()
+  }))
+  .filter(r => r.id !== "init");
+
 
   renderTodayBill();
 });
@@ -34,8 +39,9 @@ function dateKey(ts){
 }
 
 function getRecordTime(r){
-  return r.timestamp || r.closedAt || r.paidAt || r.time || r.date || Date.now();
+  return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
 }
+
 
 function getTodayRecords(){
   return records.filter(r=>{
