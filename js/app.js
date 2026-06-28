@@ -80,9 +80,10 @@ onSnapshot(ref, snap=>{
   }
 });
 
-function save(){
-  setDoc(ref,state);
+async function save(){
+  await setDoc(ref,state);
 }
+
 
 function getPackage(t){
   const idx = Number(t.packageIndex ?? 0);
@@ -988,9 +989,10 @@ async function confirmCheckout(){
 
   state.tables[checkoutIndex] = resetTable(t.name);
 
-save();
+await save();
 closeCheckout();
-
+render();
+alert("结账完成");
 }catch(e){
   alert(
     "结账错误：\n" +
