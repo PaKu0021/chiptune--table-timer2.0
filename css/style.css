@@ -1114,41 +1114,38 @@ button.selected-pop{
 }
 
 .cashier-filter-card{
-  display:grid !important;
-  grid-template-columns:1fr 1fr 1fr 88px !important;
-  column-gap:14px !important;
-  row-gap:10px !important;
-  align-items:end !important;
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:18px;
+    align-items:end;
 }
 
 .cashier-date-item{
-  min-width:0 !important;
-  display:flex !important;
-  flex-direction:column !important;
+    display:flex;
+    flex-direction:column;
+    width:100%;
 }
 
 .cashier-date-item label{
-  margin:0 0 8px !important;
-  font-size:14px !important;
-  color:var(--text) !important;
+    display:block;
+    height:24px;        /* 所有标题固定高度 */
+    line-height:24px;
+    margin-bottom:8px;
+    font-size:15px;
+    font-weight:700;
 }
 
 .cashier-date-item input,
 .cashier-date-item select{
-  width:100% !important;
-  height:54px !important;
-  margin:0 !important;
-  padding:0 14px !important;
-  border-radius:14px !important;
-  box-sizing:border-box !important;
+    width:100%;
+    height:56px;
+    margin:0;
 }
 
 .cashier-search-btn{
-  width:88px !important;
-  height:54px !important;
-  margin:0 !important;
-  padding:0 !important;
-  border-radius:14px !important;
+    width:100%;
+    height:56px;
+    margin:0;
 }
 
 @media(max-width:760px){
