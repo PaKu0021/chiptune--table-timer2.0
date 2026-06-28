@@ -1,22 +1,19 @@
-import { db } from "./firebase.js";
-import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { db, storage } from "./firebase.js";
+import { doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
-const OWNER_PASSWORD = "prompt";
-
-const ok = sessionStorage.getItem("owner_auth");
-
-if(ok !== "1"){
-  location.href = "./index.html";
-  throw new Error("owner auth required");
-}
 
 const ref = doc(db,"shop","main");
+const recordsRef = collection(db,"records");
 const RATE = 0.044;
 
 let state = null;
 let currentFilter = "today";
 let currencyMode = "CONVERTED";
 let packagePanelOpen = false;
+let records = [];
+let customerPanelOpen = false;
+let customerSearch = "";
 
 
 function newTable(i){
@@ -40,7 +37,6 @@ onSnapshot(ref,snap=>{
 
   state = snap.data();
 
-  if(!state.records) state.records = [];
   if(!state.packages) state.packages = [];
   if(!state.tables) state.tables = [];
 
@@ -53,8 +49,21 @@ onSnapshot(ref,snap=>{
   };
 }
 
-  render();
+    if(records.length){
+    render();
+  }
+
   renderBusinessHours();
+});
+
+onSnapshot(recordsRef, snap=>{
+  records = snap.docs
+    .map(d=>d.data())
+    .filter(r=>r.id !== "init");
+
+  if(state){
+    render();
+  }  
 });
 
 function save(){
@@ -73,8 +82,8 @@ function getRecordTime(r){
 function getFilteredRecords(){
   const now = new Date();
 
-  return state.records.filter(r=>{
-    const d = new Date(getRecordTime(r));
+return records.filter(r=>{
+  const d = new Date(getRecordTime(r));
     if(isNaN(d.getTime())) return currentFilter === "all";
 
     if(currentFilter === "today"){
@@ -149,7 +158,7 @@ function render(){
   renderChart();
   renderPackages();
   renderRecords();
-
+  renderCustomers();
   const tableInput = document.getElementById("tableCount");
   if(tableInput) tableInput.value = state.tables.length || 0;
 
@@ -162,6 +171,16 @@ if(packageBody){
 
 if(packageBtn){
   packageBtn.innerText = packagePanelOpen ? "收起" : "展开";
+}
+const customerBody = document.getElementById("customerPanelBody");
+const customerBtn = document.getElementById("customerToggleBtn");
+
+if(customerBody){
+  customerBody.style.display = customerPanelOpen ? "block" : "none";
+}
+
+if(customerBtn){
+  customerBtn.innerText = customerPanelOpen ? "收起" : "展开";
 }
 }
 
@@ -364,14 +383,14 @@ function renderRecords(){
     const phone = r.phoneLast4 || "";
     const type = (r.customerType || r.type) === "booking" ? "预约" : "Walk-in";
     const packageName = r.packageName || "";
-    const extra = r.extraMinutes || 0;
+    const extra = Number(r.extraMinutes || 0);
     const original = r.originalJPY || r.totalJPY || r.jpy || 0;
     const jpy = toJPY(r);
     const rmb = toRMB(r);
 
     return `
       <tr>
-        <td>${r.time || ""}</td>
+        <td>${r.closedTime || r.time || ""}</td>
         <td>${table}</td>
         <td>${name}${phone ? "("+phone+")" : ""}</td>
         <td>${type}</td>
@@ -383,10 +402,234 @@ function renderRecords(){
         <td>${r.pay || ""}</td>
         <td>${r.currency || ""}</td>
         <td>${r.roundRule || ""}</td>
+
+        <td>
+          ${r.receiptImage
+            ? `<img src="${r.receiptImage}" style="width:60px;border-radius:8px;">`
+            : `<button class="btn-ghost" onclick="uploadReceipt('${r.id}')">上传</button>`
+          }
+        </td>
+
+        <td>
+          ${extra > 0
+            ? (
+                r.extensionConfirmed
+                  ? `已确认<br><small>${r.extensionConfirmedTime || ""}</small>`
+                  : `<button class="btn-main" onclick="confirmExtension('${r.id}')">续费确认</button>`
+              )
+            : "-"
+          }
+        </td>
       </tr>
     `;
   }).join("");
+
 }
+
+function buildCustomerStats(){
+  const map = {};
+
+  records.forEach(r=>{
+    const name = r.customerName || r.name || "";
+    const phone = r.phoneLast4 || "";
+    const key = r.customerKey || `${name}_${phone}`;
+
+    if(!name && !phone) return;
+
+    if(!map[key]){
+      map[key] = {
+        key,
+        name,
+        phone,
+        visitCount:0,
+        totalJPY:0,
+        lastTime:0,
+        lastTimeText:"",
+        lastPackage:""
+      };
+    }
+
+    const ts = getRecordTime(r);
+    const jpy = toJPY(r);
+
+    map[key].visitCount += 1;
+    map[key].totalJPY += Number(jpy || 0);
+
+    if(ts > map[key].lastTime){
+      map[key].lastTime = ts;
+      map[key].lastTimeText = r.closedTime || r.time || "";
+      map[key].lastPackage = r.packageName || "";
+    }
+  });
+
+  return Object.values(map)
+    .sort((a,b)=>b.totalJPY - a.totalJPY);
+}
+
+function renderCustomers(){
+  const summary = document.getElementById("customerSummary");
+  const tbody = document.getElementById("customerRows");
+
+  if(!summary || !tbody) return;
+
+  let list = buildCustomerStats();
+
+  const kw = customerSearch.trim().toLowerCase();
+
+  if(kw){
+    list = list.filter(c=>{
+      return [
+        c.name,
+        c.phone,
+        c.key
+      ].join(" ").toLowerCase().includes(kw);
+    });
+  }
+
+  const totalCustomers = list.length;
+  const totalVisits = list.reduce((sum,c)=>sum + c.visitCount,0);
+  const totalAmount = list.reduce((sum,c)=>sum + c.totalJPY,0);
+
+  summary.innerHTML =
+    `客户数：${totalCustomers}人｜来店记录：${totalVisits}次｜累计消费：¥${Math.floor(totalAmount).toLocaleString()}`;
+
+  if(!list.length){
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6">暂无客户记录</td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = list.map(c=>`
+    <tr>
+      <td>${c.name || "-"}</td>
+      <td>${c.phone || "-"}</td>
+      <td>${c.visitCount}</td>
+      <td>¥${Math.floor(c.totalJPY).toLocaleString()}</td>
+      <td>${c.lastTimeText || "-"}</td>
+      <td>${c.lastPackage || "-"}</td>
+    </tr>
+  `).join("");
+}
+
+function toggleCustomerPanel(){
+  customerPanelOpen = !customerPanelOpen;
+  render();
+}
+
+function setCustomerSearch(v){
+  customerSearch = v || "";
+  renderCustomers();
+}
+
+let uploadingRecordId = null;
+
+function uploadReceipt(recordId){
+  uploadingRecordId = recordId;
+
+  let input = document.getElementById("ownerReceiptInput");
+
+  if(!input){
+    input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.id = "ownerReceiptInput";
+    input.style.display = "none";
+
+    input.onchange = handleOwnerReceiptFileChange;
+
+    document.body.appendChild(input);
+  }
+
+  input.value = "";
+  input.click();
+}
+
+async function compressImage(file){
+  return new Promise(resolve=>{
+    const img = new Image();
+
+    img.onload = ()=>{
+      const canvas = document.createElement("canvas");
+
+      const maxWidth = 600;
+
+      const scale = Math.min(1,maxWidth / img.width);
+
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+
+      canvas.toBlob(
+        blob=>resolve(blob),
+        "image/jpeg",
+        0.45
+      );
+      
+    };
+
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function handleOwnerReceiptFileChange(e){
+  const file = e.target.files?.[0];
+
+  if(!file || !uploadingRecordId) return;
+
+  const r = records.find(x => x.id === uploadingRecordId);
+  if(!r){
+    alert("找不到这条账单");
+    return;
+  }
+
+  try{
+    const compressedBlob = await compressImage(file);
+
+    const path = `receipts/${uploadingRecordId}_${Date.now()}.jpg`;
+    const fileRef = storageRef(storage, path);
+
+    await uploadBytes(fileRef, compressedBlob);
+
+    const url = await getDownloadURL(fileRef);
+
+    r.receiptImage = url;
+    r.receiptPath = path;
+    r.receiptFileName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    r.receiptUploadedAt = Date.now();
+    r.receiptUploadedTime = new Date().toLocaleString();
+
+    await setDoc(doc(db, "records", r.id), r);
+
+    uploadingRecordId = null;
+    alert("收款截图已上传");
+  }catch(err){
+    console.error(err);
+    alert("上传失败：" + err.message);
+  }
+}
+
+function confirmExtension(recordId){
+const r = records.find(x=>x.id === recordId);  
+  if(!r) return;
+
+  if(!r.receiptImage){
+    const ok = confirm("这笔续费还没有上传收款截图，确定先确认吗？");
+    if(!ok) return;
+  }
+
+  r.extensionConfirmed = true;
+  r.extensionConfirmedAt = Date.now();
+  r.extensionConfirmedTime = new Date().toLocaleString();
+
+  setDoc(doc(db, "records", r.id), r);
+  alert("续费已确认");
+}
+
 
 function collectPackagesFromInputs(){
   state.packages = state.packages.map((p,i)=>({
@@ -567,6 +810,7 @@ function saveBusinessHours(){
 
 function logoutOwner(){
   sessionStorage.removeItem("owner_auth");
+  sessionStorage.removeItem("owner_auth_time");
   location.href="./index.html";
 }
 
@@ -621,3 +865,7 @@ window.saveTableCount = saveTableCount;
 window.exportCSV = exportCSV;
 window.openQrPage = openQrPage;
 window.openCashierPage = openCashierPage;
+window.uploadReceipt = uploadReceipt;
+window.confirmExtension = confirmExtension;
+window.toggleCustomerPanel = toggleCustomerPanel;
+window.setCustomerSearch = setCustomerSearch;

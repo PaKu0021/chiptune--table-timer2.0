@@ -950,3 +950,130 @@ button.selected-pop{
   color:#d93025;
 }
 
+.booking-cell-name{
+  font-weight:900;
+  font-size:14px;
+  line-height:1.2;
+}
+
+.booking-cell-phone{
+  font-size:12px;
+  font-weight:800;
+  color:#555;
+  margin-top:2px;
+}
+
+.move-title{
+  font-weight:900;
+  margin:14px 0 8px;
+}
+
+.move-table-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;
+}
+
+.move-table-btn{
+  min-height:64px;
+  background:#fff;
+  color:#332d24;
+  border:1px solid #e6dccb;
+  border-radius:14px;
+  font-weight:900;
+}
+
+.move-table-btn small{
+  color:#8a8174;
+  font-weight:800;
+}
+
+.move-table-btn.selected{
+  background:#f2c94c !important;
+  border-color:#d8a900 !important;
+  color:#332d24 !important;
+}
+
+.move-table-btn.disabled{
+  background:#ddd !important;
+  color:#999 !important;
+}
+
+.move-line-area{
+  position:relative;
+  min-height:360px;
+  padding:10px 0;
+}
+
+#moveSvg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  pointer-events:none;
+  z-index:1;
+}
+
+.move-row-title{
+  position:relative;
+  z-index:2;
+  font-weight:900;
+  margin:12px 0 8px;
+}
+
+.move-drag-grid{
+  position:relative;
+  z-index:2;
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;
+  margin-bottom:24px;
+}
+
+.move-table-btn{
+  min-height:64px;
+  background:#fff;
+  color:#332d24;
+  border:1px solid var(--line);
+  font-weight:900;
+}
+
+.move-table-btn small{
+  color:#8a8174;
+  font-weight:800;
+}
+
+.move-table-btn.selected,
+.move-table-btn.dragging{
+  background:#f2c94c !important;
+  border-color:#d8a900 !important;
+  color:#332d24 !important;
+}
+
+.move-table-btn.disabled{
+  background:#ddd !important;
+  color:#999 !important;
+  border-color:#ccc !important;
+}
+
+.unlocked-grid .slot-cell.disabled-slot.slot-normal,
+.unlocked-grid .slot-cell.disabled-slot.slot-warning,
+.unlocked-grid .slot-cell.disabled-slot.slot-overtime,
+.unlocked-grid .slot-cell.disabled-slot.slot-running{
+  pointer-events:auto !important;
+  cursor:pointer !important;
+}
+
+.running-block{
+  pointer-events:none !important;
+}
+
+.move-line-area,
+.move-drag-grid,
+.move-table-btn{
+  touch-action:none !important;
+}
+
+#moveSvg line{
+  pointer-events:none;
+}

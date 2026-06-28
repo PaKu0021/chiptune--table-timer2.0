@@ -1,5 +1,5 @@
 import { db } from "./firebase.js";
-import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 import { resetTable } from "./common.js";
 
 
@@ -13,6 +13,23 @@ let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = currentBookingDate;
 let bookingListOpen = false;
 let moveBookingId = null;
+let movePairs = [];
+let draggingMoveFrom = null;
+let moveLineRAF = null;
+let lastMovePointer = null;
+let runningPayTableIndex = null;
+let dragTempLine = null;
+let moveAreaRect = null;
+let dragFromCenter = null;
+
+const MOVE_LINE_COLORS = [
+  "#e85d5d",
+  "#2b6fc9",
+  "#54a66b",
+  "#ff9800",
+  "#8e44ad",
+  "#00a6a6"
+];
 
 const BOOKING_COLORS = [
   "#B7E4C7",
@@ -68,11 +85,29 @@ onSnapshot(ref, snap=>{
       name:(i+1)+"号桌"
     }));
   }
+  let needSave = false;
 
-  try{
-    renderList();
-    renderBookingGrid();
-  }catch(e){
+Promise.all(
+  state.tables.map(async t=>{
+    if(t.start && !t.recordId){
+      await createOrUpdateTableRecord(t,{
+        customerType: t.type === "booking" ? "booking" : "walkin",
+        checkoutMethod: "补写开始计时账单"
+      });
+      needSave = true;
+    }
+  })
+).then(()=>{
+  if(needSave){
+    save();
+  }
+});
+
+
+try{
+  renderList();
+  renderBookingGrid();
+}catch(e){
     alert("预约页面错误：" + e.message);
   }
 });
@@ -128,6 +163,76 @@ function addCustomerVisit({name, phone, packageIndex, tableIndexes, startTime, e
   });
 }
 
+async function createOrUpdateTableRecord(t, {
+  customerType = "walkin",
+  checkoutMethod = "开始计时"
+} = {}){
+
+  const p = state.packages?.[Number(t.packageIndex || 0)] || {};
+  const paidJPY = Number(p.price || 0);
+  const now = Date.now();
+
+  let record = null;
+
+  if(t.recordId){
+    const snap = await getDoc(doc(db, "records", t.recordId));
+    if(snap.exists()){
+      record = snap.data();
+    }
+  }
+
+  if(!record){
+    record = {
+      id:"rec_" + now + "_" + Math.random().toString(36).slice(2,8),
+      timestamp:now,
+      time:new Date(now).toLocaleString(),
+      receiptImage:"",
+      receiptFileName:""
+    };
+
+    t.recordId = record.id;
+  }
+
+  record.timestamp = record.timestamp || now;
+  record.time = record.time || new Date(now).toLocaleString();
+
+  record.tableName = t.name;
+  record.customerName = t.customer?.name || "";
+  record.phoneLast4 = t.customer?.phoneLast4 || "";
+  record.customerType = customerType;
+
+  record.packageName = p.name || "";
+  record.packageMinutes = p.unlimited ? "不限时" : p.minutes;
+  record.packagePrice = paidJPY;
+
+  record.extraMinutes = Math.floor(Number(t.extra || 0) / 60000);
+  record.extensionAmount = 0;
+  record.originalJPY = paidJPY;
+
+  record.paidJPY = paidJPY;
+  record.dueJPY = 0;
+  record.totalJPY = paidJPY;
+  record.totalRMB = Math.floor(paidJPY * 0.044);
+
+  record.pay = t.pay || "未记录";
+  record.currency = t.currency || "日元";
+  record.payTiming = "prepaid";
+
+  record.paidStatus = "已结清";
+  record.recordType = "prepaid";
+  record.checkoutMethod = checkoutMethod;
+  record.roundRule = "不抹零";
+
+  t.paidJPY = paidJPY;
+  t.paidRMB = Math.floor(paidJPY * 0.044);
+  t.paidAt = now;
+
+  await setDoc(doc(db, "records", record.id), record);
+
+  return record;
+}
+
+
 function getTodayDate(){
   const d = new Date();
   const y = d.getFullYear();
@@ -182,15 +287,36 @@ function timeToMinutes(time){
 }
 
 function findPackageIndexByDuration(startTime,endTime){
-  const minutes = timeToMinutes(endTime) - timeToMinutes(startTime);
+  const minutes =
+    timeToMinutes(endTime) - timeToMinutes(startTime);
 
-  const index = (state.packages || []).findIndex(p=>{
-    return Number(p.minutes || 0) === minutes;
+  const packages = state.packages || [];
+
+  const d = new Date(currentBookingDate);
+  const day = d.getDay();
+  const isWeekend = day === 0 || day === 6;
+
+  const exactIndex = packages.findIndex(p=>{
+    return !p.unlimited &&
+           Number(p.minutes || 0) === minutes;
   });
 
-  return index >= 0 ? index : 0;
-}
+  if(exactIndex >= 0){
+    return exactIndex;
+  }
 
+  if(!isWeekend){
+    const unlimitedIndex = packages.findIndex(p=>{
+      return p.unlimited;
+    });
+
+    if(unlimitedIndex >= 0){
+      return unlimitedIndex;
+    }
+  }
+
+  return 0;
+}
 
 function isTableBusyAtSlot(t, rowIndex){
   if(!t.start) return false;
@@ -497,95 +623,348 @@ function cancelBookingById(id){
   cancelBooking();
 }
 
-function openMoveTableModal(id){
+function hasBookingConflict(targetIndex, booking, excludeBookingId){
+  const target = Number(targetIndex);
 
+  const startA = timeToMinutes(booking.startTime);
+  const endA = timeToMinutes(booking.endTime);
+
+  return (state.bookings || []).some(b=>{
+    if(Number(b.id) === Number(excludeBookingId)) return false;
+    if((b.date || currentBookingDate) !== currentBookingDate) return false;
+
+    const indexes = (b.tableIndexes || [b.tableIndex])
+      .filter(v=>v !== undefined && v !== null)
+      .map(Number);
+
+    if(!indexes.includes(target)) return false;
+
+    const startB = timeToMinutes(b.startTime);
+    const endB = timeToMinutes(b.endTime);
+
+    return startA < endB && endA > startB;
+  });
+}
+
+function openMoveTableModal(id){
   if(!id) id = activeBookingId;
 
   const b = getBookingById(id);
   if(!b) return;
 
   moveBookingId = id;
+  movePairs = [];
+  draggingMoveFrom = null;
 
   const bookingIndexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
 
-  const runningIndexes = bookingIndexes.filter(i=>{
-    return state.tables[i]?.start;
-  });
-
-  if(runningIndexes.length === 0){
-    alert("这个预约还没有开始计时，不能移动使用中的桌位");
-    return;
-  }
-
   document.getElementById("moveTableInfo").innerHTML = `
     客人：${b.name || "-"} ${String(b.phone || "").slice(-4) || ""}<br>
-    当前使用中：${runningIndexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
+    预约时间：${b.startTime || "-"} - ${b.endTime || "-"}<br>
+    当前桌位：${bookingIndexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
   `;
 
-  document.getElementById("moveFromTable").innerHTML = runningIndexes.map(i=>`
-    <option value="${i}">${state.tables[i]?.name || (i+1)+"号桌"}</option>
-  `).join("");
+  document.getElementById("moveLineArea").innerHTML = `
+    <svg id="moveSvg"></svg>
 
-  document.getElementById("moveToTable").innerHTML = state.tables.map((t,i)=>{
-    const disabled = t.start ? "disabled" : "";
-    const text = t.start ? `${t.name}｜使用中` : `${t.name}｜空闲`;
-    return `<option value="${i}" ${disabled}>${text}</option>`;
-  }).join("");
+    <div class="move-row-title">按住要移动的桌位，拖到下面目标桌位</div>
+    <div id="moveFromTableBox" class="move-drag-grid">
+      ${bookingIndexes.map(i=>{
+        const running = state.tables[i]?.start ? "已开始" : "未开始";
+
+        return `
+          <button
+            class="move-table-btn move-from-btn"
+            data-index="${i}"
+            id="move-from-${i}"
+            onpointerdown="startMoveDrag(event,${i})"
+          >
+            ${state.tables[i]?.name || (i+1)+"号桌"}<br>
+            <small>${running}</small>
+          </button>
+        `;
+      }).join("")}
+    </div>
+
+    <div class="move-row-title">拖到这里选择目标桌位</div>
+    <div id="moveToTableBox" class="move-drag-grid">
+      ${state.tables.map((t,i)=>{
+        const isSameBookingTable = bookingIndexes.includes(i);
+        const occupied = !!t.start && !isSameBookingTable;
+        const conflict = hasBookingConflict(i, b, b.id) && !isSameBookingTable;
+
+        let disabled = occupied || conflict;
+        let sub = "可移动";
+
+        if(occupied) sub = "使用中";
+        else if(conflict) sub = "已有预约";
+        else if(isSameBookingTable) sub = "当前预约桌";
+
+        return `
+          <button
+            class="move-table-btn move-to-btn ${disabled ? "disabled" : ""}"
+            data-index="${i}"
+            id="move-to-${i}"
+            ${disabled ? "disabled" : ""}
+          >
+            ${t.name}<br>
+            <small>${sub}</small>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
 
   document.getElementById("moveTableModalBg").style.display = "block";
+  setTimeout(drawMoveLines, 50);
 }
 
-function closeMoveTableModal(){
-  document.getElementById("moveTableModalBg").style.display = "none";
-  moveBookingId = null;
+function startMoveDrag(e, fromIndex){
+  e.preventDefault();
+
+  draggingMoveFrom = Number(fromIndex);
+
+  document.querySelectorAll(".move-from-btn")
+    .forEach(btn=>btn.classList.remove("dragging"));
+
+  const fromEl = document.getElementById("move-from-" + fromIndex);
+  fromEl?.classList.add("dragging");
+
+  const area = document.getElementById("moveLineArea");
+  const svg = document.getElementById("moveSvg");
+  if(!area || !svg || !fromEl) return;
+
+  moveAreaRect = area.getBoundingClientRect();
+
+  const r = fromEl.getBoundingClientRect();
+  dragFromCenter = {
+    x: r.left + r.width / 2 - moveAreaRect.left,
+    y: r.top + r.height / 2 - moveAreaRect.top
+  };
+
+  const ns = "http://www.w3.org/2000/svg";
+  dragTempLine = document.createElementNS(ns, "line");
+
+  const color = MOVE_LINE_COLORS[movePairs.length % MOVE_LINE_COLORS.length];
+
+  dragTempLine.setAttribute("x1", dragFromCenter.x);
+  dragTempLine.setAttribute("y1", dragFromCenter.y);
+  dragTempLine.setAttribute("x2", dragFromCenter.x);
+  dragTempLine.setAttribute("y2", dragFromCenter.y);
+  dragTempLine.setAttribute("stroke", color);
+  dragTempLine.setAttribute("stroke-width", "5");
+  dragTempLine.setAttribute("stroke-linecap", "round");
+  dragTempLine.setAttribute("stroke-dasharray", "8 6");
+
+  svg.appendChild(dragTempLine);
+
+  window.addEventListener("pointermove", moveDragLine, {passive:false});
+  window.addEventListener("pointerup", endMoveDrag);
+}
+
+
+function moveDragLine(e){
+  if(draggingMoveFrom === null) return;
+  if(!dragTempLine || !moveAreaRect) return;
+
+  e.preventDefault();
+
+  const x = e.clientX - moveAreaRect.left;
+  const y = e.clientY - moveAreaRect.top;
+
+  dragTempLine.setAttribute("x2", x);
+  dragTempLine.setAttribute("y2", y);
+}
+
+
+function endMoveDrag(e){
+  if(draggingMoveFrom === null) return;
+
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+  const toBtn = target?.closest?.(".move-to-btn");
+
+  if(toBtn && !toBtn.disabled){
+    const toIndex = Number(toBtn.dataset.index);
+
+    if(draggingMoveFrom === toIndex){
+      alert("新桌位不能和原桌位一样");
+    }else{
+      movePairs = movePairs.filter(p=>{
+        return p.from !== draggingMoveFrom && p.to !== toIndex;
+      });
+
+      movePairs.push({
+        from: draggingMoveFrom,
+        to: toIndex
+      });
+    }
+  }
+
+  document.querySelectorAll(".move-from-btn")
+    .forEach(btn=>btn.classList.remove("dragging"));
+
+  draggingMoveFrom = null;
+
+  window.removeEventListener("pointermove", moveDragLine);
+window.removeEventListener("pointerup", endMoveDrag);
+
+lastMovePointer = null;
+
+if(moveLineRAF){
+  cancelAnimationFrame(moveLineRAF);
+  moveLineRAF = null;
+}
+
+if(dragTempLine){
+  dragTempLine.remove();
+  dragTempLine = null;
+}
+
+moveAreaRect = null;
+dragFromCenter = null;
+
+drawMoveLines();
+
+
+}
+
+function drawMoveLines(pointerX = null, pointerY = null){
+  const svg = document.getElementById("moveSvg");
+  const area = document.getElementById("moveLineArea");
+  if(!svg || !area) return;
+
+  const rect = area.getBoundingClientRect();
+  const ns = "http://www.w3.org/2000/svg";
+
+  const nodes = [];
+
+  function centerOf(el){
+    const r = el.getBoundingClientRect();
+    return {
+      x: r.left + r.width / 2 - rect.left,
+      y: r.top + r.height / 2 - rect.top
+    };
+  }
+
+  document.querySelectorAll(".move-table-btn.selected")
+    .forEach(btn=>btn.classList.remove("selected"));
+
+  movePairs.forEach((pair,idx)=>{
+    const fromEl = document.getElementById("move-from-" + pair.from);
+    const toEl = document.getElementById("move-to-" + pair.to);
+    if(!fromEl || !toEl) return;
+
+    fromEl.classList.add("selected");
+    toEl.classList.add("selected");
+
+    const a = centerOf(fromEl);
+    const b = centerOf(toEl);
+    const color = MOVE_LINE_COLORS[idx % MOVE_LINE_COLORS.length];
+
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", a.x);
+    line.setAttribute("y1", a.y);
+    line.setAttribute("x2", b.x);
+    line.setAttribute("y2", b.y);
+    line.setAttribute("stroke", color);
+    line.setAttribute("stroke-width", "5");
+    line.setAttribute("stroke-linecap", "round");
+
+    nodes.push(line);
+  });
+
+  if(draggingMoveFrom !== null && pointerX !== null && pointerY !== null){
+    const fromEl = document.getElementById("move-from-" + draggingMoveFrom);
+
+    if(fromEl){
+      const a = centerOf(fromEl);
+      const color = MOVE_LINE_COLORS[movePairs.length % MOVE_LINE_COLORS.length];
+
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("x1", a.x);
+      line.setAttribute("y1", a.y);
+      line.setAttribute("x2", pointerX - rect.left);
+      line.setAttribute("y2", pointerY - rect.top);
+      line.setAttribute("stroke", color);
+      line.setAttribute("stroke-width", "5");
+      line.setAttribute("stroke-linecap", "round");
+      line.setAttribute("stroke-dasharray", "8 6");
+
+      nodes.push(line);
+    }
+  }
+
+  svg.replaceChildren(...nodes);
 }
 
 function confirmMoveTable(){
   const b = getBookingById(moveBookingId);
   if(!b) return;
 
-  const fromIndex = Number(document.getElementById("moveFromTable").value);
-  const toIndex = Number(document.getElementById("moveToTable").value);
-
-  if(fromIndex === toIndex){
-    alert("新桌位不能和原桌位一样");
+  if(movePairs.length === 0){
+    alert("请先拖线选择要移动的桌位");
     return;
   }
 
-  const fromTable = state.tables[fromIndex];
-  const toTable = state.tables[toIndex];
-
-  if(!fromTable?.start){
-    alert("原桌位没有正在计时");
-    return;
-  }
-
-  if(toTable?.start){
-    alert("目标桌位正在使用中，不能移动");
-    return;
-  }
-
-  const oldToName = toTable.name;
-  const oldFromName = fromTable.name;
-
-  state.tables[toIndex] = {
-    ...fromTable,
-    name: oldToName
-  };
-
-  state.tables[fromIndex] = resetTable(oldFromName);
-
-  b.tableIndexes = (b.tableIndexes || [b.tableIndex])
+  const bookingIndexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
-    .map(Number)
-    .map(i=>i === fromIndex ? toIndex : i);
+    .map(Number);
+
+  for(const pair of movePairs){
+    if(!bookingIndexes.includes(pair.from)){
+      alert("有原桌位不属于这个预约");
+      return;
+    }
+
+    if(pair.from === pair.to){
+      alert("新桌位不能和原桌位一样");
+      return;
+    }
+
+    const toTable = state.tables[pair.to];
+
+    if(toTable?.start){
+      alert(`${toTable.name} 正在使用中，不能移动`);
+      return;
+    }
+
+    if(hasBookingConflict(pair.to, b, b.id)){
+      alert(`${toTable.name} 在这个时间段已有预约，不能移动`);
+      return;
+    }
+  }
+
+  movePairs.forEach(pair=>{
+    const fromTable = state.tables[pair.from];
+    const toTable = state.tables[pair.to];
+
+    if(fromTable?.start){
+      const oldFromName = fromTable.name;
+      const oldToName = toTable.name;
+
+      state.tables[pair.to] = {
+        ...fromTable,
+        name: oldToName
+      };
+
+      state.tables[pair.from] = resetTable(oldFromName);
+    }
+  });
+
+  b.tableIndexes = bookingIndexes.map(i=>{
+    const pair = movePairs.find(p=>p.from === i);
+    return pair ? pair.to : i;
+  });
 
   if(b.checkedInTableIndexes){
     b.checkedInTableIndexes = b.checkedInTableIndexes
       .map(Number)
-      .map(i=>i === fromIndex ? toIndex : i);
+      .map(i=>{
+        const pair = movePairs.find(p=>p.from === i);
+        return pair ? pair.to : i;
+      });
   }
 
   delete b.tableIndex;
@@ -594,6 +973,16 @@ function confirmMoveTable(){
   closeMoveTableModal();
   renderBookingGrid();
   renderList();
+
+  alert("桌位已移动");
+}
+
+
+function closeMoveTableModal(){
+  document.getElementById("moveTableModalBg").style.display = "none";
+  moveBookingId = null;
+  movePairs = [];
+  draggingMoveFrom = null;
 }
 
 function startSelectSlot(e,tableIndex,rowIndex){
@@ -665,13 +1054,22 @@ function endSelectSlot(e){
     `${tableNames.join("、")}｜${startTime} - ${endTime}`;
 
   const tip = document.getElementById("selectionTip");
-  if(tip) tip.style.display = "none";
-  fillModalPackages();
+if(tip) tip.style.display = "none";
+
+fillModalPackages();
+
+const autoPackageIndex = findPackageIndexByDuration(startTime, endTime);
+const modalPackage = document.getElementById("modalPackage");
+
+if(modalPackage){
+  modalPackage.value = String(autoPackageIndex);
+}
 
 const modalType = document.getElementById("modalType");
 if(modalType) modalType.value = "booking";
 
 toggleModalType();
+
 
   document.getElementById("bookingModalBg").style.display = "block";
 }
@@ -784,7 +1182,7 @@ function fillModalPackages(){
   `).join("");
 }
 
-function confirmGridBooking(){
+  async function confirmGridBooking(){
   if(!selection) return;
 
   const type = document.getElementById("modalType")?.value || "booking";
@@ -818,7 +1216,7 @@ function confirmGridBooking(){
     const packageIndex = Number(document.getElementById("modalPackage")?.value || 0);
     const now = Date.now();
     const walkinColor = getNextBookingColor();
-    tableIndexes.forEach(idx=>{
+      for(const idx of tableIndexes){
       const t = state.tables[idx];
       if(!t) return;
 
@@ -838,7 +1236,11 @@ function confirmGridBooking(){
       t.alerted = false;
       t.alerting = false;
       t.lastAction = "start";
-    });
+      await createOrUpdateTableRecord(t, {
+  customerType:"walkin",
+  checkoutMethod:"Walk-in开始计时"
+});
+    }
 
     save();
 
@@ -1026,9 +1428,12 @@ function drawExistingBookings(){
   });
 
   dayBookings.forEach(b=>{
+    const finished = (b.finishedTableIndexes || []).map(Number);
+
     const tableIndexes = (b.tableIndexes || [b.tableIndex])
       .filter(v=>v !== undefined && v !== null)
-      .map(Number);
+      .map(Number)
+      .filter(i=>!finished.includes(i));
 
     const startRow = slots.indexOf(b.startTime);
     let endRow = slots.indexOf(b.endTime);
@@ -1067,31 +1472,21 @@ function drawExistingBookings(){
           openBookingAction(b.id);
         };
 
-        if(rowIndex === startRow && tableIndex === tableIndexes[0]){
-  cell.innerHTML = b.checkedIn ? "" : (b.name || "");
-}               
+  if(rowIndex === startRow && tableIndex === tableIndexes[0]){
+  const phoneLast4 = String(b.phone || "").slice(-4);
+
+  cell.innerHTML = b.checkedIn
+    ? ""
+    : `
+      <div class="booking-cell-name">${b.name || "-"}</div>
+      <div class="booking-cell-phone">${phoneLast4 || ""}</div>
+    `;
+}
+               
       }
     });
   });
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  
-
-
 
 function drawRunningTables(){
   document.querySelectorAll(".running-block").forEach(el=>{
@@ -1122,9 +1517,18 @@ function drawRunningTables(){
         `.slot-cell[data-table="${tableIndex}"][data-row="${row}"]`
       );
 
-      if(cell){
-        cell.style.background = bgColor;
-      }
+    if(cell){
+  cell.style.background = bgColor;
+
+  cell.onclick = (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+
+    if(bookingLocked) return;
+
+    openRunningTablePay(tableIndex);
+  };
+}      
     }
 
     const middleRow = Math.floor((startRow + endRow) / 2);
@@ -1151,12 +1555,56 @@ middleCell.innerHTML = `
 }
 
 
+function openRunningTablePay(tableIndex){
+  const t = state.tables[tableIndex];
+  if(!t || !t.start) return;
 
+  runningPayTableIndex = tableIndex;
 
+  document.getElementById("runningPayInfo").innerHTML = `
+    ${t.name}<br>
+    当前付款方式：${t.pay || "未记录"}
+  `;
 
+  document.getElementById("runningPaySelect").value = t.pay || "";
 
+  document.getElementById("runningPayModalBg").style.display = "block";
+}
 
+function closeRunningTablePay(){
+  document.getElementById("runningPayModalBg").style.display = "none";
+  runningPayTableIndex = null;
+}
 
+async function confirmRunningTablePay(){
+  if(runningPayTableIndex === null) return;
+
+  const t = state.tables[runningPayTableIndex];
+  const value = document.getElementById("runningPaySelect").value;
+
+  if(!value){
+    alert("请选择付款方式");
+    return;
+  }
+
+  t.pay = value;
+
+if(t.recordId){
+  const snap = await getDoc(doc(db, "records", t.recordId));
+
+  if(snap.exists()){
+    const r = snap.data();
+    r.pay = value;
+    await setDoc(doc(db, "records", r.id), r);
+  }
+}
+
+  save();
+  closeRunningTablePay();
+  renderBookingGrid();
+
+  alert(`${t.name} 已设置付款方式：${value}`);
+}
 
 
 
@@ -1316,7 +1764,7 @@ function checkInBooking(){
   openCheckInSelectModal(activeBookingId);
 }
 
-function confirmCheckInSelected(){
+async function confirmCheckInSelected(){
   const b = getBookingById(activeBookingId);
   if(!b) return;
 
@@ -1347,7 +1795,7 @@ function confirmCheckInSelected(){
 
   const now = Date.now();
 
-  indexes.forEach(idx=>{
+    for(const idx of indexes){
     const t = state.tables[idx];
     if(!t) return;
 
@@ -1369,7 +1817,14 @@ function confirmCheckInSelected(){
     t.alerted = false;
     t.alerting = false;
     t.lastAction = "start";
-  });
+
+    await createOrUpdateTableRecord(t, {
+  customerType:"booking",
+  checkoutMethod:"预约到店开始计时"
+});
+
+
+  }
 
   if(!b.checkedInTableIndexes){
     b.checkedInTableIndexes = [];
@@ -1467,3 +1922,7 @@ window.confirmCheckInSelected = confirmCheckInSelected;
 window.openMoveTableModal = openMoveTableModal;
 window.closeMoveTableModal = closeMoveTableModal;
 window.confirmMoveTable = confirmMoveTable;
+window.startMoveDrag = startMoveDrag;
+window.openRunningTablePay = openRunningTablePay;
+window.closeRunningTablePay = closeRunningTablePay;
+window.confirmRunningTablePay = confirmRunningTablePay;

@@ -3,14 +3,19 @@ export function renderNav(active){
   if(!box) return;
 
   box.innerHTML = `
+    <button class="${active === "booking" ? "btn-main" : "btn-ghost"}"
+      onclick="location.href='./booking.html'">
+      预约
+    </button>
+
     <button class="${active === "app" ? "btn-main" : "btn-ghost"}"
       onclick="location.href='./app.html'">
       计时器
     </button>
 
-    <button class="${active === "booking" ? "btn-main" : "btn-ghost"}"
-      onclick="location.href='./booking.html'">
-      预约
+    <button class="${active === "bill" ? "btn-main" : "btn-ghost"}"
+      onclick="location.href='./today-bill.html'">
+      今日账单
     </button>
 
     <button class="${active === "owner" ? "btn-main" : "btn-ghost"}"
@@ -26,13 +31,6 @@ export function renderNav(active){
 }
 
 window.goOwner = function(){
-  const ok = sessionStorage.getItem("owner_auth");
-
-  if(ok === "1"){
-    location.href = "./owner.html";
-    return;
-  }
-
   const pw = prompt("请输入老板密码");
 
   if(pw !== "prompt"){

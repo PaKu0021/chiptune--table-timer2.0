@@ -41,32 +41,46 @@
     </div>
   </div>
 </div>
-  <div class="home-grid">
-    <button class="home-card primary" onclick="go('./app.html')">
-      <span class="emoji">⏱️</span>
-      <strong>进入计时系统</strong>
-      <small>桌位计时 / 结账 / 二维码 / 超时提醒</small>
-    </button>
+<div class="home-grid">
 
-    <button class="home-card" onclick="goOwner()">
-      <span class="emoji">📊</span>
-      <strong>老板模式</strong>
-      <small>收入统计 / 报表 / CSV导出</small>
-    </button>
+<button id="cardBooking" class="home-card" onclick="go('./booking.html','cardBooking')">
+  <span class="emoji">📅</span>
+    <strong>预约系统</strong>
+    <small>客人预约 / 指定桌位 / 调整座位</small>
+  </button>
 
-    <button class="home-card" onclick="go('./booking.html')">
-      <span class="emoji">📅</span>
-      <strong>预约系统</strong>
-      <small>客人预约 / 指定桌位 / 调整座位</small>
-    </button>
-  </div>
+<button id="cardApp" class="home-card" onclick="go('./app.html','cardApp')">
+  <span class="emoji">⏱️</span>
+    <strong>进入计时系统</strong>
+    <small>桌位计时 / 结账 / 二维码 / 超时提醒</small>
+  </button>
+
+<button id="cardBill" class="home-card" onclick="go('./today-bill.html','cardBill')">
+  <div class="emoji">🧾</div>
+    <strong>今日账单</strong>
+    <small>只查看今天收款记录</small>
+  </button>
+
+<button id="cardOwner" class="home-card" onclick="goOwner()">
+  <span class="emoji">📊</span>
+    <strong>老板模式</strong>
+    <small>收入统计 / 报表 / CSV导出</small>
+  </button>
+
+</div>
+
+      
 </div>
  
 <script type="module">
 import { db } from "./js/firebase.js";
-import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-
+import { doc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 const ref = doc(db,"shop","main");
+const recordsRef = collection(db,"records");
+
+let homeState = null;
+let allRecords = [];
+
 
 function getTodayDate(){
   const d = new Date();
@@ -76,10 +90,24 @@ function getTodayDate(){
 onSnapshot(ref,snap=>{
   if(!snap.exists()) return;
 
-  const state = snap.data();
-  const tables = state.tables || [];
-  const bookings = state.bookings || [];
-  const records = state.records || [];
+  homeState = snap.data();
+  updateHome();
+});
+
+onSnapshot(recordsRef,snap=>{
+  allRecords = snap.docs
+    .map(d=>d.data())
+    .filter(r=>r.id !== "init");
+
+  updateHome();
+});
+
+function updateHome(){
+  if(!homeState) return;
+
+  const tables = homeState.tables || [];
+  const bookings = homeState.bookings || [];
+  const records = allRecords;
 
   const usingCount = tables.filter(t=>t.start).length;
   const freeCount = tables.length - usingCount;
@@ -92,8 +120,9 @@ onSnapshot(ref,snap=>{
 
   const todayRevenue = records
     .filter(r=>{
-      const ts = r.timestamp || r.time || r.date;
+      const ts = r.timestamp || r.closedAt || r.paidAt || r.time || r.date;
       if(!ts) return false;
+
       const d = new Date(ts);
       if(isNaN(d.getTime())) return false;
 
@@ -106,13 +135,16 @@ onSnapshot(ref,snap=>{
   document.getElementById("homeFreeCount").innerText = `${freeCount}桌`;
   document.getElementById("homeBookingCount").innerText = `${todayBookingCount}组`;
   document.getElementById("homeRevenue").innerText = `¥${todayRevenue.toLocaleString()}`;
-});
+}
 
-window.go = function(page){
+window.go = function(page, cardId){
+  localStorage.setItem("home_active", cardId);
   location.href = page;
 };
 
+
 window.goOwner = function(){
+
   const pw = prompt("请输入老板密码");
 
   if(pw !== "prompt"){
@@ -120,11 +152,21 @@ window.goOwner = function(){
     return;
   }
 
+  localStorage.setItem("home_active","cardOwner");
   sessionStorage.setItem("owner_auth","1");
 
-  location.href = "./owner.html";
+  location.href="./owner.html";
 };
 
+const activeCard = localStorage.getItem("home_active");
+
+if(activeCard){
+  document.querySelectorAll(".home-card").forEach(btn=>{
+    btn.classList.remove("primary");
+  });
+
+  document.getElementById(activeCard)?.classList.add("primary");
+}
 </script>
 
 </body>

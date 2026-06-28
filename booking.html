@@ -172,13 +172,12 @@
 </div>
 
 <div id="moveTableModalBg" class="modal-bg">
-  <div class="modal">
+  <div class="modal move-modal">
     <h2>移动桌位</h2>
 
     <div id="moveTableInfo" style="margin-bottom:12px;font-weight:800;"></div>
 
-    <select id="moveFromTable"></select>
-    <select id="moveToTable"></select>
+    <div id="moveLineArea" class="move-line-area"></div>
 
     <button class="btn-main full" onclick="confirmMoveTable()">
       确认移动
@@ -191,6 +190,10 @@
 </div>
 
 
+
+
+
+
 <script type="module">
   import { renderNav } from "./js/nav.js";
 
@@ -201,6 +204,30 @@
     console.error(e);
   });
 </script>
+
+<div id="runningPayModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>付款方式</h2>
+
+    <div id="runningPayInfo" style="font-weight:900;margin-bottom:12px;"></div>
+
+    <select id="runningPaySelect">
+      <option value="">请选择付款方式</option>
+      <option value="现金">现金</option>
+      <option value="PayPay">PayPay</option>
+      <option value="微信">微信</option>
+      <option value="支付宝">支付宝</option>
+    </select>
+
+    <button class="btn-main full" onclick="confirmRunningTablePay()">
+      保存付款方式
+    </button>
+
+    <button class="btn-ghost full" onclick="closeRunningTablePay()">
+      关闭
+    </button>
+  </div>
+</div>
 
 </body>
 </html>

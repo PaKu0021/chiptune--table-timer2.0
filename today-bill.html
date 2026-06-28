@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日账单</title>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+<div class="page-shell">
+
+  <div class="app-header">
+    <div class="app-title">
+      <h1>今日账单</h1>
+      <p>只显示今天的收款记录</p>
+    </div>
+
+<div class="header-actions">
+  <div id="globalNav"></div>
+</div>
+
+</div>
+
+  <div class="panel">
+    <h2>今日收入</h2>
+    <div id="todaySummary" style="font-weight:900;line-height:1.8;"></div>
+    <div id="todayPayStats" style="margin-top:10px;color:#8a8174;font-weight:800;"></div>
+  </div>
+
+  <div class="panel">
+
+    <h2>今日账单明细</h2>
+
+    <div style="overflow:auto;">
+      <table class="record-table">
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>桌位</th>
+            <th>客人</th>
+            <th>类型</th>
+            <th>套餐</th>
+            <th>续费</th>
+            <th>原价</th>
+            <th>日元</th>
+            <th>人民币</th>
+            <th>付款</th>
+            <th>币种</th>
+            <th>抹零</th>
+            <th>收款截图</th>
+            <th>续费确认</th>
+          </tr>
+        </thead>
+        <tbody id="todayRecords"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+<input
+  id="receiptInput"
+  type="file"
+  accept="image/*"
+  style="display:none"
+  onchange="handleReceiptFileChange(event)"
+>
+
+<script type="module">
+import { renderNav } from "./js/nav.js";
+
+renderNav("bill");
+import("./js/today-bill.js");
+</script>
+
+
+</body>
+</html>

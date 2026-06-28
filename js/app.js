@@ -1,6 +1,6 @@
 /*alert("app.js 已加载");*/
 import { db } from "./firebase.js";
-import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 /*import { formatTime } from "./common.js";*/
 import { resetTable, formatTime } from "./common.js";
 const ref = doc(db, "shop", "main");
@@ -33,7 +33,6 @@ const defaultState = {
     {name:"不限时", minutes:0, price:5500, extensionPrice:0, unlimited:true}
   ],
   tables: Array.from({length:8},(_,i)=>newTable(i+1)),
-  records:[],
   bookings:[],
   customers:{}
 };
@@ -44,7 +43,6 @@ onSnapshot(ref, snap=>{
 /*alert("Firestore已读取");*/
     
     if(!state.packages) state.packages = defaultState.packages;
-    if(!state.records) state.records = [];
     if(!state.bookings) state.bookings = [];
     if(!state.tables) state.tables = defaultState.tables;
     if(!state.customers) state.customers = {};
@@ -172,9 +170,11 @@ function getDueJPY(t){
   return Math.max(0, getOriginalJPY(t) - Number(t.paidJPY || 0));
 }
 
-function getTableRecord(t){
+async function getTableRecord(t){
   if(!t.recordId) return null;
-  return state.records.find(r=>r.id === t.recordId) || null;
+
+  const snap = await getDoc(doc(db, "records", t.recordId));
+  return snap.exists() ? snap.data() : null;
 }
 
 function makeCustomerKey(name, phoneLast4){
@@ -276,13 +276,16 @@ function createOrUpdateCustomerVisit(t){
   return visit;
 }
 
-function createOrUpdateRecord(t){
-  const p = getPackage(t);
-  const originalJPY = getOriginalJPY(t);
-  const paidJPY = Number(t.paidJPY || 0);
-  const dueJPY = Math.max(0, originalJPY - paidJPY);
+async function createOrUpdateRecord(t){
 
-  let record = getTableRecord(t);
+  const p = getPackage(t);
+const originalJPY = getOriginalJPY(t);
+
+let paidJPY = Number(t.paidJPY || 0);
+
+const dueJPY = Math.max(0, originalJPY - paidJPY);
+
+  let record = await getTableRecord(t);
 
   if(!record){
     const id = "rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
@@ -297,7 +300,6 @@ function createOrUpdateRecord(t){
       receiptFileName:"",
     };
 
-    state.records.push(record);
   }
 
   record.tableName = t.name;
@@ -337,8 +339,12 @@ if(visit){
   record.visitRange = visit.range;
 }
 
-
+await setDoc(doc(db, "records", record.id), record);
   return record;
+}
+
+async function updateRecordOnly(record){
+  await setDoc(doc(db, "records", record.id), record);
 }
 
 function getStatus(t){
@@ -643,8 +649,15 @@ function notifyLocal(title,body){
   }catch(e){}
 }
 
-function setPackage(i,v){
-  state.tables[i].packageIndex = Number(v);
+async function setPackage(i,v){
+  const t = state.tables[i];
+
+  t.packageIndex = Number(v);
+
+  if(t.start){
+    await createOrUpdateRecord(t);
+  }
+
   save();
 }
 
@@ -709,7 +722,7 @@ function updateCustomer(i){
   save();
 }
 
-function start(i){
+async function start(i){
   const pre = Number(document.getElementById("pre-"+i).value || 0);
   const t = state.tables[i];
   const startTime = Date.now() - pre * 60000;
@@ -736,7 +749,7 @@ if(t.payTiming === "prepaid"){
   t.paidAt = null;
 }
 
-createOrUpdateRecord(t);
+await createOrUpdateRecord(t);
 
   t.pausedAt = null;
   t.alerted = false;
@@ -796,7 +809,7 @@ function resume(i){
   save();
 }
 
-function addHour(i){
+async function addHour(i){
   const t = state.tables[i];
 
   stopAlertLoop(i);
@@ -804,7 +817,7 @@ function addHour(i){
   t.extra += 60 * 60 * 1000;
   t.alerted = false;
   t.alerting = false;
-  createOrUpdateRecord(t);
+  await createOrUpdateRecord(t);
   save();
 }
 
@@ -813,14 +826,27 @@ function setPayTiming(i,v){
   save();
 }
 
-function setPay(i,v){
+async function setPay(i,v){
   updateCustomer(i);
-  state.tables[i].pay = v;
+
+  const t = state.tables[i];
+  t.pay = v;
+
+  if(t.start){
+    await createOrUpdateRecord(t);
+  }
+
   save();
 }
 
-function setCurrency(i,v){
-  state.tables[i].currency = v;
+async function setCurrency(i,v){
+  const t = state.tables[i];
+  t.currency = v;
+
+  if(t.start){
+    await createOrUpdateRecord(t);
+  }
+
   save();
 }
 
@@ -885,7 +911,8 @@ function updateCheckout(){
   `;
 }
 
-function confirmCheckout(){
+async function confirmCheckout(){
+  try{
   const t = state.tables[checkoutIndex];
 
   const pay = document.getElementById("checkoutPay")?.value || "";
@@ -905,7 +932,6 @@ function confirmCheckout(){
   t.pay = pay;
   t.currency = currency;
 
-  const originalJPY = getOriginalJPY(t);
   const dueJPY = getDueJPY(t);
   const finalJPY = useRound ? roundJPY(dueJPY) : dueJPY;
 
@@ -913,22 +939,22 @@ function confirmCheckout(){
   t.paidRMB = getRMB(t.paidJPY);
   t.paidAt = Date.now();
 
-  const record = createOrUpdateRecord(t);
+  const record = await createOrUpdateRecord(t);
 
-  record.originalJPY = originalJPY;
   record.totalJPY = t.paidJPY;
   record.totalRMB = getRMB(t.paidJPY);
   record.paidJPY = t.paidJPY;
-  record.dueJPY = Math.max(0, originalJPY - t.paidJPY);
-
-  record.pay = pay;
-  record.currency = currency;
+  record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
+  record.pay = t.pay;
+  record.currency = t.currency || "日元";
   record.roundRule = useRound ? "500抹零" : "不抹零";
   record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
   record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
   record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
   record.closedAt = Date.now();
   record.closedTime = new Date().toLocaleString();
+
+  await updateRecordOnly(record);
 
   const visit = createOrUpdateCustomerVisit(t);
   if(visit){
@@ -939,10 +965,40 @@ function confirmCheckout(){
     visit.closedTime = new Date().toLocaleString();
   }
 
+  if(t.bookingId){
+    const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
+
+    if(b){
+      if(!Array.isArray(b.finishedTableIndexes)){
+        b.finishedTableIndexes = [];
+      }
+
+      b.finishedTableIndexes = Array.from(new Set([
+        ...b.finishedTableIndexes.map(Number),
+        checkoutIndex
+      ]));
+
+      if(Array.isArray(b.checkedInTableIndexes)){
+        b.checkedInTableIndexes = b.checkedInTableIndexes
+          .map(Number)
+          .filter(i=>i !== checkoutIndex);
+      }
+    }
+  }
+
   state.tables[checkoutIndex] = resetTable(t.name);
 
-  save();
-  closeCheckout();
+save();
+closeCheckout();
+
+}catch(e){
+  alert(
+    "结账错误：\n" +
+    e.message
+  );
+  console.error(e);
+}
+
 }
 
 
@@ -1117,7 +1173,7 @@ function closeBatchStart(){
   document.getElementById("batchStartModalBg").style.display = "none";
 }
 
-function confirmBatchStart(){
+async function confirmBatchStart(){
   const packageIndex = Number(document.getElementById("batchPackageSelect").value);
   const pay = document.getElementById("batchPaySelect").value;
 
@@ -1134,25 +1190,24 @@ function confirmBatchStart(){
     return;
   }
 
-  indexes.forEach(i=>{
-    const t = state.tables[i];
-    if(!t || t.start) return;
+for(const i of indexes){
+  const t = state.tables[i];
+  if(!t || t.start) continue;
 
-    t.packageIndex = packageIndex;
-    t.pay = pay;
-    t.start = Date.now();
-    t.pausedAt = null;
-    t.alerted = false;
-    t.alerting = false;
-    t.lastAction = "start";
-    t.paidJPY = Number(getPackage(t).price || 0);
-    t.paidRMB = getRMB(t.paidJPY);
-    t.paidAt = Date.now();
-    t.payTiming = "prepaid";
+  t.packageIndex = packageIndex;
+  t.pay = pay;
+  t.start = Date.now();
+  t.pausedAt = null;
+  t.alerted = false;
+  t.alerting = false;
+  t.lastAction = "start";
+  t.paidJPY = Number(getPackage(t).price || 0);
+  t.paidRMB = getRMB(t.paidJPY);
+  t.paidAt = Date.now();
+  t.payTiming = "prepaid";
 
-createOrUpdateRecord(t);
-  });
-
+  await createOrUpdateRecord(t);
+}
   save();
   closeBatchStart();
   render();
@@ -1191,15 +1246,15 @@ function openBatchCheckout(){
 
           <select id="batch-pay-${i}">
             <option value="">付款方式</option>
-            <option value="现金">现金</option>
-            <option value="PayPay">PayPay</option>
-            <option value="微信">微信</option>
-            <option value="支付宝">支付宝</option>
+            <option value="现金" ${t.pay==="现金"?"selected":""}>现金</option>
+            <option value="PayPay" ${t.pay==="PayPay"?"selected":""}>PayPay</option>
+            <option value="微信" ${t.pay==="微信"?"selected":""}>微信</option>
+            <option value="支付宝" ${t.pay==="支付宝"?"selected":""}>支付宝</option>            
           </select>
 
           <select id="batch-currency-${i}">
-            <option value="日元">日元</option>
-            <option value="人民币">人民币</option>
+            <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
+            <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
           </select>
 
           <input
@@ -1246,7 +1301,7 @@ function closeBatchCheckout(){
   document.getElementById("batchCheckoutModalBg").style.display = "none";
 }
 
-function confirmBatchCheckout(){
+async function confirmBatchCheckout(){
   const indexes = [...document.querySelectorAll(".batch-checkout-table:checked")]
     .map(el=>Number(el.value));
 
@@ -1266,59 +1321,47 @@ function confirmBatchCheckout(){
 
   if(!confirm(`确认批量结账 ${indexes.length} 桌吗？`)) return;
 
-  indexes.forEach(i=>{
+  for(const i of indexes){
     const t = state.tables[i];
-    const p = getPackage(t);
-
-    const originalJPY = getOriginalJPY(t);
-    const defaultRMB = getRMB(originalJPY);
 
     const pay = document.getElementById(`batch-pay-${i}`).value;
     const currency = document.getElementById(`batch-currency-${i}`).value;
     const manualAmount = Number(document.getElementById(`batch-amount-${i}`).value || 0);
 
-    const finalJPY =
-      currency === "日元"
-        ? (manualAmount > 0 ? manualAmount : originalJPY)
-        : originalJPY;
-
-    const totalRMB =
-      currency === "人民币"
-        ? (manualAmount > 0 ? manualAmount : defaultRMB)
-        : defaultRMB;
-
-    const now = new Date();
-
     stopAlertLoop(i);
 
-    const record = createOrUpdateRecord(t);
+    t.pay = pay;
+    t.currency = currency;
 
-t.pay = pay;
-t.currency = currency;
+    const dueJPY = getDueJPY(t);
 
-const dueJPY = Math.max(0, originalJPY - Number(t.paidJPY || 0));
-const finalPaidJPY = currency === "日元"
-  ? (manualAmount > 0 ? manualAmount : dueJPY)
-  : dueJPY;
+    const finalPaidJPY =
+      currency === "日元"
+        ? (manualAmount > 0 ? manualAmount : dueJPY)
+        : dueJPY;
 
-t.paidJPY = Number(t.paidJPY || 0) + finalPaidJPY;
-t.paidRMB = getRMB(t.paidJPY);
-t.paidAt = Date.now();
+    t.paidJPY = Number(t.paidJPY || 0) + finalPaidJPY;
+    t.paidRMB = getRMB(t.paidJPY);
+    t.paidAt = Date.now();
 
-record.totalJPY = t.paidJPY;
-record.totalRMB = getRMB(t.paidJPY);
-record.paidJPY = t.paidJPY;
-record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
-record.pay = pay;
-record.currency = currency;
-record.roundRule = "不抹零";
-record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
-record.checkoutMethod = "批量结账";
-record.closedAt = Date.now();
-record.closedTime = new Date().toLocaleString();
+    const record = await createOrUpdateRecord(t);
 
-state.tables[i] = resetTable(t.name);
-    });
+    record.totalJPY = t.paidJPY;
+    record.totalRMB = getRMB(t.paidJPY);
+    record.paidJPY = t.paidJPY;
+    record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
+    record.pay = pay;
+    record.currency = currency;
+    record.roundRule = "不抹零";
+    record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+    record.checkoutMethod = "批量结账";
+    record.closedAt = Date.now();
+    record.closedTime = new Date().toLocaleString();
+
+    await updateRecordOnly(record);
+
+    state.tables[i] = resetTable(t.name);
+  }
 
   save();
   closeBatchCheckout();

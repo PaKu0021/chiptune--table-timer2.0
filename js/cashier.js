@@ -1,31 +1,58 @@
+import { db, storage } from "./firebase.js";
 
-import { db } from "./firebase.js";
-import { doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import {
+  doc,
+  onSnapshot,
+  setDoc,
+  collection,
+  query,
+  where
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
+import {
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
 async function uploadReceipt(timestamp,file){
+
   if(!file) return;
 
-  const img = await imageToBase64(file);
+  const record = records.find(
+    r=>Number(r.timestamp) === Number(timestamp)
+  );
 
-  const record = state.records.find(r=>Number(r.timestamp) === Number(timestamp));
   if(!record){
     alert("找不到这条收银记录");
     return;
   }
 
-  record.receiptImage = img;
+  const path =
+    `receipts/${record.id}/${Date.now()}_${file.name}`;
+
+  const imgRef = storageRef(storage,path);
+
+  await uploadBytes(imgRef,file);
+
+  const url = await getDownloadURL(imgRef);
+
+  record.receiptImage = url;
+  record.receiptPath = path;
   record.receiptFileName = file.name || "";
   record.receiptUploadedAt = Date.now();
 
-  await setDoc(ref,state);
+  await setDoc(
+    doc(db,"records",record.id),
+    record
+  );
 
   alert("截图已保存");
-  renderCashier();
 }
 
+
 function viewReceipt(timestamp){
-  const record = state.records.find(r=>Number(r.timestamp) === Number(timestamp));
+  const record = records.find(r=>Number(r.timestamp) === Number(timestamp));
 
   if(!record || !record.receiptImage){
     alert("没有截图");
@@ -62,8 +89,18 @@ const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 
 let state = null;
+let records = [];
 let quickRange = "today";
 let initialized = false; 
+
+function get90DaysAgo(){
+
+  const d = new Date();
+
+  d.setDate(d.getDate() - 90);
+
+  return d.getTime();
+}
 
 function dateKey(ts){
   const d = new Date(ts);
@@ -138,7 +175,7 @@ function getFilteredRecords(){
   const end = document.getElementById("endDate").value;
   const pay = document.getElementById("payFilter").value;
 
-  return (state.records || []).filter(r=>{
+    return records.filter(r=>{
     const ts = getRecordTime(r);
     const d = new Date(ts);
     if(isNaN(d.getTime())) return false;
@@ -153,41 +190,6 @@ function getFilteredRecords(){
   }).sort((a,b)=>getRecordTime(a) - getRecordTime(b));
 }
 
-function imageToBase64(file){
-  return new Promise((resolve,reject)=>{
-    if(!file){
-      resolve("");
-      return;
-    }
-
-    const reader = new FileReader();
-
-    reader.onload = e=>{
-      const img = new Image();
-
-      img.onload = ()=>{
-        const canvas = document.createElement("canvas");
-
-        const maxWidth = 900;
-        const scale = Math.min(1, maxWidth / img.width);
-
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img,0,0,canvas.width,canvas.height);
-
-        resolve(canvas.toDataURL("image/jpeg",0.65));
-      };
-
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 function renderCashier(){
   const rows = getFilteredRecords();
@@ -399,26 +401,62 @@ function printCashier(){
 }
 
 
-
 onSnapshot(ref, snap=>{
   if(!snap.exists()) return;
 
   state = snap.data();
 
-  if(!state.records) state.records = [];
-
   if(!initialized){
     initialized = true;
     setQuickRange("today");
-  }else{
+  }
+});
+
+const recordsQuery = query(
+  collection(db,"records"),
+  where("timestamp",">=",get90DaysAgo())
+);
+
+onSnapshot(recordsQuery,snap=>{
+
+  records = snap.docs
+    .map(d=>d.data())
+    .filter(r=>r.id !== "init");
+
+  if(state){
     renderCashier();
   }
 });
 
 
-
 function applyDateFilter(){
   renderCashier();
+}
+
+
+async function cleanupOldReceipts(){
+  if(!confirm("确定清理90天前的收款截图记录吗？图片文件可能仍保留在 Storage，但账单里将不再显示。")) return;
+
+  const limit = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  let count = 0;
+
+records.forEach(r=>{    
+    if(r.receiptUploadedAt && r.receiptUploadedAt < limit){
+      delete r.receiptImage;
+      delete r.receiptPath;
+      delete r.receiptFileName;
+      delete r.receiptUploadedAt;
+      delete r.receiptUploadedTime;
+      count++;
+    }
+  });
+
+await Promise.all(
+  records.map(r=>
+    setDoc(doc(db,"records",r.id),r)
+  )
+);  
+  alert(`已清理 ${count} 条90天前截图记录`);
 }
 
 window.applyDateFilter = applyDateFilter;
@@ -429,3 +467,4 @@ window.printCashier = printCashier;
 window.uploadReceipt = uploadReceipt;
 window.viewReceipt = viewReceipt;
 window.closeReceiptPreview = closeReceiptPreview;
+window.cleanupOldReceipts = cleanupOldReceipts;
