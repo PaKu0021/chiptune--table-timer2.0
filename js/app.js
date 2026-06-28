@@ -885,67 +885,66 @@ function updateCheckout(){
   `;
 }
 
-
-
 function confirmCheckout(){
   const t = state.tables[checkoutIndex];
-  const p = getPackage(t);
 
   const pay = document.getElementById("checkoutPay")?.value || "";
-const currency = document.getElementById("checkoutCurrency")?.value || "日元";
+  const currency = document.getElementById("checkoutCurrency")?.value || "日元";
 
-if(!pay){
-  alert("请选择付款方式");
-  return;
-}
-
-t.pay = pay;
-t.currency = currency;
+  if(!pay){
+    alert("请选择付款方式");
+    return;
+  }
 
   if(!confirm("确认结账？")){
     return;
   }
 
   stopAlertLoop(checkoutIndex);
+
+  t.pay = pay;
+  t.currency = currency;
+
   const originalJPY = getOriginalJPY(t);
   const dueJPY = getDueJPY(t);
   const finalJPY = useRound ? roundJPY(dueJPY) : dueJPY;
-  const totalRMB = getRMB(finalJPY);
-  const now = new Date();
+
+  t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
+  t.paidRMB = getRMB(t.paidJPY);
+  t.paidAt = Date.now();
 
   const record = createOrUpdateRecord(t);
 
-t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
-t.paidRMB = getRMB(t.paidJPY);
-t.paidAt = Date.now();
+  record.originalJPY = originalJPY;
+  record.totalJPY = t.paidJPY;
+  record.totalRMB = getRMB(t.paidJPY);
+  record.paidJPY = t.paidJPY;
+  record.dueJPY = Math.max(0, originalJPY - t.paidJPY);
 
-record.totalJPY = t.paidJPY;
-record.totalRMB = getRMB(t.paidJPY);
-record.paidJPY = t.paidJPY;
-record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
+  record.pay = pay;
+  record.currency = currency;
+  record.roundRule = useRound ? "500抹零" : "不抹零";
+  record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+  record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
+  record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
+  record.closedAt = Date.now();
+  record.closedTime = new Date().toLocaleString();
 
-record.pay = t.pay;
-record.currency = t.currency || "日元";
-record.roundRule = useRound ? "500抹零" : "不抹零";
-record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
-record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
-record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
-record.closedAt = Date.now();
-record.closedTime = new Date().toLocaleString();
+  const visit = createOrUpdateCustomerVisit(t);
+  if(visit){
+    visit.endAt = Date.now();
+    visit.range = getVisitRangeText(t);
+    visit.closed = true;
+    visit.finalJPY = t.paidJPY;
+    visit.closedTime = new Date().toLocaleString();
+  }
 
-const visit = createOrUpdateCustomerVisit(t);
-if(visit){
-  visit.endAt = Date.now();
-  visit.range = getVisitRangeText(t);
-  visit.closed = true;
-  visit.finalJPY = t.paidJPY;
-  visit.closedTime = new Date().toLocaleString();
-}
+  state.tables[checkoutIndex] = resetTable(t.name);
 
-state.tables[checkoutIndex] = resetTable(t.name);
   save();
   closeCheckout();
 }
+
 
 function closeCheckout(){
   document.getElementById("checkoutModalBg").style.display = "none";
