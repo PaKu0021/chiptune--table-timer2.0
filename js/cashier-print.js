@@ -65,15 +65,20 @@ document.getElementById("printTitle").innerText =
   `收银记录｜${payload.start} ～ ${payload.end}｜${payload.pay}｜${rows.length}笔`;
 
 document.getElementById("printRows").innerHTML =
-  rows.map(r=>`
-    <tr>
-      <td>${r.closedTime || r.time || ""}</td>      
-      <td>${r.tableName || ""}</td>
-      <td>${r.customerName || ""}${r.phoneLast4 ? "（" + r.phoneLast4 + "）" : ""}</td>
-      <td>${r.packageName || ""}</td>
-      <td>¥${toJPY(r).toLocaleString()}</td>
-      <td>${r.pay || "未记录"}</td>
-    </tr>
-  `).join("");
+rows.map(r=>`
+  <tr>
+    <td>${r.closedTime || r.time || ""}</td>
+    <td>${r.tableName || ""}</td>
+    <td>${r.customerName || ""}${r.phoneLast4 ? "（" + r.phoneLast4 + "）" : ""}</td>
+    <td>${(r.customerType || r.type) === "booking" ? "预约" : "Walk-in"}</td>
+    <td>${r.packageName || ""}</td>
+    <td>¥${Number(r.originalJPY || 0).toLocaleString()}</td>
+    <td>¥${toJPY(r).toLocaleString()}</td>
+    <td>¥${Number(r.totalRMB || r.rmb || 0).toLocaleString()}</td>
+    <td>${r.pay || "未记录"}</td>
+    <td>${r.currency || ""}</td>
+    <td>${r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || "")}</td>
+  </tr>
+`).join("");
 
 renderSummary(rows);
