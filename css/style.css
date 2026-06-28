@@ -1114,30 +1114,32 @@ button.selected-pop{
 }
 
 .cashier-filter-card{
-  display:grid;
-  grid-template-columns:1fr 1fr 1fr auto;
-  gap:12px;
-  align-items:end;
+  display:grid !important;
+  grid-template-columns:repeat(4, minmax(0, 1fr)) !important;
+  gap:12px !important;
+  align-items:end !important;
+}
+
+.cashier-date-item{
+  min-width:0 !important;
 }
 
 .cashier-date-item input,
 .cashier-date-item select{
-  width:100%;
-  max-width:100%;
+  width:100% !important;
+  max-width:100% !important;
+  box-sizing:border-box !important;
+  display:block !important;
 }
 
 .cashier-search-btn{
-  height:46px;
-  min-width:72px;
-  margin-bottom:5px;
+  width:100% !important;
+  height:48px !important;
+  margin:5px 0 !important;
 }
 
 @media(max-width:760px){
   .cashier-filter-card{
-    grid-template-columns:1fr;
-  }
-
-  .cashier-search-btn{
-    width:100%;
+    grid-template-columns:1fr !important;
   }
 }
