@@ -912,6 +912,7 @@ function updateCheckout(){
 }
 
 async function confirmCheckout(){
+  try{
   const t = state.tables[checkoutIndex];
 
   const pay = document.getElementById("checkoutPay")?.value || "";
@@ -987,8 +988,17 @@ async function confirmCheckout(){
 
   state.tables[checkoutIndex] = resetTable(t.name);
 
-  save();
-  closeCheckout();
+save();
+closeCheckout();
+
+}catch(e){
+  alert(
+    "结账错误：\n" +
+    e.message
+  );
+  console.error(e);
+}
+
 }
 
 
