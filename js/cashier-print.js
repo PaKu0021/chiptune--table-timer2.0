@@ -11,12 +11,16 @@ const payload = raw ? JSON.parse(raw) : {
 const rows = payload.rows || [];
 
 function toJPY(r){
+  if(r.totalJPY !== undefined) return Number(r.totalJPY || 0);
+  if(r.jpy !== undefined) return Number(r.jpy || 0);
+
   if(r.currency === "人民币"){
-    return Math.floor(Number(r.totalRMB || 0) / RATE);
+    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
   }
 
-  return Number(r.totalJPY || 0);
+  return 0;
 }
+
 
 function renderSummary(rows){
   const pays = {
@@ -63,7 +67,7 @@ document.getElementById("printTitle").innerText =
 document.getElementById("printRows").innerHTML =
   rows.map(r=>`
     <tr>
-      <td>${r.time || ""}</td>
+      <td>${r.closedTime || r.time || ""}</td>      
       <td>${r.tableName || ""}</td>
       <td>${r.customerName || ""}${r.phoneLast4 ? "（" + r.phoneLast4 + "）" : ""}</td>
       <td>${r.packageName || ""}</td>
