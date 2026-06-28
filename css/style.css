@@ -1077,3 +1077,38 @@ button.selected-pop{
 #moveSvg line{
   pointer-events:none;
 }
+
+.receipt-print-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:12px;
+  margin-top:12px;
+}
+
+.receipt-print-card{
+  border:1px solid #e6dccb;
+  border-radius:12px;
+  padding:8px;
+  background:#fff;
+  font-size:12px;
+  line-height:1.5;
+  break-inside:avoid;
+}
+
+.receipt-print-card img{
+  width:100%;
+  max-height:220px;
+  object-fit:contain;
+  border-radius:8px;
+  margin-bottom:6px;
+}
+
+@media print{
+  .receipt-print-grid{
+    page-break-before:always;
+  }
+
+  .receipt-print-card{
+    break-inside:avoid;
+  }
+}

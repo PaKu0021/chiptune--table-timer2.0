@@ -78,7 +78,46 @@ rows.map(r=>`
     <td>${r.pay || "未记录"}</td>
     <td>${r.currency || ""}</td>
     <td>${r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || "")}</td>
+    <td>
+  ${
+    r.receiptImage
+      ? `<img
+           src="${r.receiptImage}"
+           style="
+             width:90px;
+             border-radius:8px;
+             border:1px solid #ddd;
+           "
+         >`
+      : "-"
+  }
+</td>
   </tr>
 `).join("");
 
 renderSummary(rows);
+
+function renderReceiptImages(rows){
+  const box = document.getElementById("receiptPrintGrid");
+  if(!box) return;
+
+  const list = rows.filter(r=>r.receiptImage);
+
+  if(!list.length){
+    box.innerHTML = `<p>暂无收款截图</p>`;
+    return;
+  }
+
+  box.innerHTML = list.map(r=>`
+    <div class="receipt-print-card">
+      <img src="${r.receiptImage}">
+      <div>
+        ${r.closedTime || r.time || ""}<br>
+        ${r.tableName || ""}｜${r.customerName || ""}${r.phoneLast4 ? "（" + r.phoneLast4 + "）" : ""}<br>
+        ${r.pay || "未记录"}｜¥${toJPY(r).toLocaleString()}
+      </div>
+    </div>
+  `).join("");
+}
+
+renderReceiptImages(rows);

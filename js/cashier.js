@@ -377,17 +377,25 @@ function exportCashierCSV(){
 function printCashier(){
   const rows = getFilteredRecords();
 
-  const lightRows = rows.map(r=>({
-    time:r.time || "",
-    tableName:r.tableName || "",
-    customerName:r.customerName || "",
-    phoneLast4:r.phoneLast4 || "",
-    packageName:r.packageName || "",
-    pay:r.pay || "未记录",
-    currency:r.currency || "",
-    totalJPY:r.totalJPY || r.jpy || 0,
-    totalRMB:r.totalRMB || r.rmb || 0
-  }));
+const lightRows = rows.map(r=>({
+  time:r.time || "",
+  tableName:r.tableName || "",
+  customerName:r.customerName || "",
+  phoneLast4:r.phoneLast4 || "",
+
+  customerType:r.customerType || r.type || "",
+  packageName:r.packageName || "",
+  originalJPY:r.originalJPY || 0,
+
+  pay:r.pay || "未记录",
+  currency:r.currency || "",
+  roundRule:r.roundRule || "",
+
+  totalJPY:r.totalJPY || r.jpy || 0,
+  totalRMB:r.totalRMB || r.rmb || 0,
+
+  receiptImage:r.receiptImage || ""
+}));  
 
   const payload = {
     start: document.getElementById("startDate").value || "全部",
