@@ -49,17 +49,19 @@ onSnapshot(ref,snap=>{
   };
 }
 
-    if(records.length){
-    render();
-  }
+render();
+renderBusinessHours();
 
-  renderBusinessHours();
 });
 
 onSnapshot(recordsRef, snap=>{
-  records = snap.docs
-    .map(d=>d.data())
-    .filter(r=>r.id !== "init");
+
+records = snap.docs
+  .map(d=>({
+    id: d.id,
+    ...d.data()
+  }))
+  .filter(r=>r.id !== "init");
 
   if(state){
     render();
@@ -76,8 +78,9 @@ function dateKey(ts){
 }
 
 function getRecordTime(r){
-  return r.timestamp || r.time || r.date || Date.now();
+  return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
 }
+
 
 function getFilteredRecords(){
   const now = new Date();
