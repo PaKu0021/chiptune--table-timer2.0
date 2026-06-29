@@ -1,5 +1,8 @@
-import { db, storage } from "./firebase.js";
-import { doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, setDoc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
+
+
+
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
 
@@ -423,6 +426,11 @@ function renderRecords(){
             : "-"
           }
         </td>
+        <td>
+  <button class="btn-danger" onclick="deleteOwnerRecord('${r.id}')">
+    删除
+  </button>
+</td>
       </tr>
     `;
   }).join("");
@@ -633,6 +641,39 @@ const r = records.find(x=>x.id === recordId);
   alert("续费已确认");
 }
 
+async function deleteOwnerRecord(recordId){
+  const r = records.find(x=>x.id === recordId);
+
+  if(!r){
+    alert("找不到这条记录");
+    return;
+  }
+
+  const ok = confirm(
+    "确定删除这条收银记录吗？\n\n" +
+    "此操作不可恢复。\n" +
+    "如果这条记录有收款截图，也会一起从 Storage 删除。"
+  );
+
+  if(!ok) return;
+
+  try{
+    if(r.receiptPath){
+      try{
+        await deleteObject(storageRef(storage, r.receiptPath));
+      }catch(e){
+        console.warn("Storage截图删除失败或文件不存在，可忽略：", e);
+      }
+    }
+
+    await deleteDoc(doc(db, "records", recordId));
+
+    alert("记录已删除");
+  }catch(err){
+    console.error(err);
+    alert("删除失败：" + err.message);
+  }
+}
 
 function collectPackagesFromInputs(){
   state.packages = state.packages.map((p,i)=>({
@@ -872,3 +913,4 @@ window.uploadReceipt = uploadReceipt;
 window.confirmExtension = confirmExtension;
 window.toggleCustomerPanel = toggleCustomerPanel;
 window.setCustomerSearch = setCustomerSearch;
+window.deleteOwnerRecord = deleteOwnerRecord;

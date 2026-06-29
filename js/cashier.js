@@ -12,9 +12,9 @@ import {
 import {
   ref as storageRef,
   uploadBytes,
-  getDownloadURL
+  getDownloadURL,
+  deleteObject
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
-
 
 async function uploadReceipt(recordId,file){
 
@@ -445,31 +445,42 @@ function applyDateFilter(){
   renderCashier();
 }
 
-
 async function cleanupOldReceipts(){
-  if(!confirm("确定清理90天前的收款截图记录吗？图片文件可能仍保留在 Storage，但账单里将不再显示。")) return;
+  if(!confirm("确定清理90天前的收款截图吗？\n\nFirestore里的截图字段会清空，Storage里的图片文件也会删除。")) return;
 
   const limit = Date.now() - 90 * 24 * 60 * 60 * 1000;
   let count = 0;
+  let storageDeleted = 0;
 
-records.forEach(r=>{    
-    if(r.receiptUploadedAt && r.receiptUploadedAt < limit){
-      delete r.receiptImage;
-      delete r.receiptPath;
-      delete r.receiptFileName;
-      delete r.receiptUploadedAt;
-      delete r.receiptUploadedTime;
-      count++;
-    }
+  const targets = records.filter(r=>{
+    return r.receiptUploadedAt &&
+           r.receiptUploadedAt < limit &&
+           (r.receiptImage || r.receiptPath);
   });
 
-await Promise.all(
-  records.map(r=>
-    setDoc(doc(db,"records",r.id),r)
-  )
-);  
-  alert(`已清理 ${count} 条90天前截图记录`);
+  for(const r of targets){
+    if(r.receiptPath){
+      try{
+        await deleteObject(storageRef(storage, r.receiptPath));
+        storageDeleted++;
+      }catch(e){
+        console.warn("Storage截图删除失败或文件不存在，可忽略：", e);
+      }
+    }
+
+    delete r.receiptImage;
+    delete r.receiptPath;
+    delete r.receiptFileName;
+    delete r.receiptUploadedAt;
+    delete r.receiptUploadedTime;
+
+    await setDoc(doc(db,"records",r.id),r);
+    count++;
+  }
+
+  alert(`已清理 ${count} 条90天前截图记录\nStorage删除 ${storageDeleted} 张图片`);
 }
+
 
 window.applyDateFilter = applyDateFilter;
 window.setQuickRange = setQuickRange;
