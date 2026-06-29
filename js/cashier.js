@@ -292,12 +292,13 @@ function renderCashier(){
         <td>¥${Number(r.originalJPY || 0).toLocaleString()}</td>
         <td>¥${toJPY(r).toLocaleString()}</td>
         <td>¥${toRMB(r).toLocaleString()}</td>
-        <td>${r.pay || "未记录"}</td>
+        <td>${paymentDetailHTML(r)}</td>
         <td>${r.currency || ""}</td>
         <td>${r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || "")}</td>
         <td>
   ${
-    r.pay === "现金"
+
+    getPaySummary(r) === "现金"
       ? "现金无需截图"
       : `
         ${r.receiptImage ? `
@@ -344,16 +345,19 @@ function renderSummary(rows){
   let totalRMB = 0;
 
   rows.forEach(r=>{
-    const pay = r.pay || "未记录";
-    const jpy = toJPY(r);
-    const rmb = toRMB(r);
+  normalizePayments(r).forEach(p=>{
+    const pay = p.pay || "未记录";
+    const jpy = Number(p.amountJPY || 0);
 
     if(!pays[pay]) pays[pay] = 0;
 
     pays[pay] += jpy;
     totalJPY += jpy;
-    totalRMB += rmb;
   });
+
+  totalRMB += toRMB(r);
+});
+
 
   document.getElementById("cashierSummary").innerHTML = `
     <table class="record-table">
@@ -382,7 +386,7 @@ function exportCashierCSV(){
 
   const headers = [
     "时间","桌位","客人姓名","手机尾号","类型","套餐",
-    "原价日元","实收日元","人民币","支付方式","币种","抹零","收款截图"
+    "原价日元","实收日元","人民币","收支明细","币种","抹零","收款截图"
   ];
 
   const body = rows.map(r=>[
@@ -395,7 +399,7 @@ function exportCashierCSV(){
     r.originalJPY || 0,
     toJPY(r),
     toRMB(r),
-    r.pay || "",
+    paymentDetailText(r),    
     r.currency || "",
     r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || ""),
     r.receiptImage ? "已上传" : "未上传"
@@ -412,17 +416,19 @@ function exportCashierCSV(){
   let totalJPY = 0;
   let totalRMB = 0;
 
-  rows.forEach(r=>{
-    const pay = r.pay || "未记录";
-    const jpy = toJPY(r);
-    const rmb = toRMB(r);
+rows.forEach(r=>{
+  normalizePayments(r).forEach(p=>{
+    const pay = p.pay || "未记录";
+    const jpy = Number(p.amountJPY || 0);
 
     if(!pays[pay]) pays[pay] = 0;
 
     pays[pay] += jpy;
     totalJPY += jpy;
-    totalRMB += rmb;
   });
+
+  totalRMB += toRMB(r);
+});  
 
   const summaryRows = [
     [],
@@ -468,12 +474,14 @@ const lightRows = rows.map(r=>({
   packageName:r.packageName || "",
   originalJPY:r.originalJPY || 0,
 
-  pay:r.pay || "未记录",
+  pay:getPaySummary(r),
+  paymentDetail:paymentDetailText(r),
+  payments:normalizePayments(r),  
   currency:r.currency || "",
   roundRule:r.roundRule || "",
 
-  totalJPY:r.totalJPY || r.jpy || 0,
-  totalRMB:r.totalRMB || r.rmb || 0,
+  totalJPY:toJPY(r),
+  totalRMB:toRMB(r),  
 
   receiptImage:r.receiptImage || ""
 }));  
