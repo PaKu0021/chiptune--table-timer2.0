@@ -167,6 +167,54 @@ function getRMB(jpy){
   return Math.floor(jpy * RATE);
 }
 
+function makePaymentLine({type="收入", reason="", pay="", amountJPY=0, note=""}){
+  return {
+    type,
+    reason,
+    pay: pay || "未记录",
+    amountJPY: Number(amountJPY || 0),
+    amountRMB: getRMB(Number(amountJPY || 0)),
+    note,
+    time: new Date().toLocaleString(),
+    timestamp: Date.now()
+  };
+}
+
+function normalizePayments(record){
+  if(Array.isArray(record.payments)) return record.payments;
+
+  if(Number(record.totalJPY || 0) !== 0){
+    return [{
+      type:"收入",
+      reason:record.checkoutMethod || "历史记录",
+      pay:record.pay || "未记录",
+      amountJPY:Number(record.totalJPY || 0),
+      amountRMB:Number(record.totalRMB || 0),
+      note:"旧数据自动兼容",
+      time:record.time || "",
+      timestamp:record.timestamp || Date.now()
+    }];
+  }
+
+  return [];
+}
+
+function sumPaymentsJPY(payments){
+  return payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+}
+
+function getPaymentSummary(payments){
+  const pays = [...new Set(
+    payments
+      .filter(p=>Number(p.amountJPY || 0) !== 0)
+      .map(p=>p.pay || "未记录")
+  )];
+
+  if(pays.length === 0) return "未记录";
+  if(pays.length === 1) return pays[0];
+  return "混合";
+}
+
 function getDueJPY(t){
   return Math.max(0, getOriginalJPY(t) - Number(t.paidJPY || 0));
 }
@@ -288,7 +336,10 @@ const dueJPY = Math.max(0, originalJPY - paidJPY);
 
   let record = await getTableRecord(t);
 
+  let isNewRecord = false;
+
   if(!record){
+    isNewRecord = true;
     const id = "rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
     t.recordId = id;
 
@@ -316,13 +367,41 @@ const dueJPY = Math.max(0, originalJPY - paidJPY);
   record.extensionAmount = Math.max(0, originalJPY - Number(p.price || 0));
 
   record.originalJPY = originalJPY;
-  record.paidJPY = paidJPY;
-  record.dueJPY = dueJPY;
 
-  record.totalJPY = paidJPY;
-  record.totalRMB = getRMB(paidJPY);
 
-  record.pay = t.pay || "";
+  record.payments = normalizePayments(record);
+
+if(isNewRecord && t.payTiming === "prepaid" && paidJPY > 0){
+  record.payments.push(
+    makePaymentLine({
+      type:"收入",
+      reason:"套餐费",
+      pay:t.pay || "未记录",
+      amountJPY:paidJPY,
+      note:"开始计时时记录"
+    })
+  );
+}
+
+const packageLine = record.payments.find(p=>p.reason === "套餐费");
+
+if(packageLine && packageLine.pay === "未记录" && t.pay){
+  packageLine.pay = t.pay;
+}
+
+const paymentsTotalJPY = sumPaymentsJPY(record.payments);
+
+record.paidJPY = paymentsTotalJPY;
+record.dueJPY = Math.max(0, originalJPY - paymentsTotalJPY);
+
+record.totalJPY = paymentsTotalJPY;
+record.totalRMB = getRMB(paymentsTotalJPY);
+
+record.pay = getPaymentSummary(record.payments);
+
+
+
+
   record.currency = t.currency || "日元";
   record.payTiming = t.payTiming || "prepaid";
 
@@ -907,11 +986,24 @@ function updateCheckout(){
     </select>
   `;
 
-  document.getElementById("checkoutAmount").innerHTML = `
+document.getElementById("checkoutAmount").innerHTML = `
     原价日元：¥${originalJPY.toLocaleString()}<br>
-    结账日元：¥${finalJPY.toLocaleString()}<br>
-    人民币：¥${totalRMB.toLocaleString()}
+    已收金额：¥${Number(t.paidJPY || 0).toLocaleString()}<br><br>
+
+    <label>实际应收金额</label>
+    <input id="checkoutFinalCharge" type="number" value="${originalJPY}">
+
+    <label>备注</label>
+    <input id="checkoutNote" placeholder="例：不限时改3小时，现金退款差价">
+
+    <br>
+    当前需收/需退：¥${finalJPY.toLocaleString()}<br>
+    人民币参考：¥${totalRMB.toLocaleString()}<br>
+    <small style="color:#8a8174;">
+      如果要退款，把实际应收金额改小。系统会自动算成负数退款。
+    </small>
   `;
+
 }
 
 async function confirmCheckout(){
@@ -935,8 +1027,16 @@ async function confirmCheckout(){
   t.pay = pay;
   t.currency = currency;
 
-  const dueJPY = getDueJPY(t);
-  const finalJPY = useRound ? roundJPY(dueJPY) : dueJPY;
+
+const defaultOriginalJPY = getOriginalJPY(t);
+const finalChargeJPY = Number(
+  document.getElementById("checkoutFinalCharge")?.value || defaultOriginalJPY
+);
+
+const note = document.getElementById("checkoutNote")?.value || "";
+
+const rawDiffJPY = finalChargeJPY - Number(t.paidJPY || 0);
+const finalJPY = useRound ? roundJPY(rawDiffJPY) : rawDiffJPY;
 
   t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
   t.paidRMB = getRMB(t.paidJPY);
@@ -944,11 +1044,28 @@ async function confirmCheckout(){
 
   const record = await createOrUpdateRecord(t);
 
-  record.totalJPY = t.paidJPY;
-  record.totalRMB = getRMB(t.paidJPY);
-  record.paidJPY = t.paidJPY;
-  record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
-  record.pay = t.pay;
+  record.payments = normalizePayments(record);
+
+if(finalJPY !== 0){
+  record.payments.push(
+    makePaymentLine({
+      type: finalJPY < 0 ? "退款" : "收入",
+      reason: finalJPY < 0 ? "退款/改套餐" : "结账补收",
+      pay,
+      amountJPY: finalJPY,
+      note
+    })
+  );
+}
+
+const paymentTotalJPY = sumPaymentsJPY(record.payments);
+
+record.originalJPY = finalChargeJPY;
+record.totalJPY = paymentTotalJPY;
+record.totalRMB = getRMB(paymentTotalJPY);
+record.paidJPY = paymentTotalJPY;
+record.dueJPY = Math.max(0, finalChargeJPY - paymentTotalJPY);
+record.pay = getPaymentSummary(record.payments);  
   record.currency = t.currency || "日元";
   record.roundRule = useRound ? "500抹零" : "不抹零";
   record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
