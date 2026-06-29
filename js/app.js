@@ -535,7 +535,13 @@ ${t.start ? `
         <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
       </select>
 
-      <button class="btn-success full" onclick="openCheckout(${i})">结账</button>
+        ${t.start ? `
+  <button class="btn-ghost full" onclick="moveRunningTable(${i})">
+    移动桌位
+  </button>
+` : ""}
+
+<button class="btn-success full" onclick="openCheckout(${i})">结账</button>
 
     `;
 
@@ -1004,6 +1010,85 @@ function closeCheckout(){
   document.getElementById("checkoutModalBg").style.display = "none";
 }
 
+async function moveRunningTable(fromIndex){
+  const fromTable = state.tables[fromIndex];
+
+  if(!fromTable || !fromTable.start){
+    alert("这张桌没有正在计时，不能移动");
+    return;
+  }
+
+  if(fromTable.type === "booking"){
+    alert("预约客人请在预约系统里移动桌位");
+    return;
+  }
+
+  const freeTables = state.tables
+    .map((t,i)=>({t,i}))
+    .filter(({t,i})=>!t.start && i !== fromIndex);
+
+  if(!freeTables.length){
+    alert("没有空闲桌位可以移动");
+    return;
+  }
+
+  const listText = freeTables
+    .map(({t,i})=>`${i + 1}：${t.name}`)
+    .join("\n");
+
+  const input = prompt(
+    `要移动到哪张空桌？请输入编号：\n\n${listText}`
+  );
+
+  if(input === null) return;
+
+  const toIndex = Number(String(input).replace("号桌","").trim()) - 1;
+
+  if(
+    Number.isNaN(toIndex) ||
+    !state.tables[toIndex] ||
+    toIndex === fromIndex
+  ){
+    alert("桌位编号不正确");
+    return;
+  }
+
+  const toTable = state.tables[toIndex];
+
+  if(toTable.start){
+    alert(`${toTable.name} 正在使用中，不能移动`);
+    return;
+  }
+
+  if(!confirm(`确认把 ${fromTable.name} 移动到 ${toTable.name} 吗？`)){
+    return;
+  }
+
+  stopAlertLoop(fromIndex);
+  stopAlertLoop(toIndex);
+
+  delete remindLocks[fromIndex];
+  delete remindLocks[toIndex];
+
+  const oldFromName = fromTable.name;
+  const oldToName = toTable.name;
+
+  state.tables[toIndex] = {
+    ...fromTable,
+    name: oldToName
+  };
+
+  state.tables[fromIndex] = resetTable(oldFromName);
+
+  await createOrUpdateRecord(state.tables[toIndex]);
+
+  await save();
+  render();
+
+  alert(`已移动到 ${oldToName}`);
+}
+
+
 function generateQR(i){
   const canvas = document.getElementById("qr-"+i);
   if(!canvas) return;
@@ -1425,3 +1510,4 @@ window.toggleType = toggleType;
 window.roundBatchAmount = roundBatchAmount;
 window.render = render;
 window.setPayTiming = setPayTiming;
+window.moveRunningTable = moveRunningTable;
