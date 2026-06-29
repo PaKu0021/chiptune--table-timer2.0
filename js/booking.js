@@ -14,6 +14,8 @@ let selectedCalendarDate = currentBookingDate;
 let bookingListOpen = false;
 let moveBookingId = null;
 let movePairs = [];
+let moveMode = "booking";
+let moveRunningFromIndex = null;
 let draggingMoveFrom = null;
 let moveLineRAF = null;
 let lastMovePointer = null;
@@ -645,7 +647,71 @@ function hasBookingConflict(targetIndex, booking, excludeBookingId){
   });
 }
 
+function openMoveRunningTableModal(tableIndex){
+  const t = state.tables[tableIndex];
+  if(!t || !t.start) return;
+
+  moveMode = "running";
+  moveRunningFromIndex = tableIndex;
+  moveBookingId = null;
+  movePairs = [];
+  draggingMoveFrom = null;
+
+  document.getElementById("moveTableInfo").innerHTML = `
+    当前：${t.name}<br>
+    类型：Walk-in<br>
+    客人：${t.customer?.name || "-"} ${t.customer?.phoneLast4 || ""}
+  `;
+
+  document.getElementById("moveLineArea").innerHTML = `
+    <svg id="moveSvg"></svg>
+
+    <div class="move-row-title">按住当前桌位，拖到下面目标桌位</div>
+    <div id="moveFromTableBox" class="move-drag-grid">
+      <button
+        class="move-table-btn move-from-btn"
+        data-index="${tableIndex}"
+        id="move-from-${tableIndex}"
+        onpointerdown="startMoveDrag(event,${tableIndex})"
+      >
+        ${t.name}<br>
+        <small>使用中</small>
+      </button>
+    </div>
+
+    <div class="move-row-title">拖到这里选择目标桌位</div>
+    <div id="moveToTableBox" class="move-drag-grid">
+      ${state.tables.map((table,i)=>{
+        const disabled = !!table.start || i === tableIndex;
+        const sub = i === tableIndex
+          ? "当前桌"
+          : table.start
+            ? "使用中"
+            : "可移动";
+
+        return `
+          <button
+            class="move-table-btn move-to-btn ${disabled ? "disabled" : ""}"
+            data-index="${i}"
+            id="move-to-${i}"
+            ${disabled ? "disabled" : ""}
+          >
+            ${table.name}<br>
+            <small>${sub}</small>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  document.getElementById("moveTableModalBg").style.display = "block";
+  setTimeout(drawMoveLines,50);
+}
+
+
 function openMoveTableModal(id){
+  moveMode = "booking";
+moveRunningFromIndex = null;
   if(!id) id = activeBookingId;
 
   const b = getBookingById(id);
@@ -899,6 +965,12 @@ function drawMoveLines(pointerX = null, pointerY = null){
 }
 
 function confirmMoveTable(){
+
+  if(moveMode === "running"){
+  confirmMoveRunningTable();
+  return;
+}
+
   const b = getBookingById(moveBookingId);
   if(!b) return;
 
@@ -976,6 +1048,70 @@ function confirmMoveTable(){
   alert("桌位已移动");
 }
 
+async function confirmMoveRunningTable(){
+  if(moveRunningFromIndex === null){
+    alert("没有选择要移动的桌位");
+    return;
+  }
+
+  if(movePairs.length === 0){
+    alert("请先拖线选择目标桌位");
+    return;
+  }
+
+  const pair = movePairs[0];
+  const fromIndex = Number(pair.from);
+  const toIndex = Number(pair.to);
+
+  const fromTable = state.tables[fromIndex];
+  const toTable = state.tables[toIndex];
+
+  if(!fromTable || !fromTable.start){
+    alert("原桌位不是使用中状态");
+    return;
+  }
+
+  if(fromTable.type !== "walkin"){
+    alert("这里只能移动 Walk-in 桌位");
+    return;
+  }
+
+  if(!toTable || toTable.start){
+    alert("目标桌位正在使用中，不能移动");
+    return;
+  }
+
+  if(!confirm(`确认把 ${fromTable.name} 移动到 ${toTable.name} 吗？`)){
+    return;
+  }
+
+  const oldFromName = fromTable.name;
+  const oldToName = toTable.name;
+
+  state.tables[toIndex] = {
+    ...fromTable,
+    name: oldToName
+  };
+
+  state.tables[fromIndex] = resetTable(oldFromName);
+
+  if(state.tables[toIndex].recordId){
+    const snap = await getDoc(doc(db,"records",state.tables[toIndex].recordId));
+
+    if(snap.exists()){
+      const r = snap.data();
+      r.tableName = oldToName;
+      await setDoc(doc(db,"records",r.id),r);
+    }
+  }
+
+  save();
+  closeMoveTableModal();
+  renderBookingGrid();
+  renderList();
+
+  alert(`已移动到 ${oldToName}`);
+}
 
 function closeMoveTableModal(){
   document.getElementById("moveTableModalBg").style.display = "none";
@@ -1526,7 +1662,12 @@ function drawRunningTables(){
 
     if(bookingLocked) return;
 
-    openRunningTablePay(tableIndex);
+if(t.type === "walkin"){
+  openMoveRunningTableModal(tableIndex);
+}else{
+  openRunningTablePay(tableIndex);
+}
+
   };
 }      
     }
@@ -1931,3 +2072,4 @@ window.startMoveDrag = startMoveDrag;
 window.openRunningTablePay = openRunningTablePay;
 window.closeRunningTablePay = closeRunningTablePay;
 window.confirmRunningTablePay = confirmRunningTablePay;
+window.openMoveRunningTableModal = openMoveRunningTableModal;
