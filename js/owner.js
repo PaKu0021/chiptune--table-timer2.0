@@ -119,14 +119,68 @@ return records.filter(r=>{
   });
 }
 
+function normalizePayments(r){
+  if(Array.isArray(r.payments)) return r.payments;
+
+  const amount = Number(r.totalJPY || r.jpy || 0);
+
+  if(amount !== 0){
+    return [{
+      type:"收入",
+      reason:r.checkoutMethod || "历史记录",
+      pay:r.pay || "未记录",
+      amountJPY:amount,
+      amountRMB:Number(r.totalRMB || r.rmb || 0),
+      note:"旧数据"
+    }];
+  }
+
+  return [];
+}
+
+function sumPaymentsJPY(r){
+  return normalizePayments(r)
+    .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+}
+
+function paymentDetailHTML(r){
+  const list = normalizePayments(r);
+
+  if(!list.length) return r.pay || "未记录";
+
+  return list.map(p=>{
+    const amount = Number(p.amountJPY || 0);
+    const sign = amount < 0 ? "-" : "+";
+
+    return `
+      <div>
+        ${p.reason || p.type || ""}｜
+        ${p.pay || "未记录"}｜
+        ${sign}¥${Math.abs(amount).toLocaleString()}
+        ${p.note ? `<br><small>${p.note}</small>` : ""}
+      </div>
+    `;
+  }).join("");
+}
+
+
 function toJPY(r){
+  if(Array.isArray(r.payments)){
+    return sumPaymentsJPY(r);
+  }
+
   if(r.totalJPY !== undefined) return Number(r.totalJPY || 0);
   if(r.jpy !== undefined) return Number(r.jpy || 0);
   if(r.currency === "人民币") return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
   return 0;
 }
 
+
 function toRMB(r){
+  if(Array.isArray(r.payments)){
+    return Math.floor(toJPY(r) * RATE);
+  }
+
   if(r.totalRMB !== undefined) return Number(r.totalRMB || 0);
   if(r.rmb !== undefined) return Number(r.rmb || 0);
   return Math.floor(toJPY(r) * RATE);
@@ -221,8 +275,10 @@ function renderSummary(){
       convertedJPY += jpy;
     }
 
-    const pay = r.pay || "未记录";
-    payStats[pay] = (payStats[pay] || 0) + 1;
+    const pay = r.pay || "未记录";normalizePayments(r).forEach(p=>{
+  const pay = p.pay || "未记录";
+  payStats[pay] = (payStats[pay] || 0) + Number(p.amountJPY || 0);
+});    
 
     const type = r.customerType || r.type || "walkin";
     typeStats[type] = (typeStats[type] || 0) + 1;
@@ -232,7 +288,7 @@ function renderSummary(){
     `${filterName()}｜日元收入：¥${Math.floor(jpyIncome).toLocaleString()}｜人民币收入：¥${Math.floor(rmbIncome).toLocaleString()}｜换算总收入：¥${Math.floor(convertedJPY).toLocaleString()}｜笔数：${list.length}`;
 
   document.getElementById("payStats").innerHTML =
-    `付款渠道：${Object.keys(payStats).map(k=>`${k} ${payStats[k]}笔`).join(" / ") || "暂无"}<br>
+    `付款渠道：${Object.keys(payStats).map(k=>`${k} ¥${Math.floor(payStats[k]).toLocaleString()}`).join(" / ") || "暂无"}<br>
      客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔`;
 }
 
@@ -403,7 +459,7 @@ function renderRecords(){
         <td>¥${Number(original).toLocaleString()}</td>
         <td>¥${Number(jpy).toLocaleString()}</td>
         <td>¥${Number(rmb).toLocaleString()}</td>
-        <td>${r.pay || ""}</td>
+        <td>${paymentDetailHTML(r)}</td>        
         <td>${r.currency || ""}</td>
         <td>${r.roundRule || ""}</td>
 
