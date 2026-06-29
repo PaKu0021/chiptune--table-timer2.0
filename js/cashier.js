@@ -115,8 +115,84 @@ function getRecordTime(r){
   return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || 0;
 }
 
+function normalizePayments(r){
+  if(Array.isArray(r.payments)) return r.payments;
+
+  const amount = Number(r.totalJPY || r.jpy || 0);
+
+  if(amount !== 0){
+    return [{
+      type:"收入",
+      reason:r.checkoutMethod || "历史记录",
+      pay:r.pay || "未记录",
+      amountJPY:amount,
+      amountRMB:Number(r.totalRMB || r.rmb || 0),
+      note:"旧数据",
+      time:r.time || "",
+      timestamp:r.timestamp || Date.now()
+    }];
+  }
+
+  return [];
+}
+
+function sumPaymentsJPY(r){
+  return normalizePayments(r)
+    .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+}
+
+function paymentDetailText(r){
+  const list = normalizePayments(r);
+
+  if(!list.length) return r.pay || "未记录";
+
+  return list.map(p=>{
+    const amount = Number(p.amountJPY || 0);
+    const sign = amount < 0 ? "-" : "+";
+
+    return `${p.reason || p.type || ""}｜${p.pay || "未记录"}｜${sign}¥${Math.abs(amount).toLocaleString()}${p.note ? "｜" + p.note : ""}`;
+  }).join(" / ");
+}
+
+function paymentDetailHTML(r){
+  const list = normalizePayments(r);
+
+  if(!list.length) return r.pay || "未记录";
+
+  return list.map(p=>{
+    const amount = Number(p.amountJPY || 0);
+    const sign = amount < 0 ? "-" : "+";
+    const cls = amount < 0 ? "color:#e85d5d;font-weight:900;" : "font-weight:800;";
+
+    return `
+      <div style="${cls}">
+        ${p.reason || p.type || ""}｜
+        ${p.pay || "未记录"}｜
+        ${sign}¥${Math.abs(amount).toLocaleString()}
+        ${p.note ? `<br><small style="color:#8a8174;">${p.note}</small>` : ""}
+      </div>
+    `;
+  }).join("");
+}
+
+function getPaySummary(r){
+  const pays = [...new Set(
+    normalizePayments(r)
+      .filter(p=>Number(p.amountJPY || 0) !== 0)
+      .map(p=>p.pay || "未记录")
+  )];
+
+  if(pays.length === 0) return r.pay || "未记录";
+  if(pays.length === 1) return pays[0];
+  return "混合";
+}
+
 
 function toJPY(r){
+  if(Array.isArray(r.payments)){
+    return sumPaymentsJPY(r);
+  }
+
   if(r.currency === "人民币"){
     return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
   }
@@ -125,12 +201,17 @@ function toJPY(r){
 }
 
 function toRMB(r){
+  if(Array.isArray(r.payments)){
+    return Math.floor(toJPY(r) * RATE);
+  }
+
   if(r.currency === "人民币"){
     return Number(r.totalRMB || r.rmb || 0);
   }
 
   return Math.floor(toJPY(r) * RATE);
 }
+
 
 function setQuickRange(type){
   quickRange = type;
