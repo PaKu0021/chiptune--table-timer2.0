@@ -42,6 +42,52 @@ function getRecordTime(r){
   return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
 }
 
+function normalizePayments(r){
+  if(Array.isArray(r.payments)) return r.payments;
+
+  const amount = Number(r.totalJPY || r.jpy || 0);
+
+  if(amount !== 0){
+    return [{
+      type:"收入",
+      reason:r.checkoutMethod || "历史记录",
+      pay:r.pay || "未记录",
+      amountJPY:amount,
+      amountRMB:Number(r.totalRMB || r.rmb || 0),
+      note:"旧数据"
+    }];
+  }
+
+  return [];
+}
+
+function sumPaymentsJPY(r){
+  return normalizePayments(r)
+    .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+}
+
+function paymentDetailHTML(r){
+  const list = normalizePayments(r);
+
+  if(!list.length) return r.pay || "未记录";
+
+  return list.map(p=>{
+    const amount = Number(p.amountJPY || 0);
+    const sign = amount < 0 ? "-" : "+";
+    const style = amount < 0
+      ? "color:#e85d5d;font-weight:900;"
+      : "font-weight:800;";
+
+    return `
+      <div style="${style}">
+        ${p.reason || p.type || ""}｜
+        ${p.pay || "未记录"}｜
+        ${sign}¥${Math.abs(amount).toLocaleString()}
+        ${p.note ? `<br><small style="color:#8a8174;">${p.note}</small>` : ""}
+      </div>
+    `;
+  }).join("");
+}
 
 function getTodayRecords(){
   return records.filter(r=>{
@@ -52,17 +98,27 @@ const d = new Date(getRecordTime(r));
 }
 
 function toJPY(r){
+  if(Array.isArray(r.payments)){
+    return sumPaymentsJPY(r);
+  }
+
   if(r.totalJPY !== undefined) return Number(r.totalJPY || 0);
   if(r.jpy !== undefined) return Number(r.jpy || 0);
   if(r.currency === "人民币") return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
   return 0;
 }
 
+
 function toRMB(r){
+  if(Array.isArray(r.payments)){
+    return Math.floor(toJPY(r) * RATE);
+  }
+
   if(r.totalRMB !== undefined) return Number(r.totalRMB || 0);
   if(r.rmb !== undefined) return Number(r.rmb || 0);
   return Math.floor(toJPY(r) * RATE);
 }
+
 
 function compressImage(file, maxWidth = 600, quality = 0.45){
   return new Promise((resolve, reject)=>{
@@ -122,8 +178,11 @@ function renderTodayBill(){
       convertedJPY += jpy;
     }
 
-    const pay = r.pay || "未记录";
-    payStats[pay] = (payStats[pay] || 0) + 1;
+    normalizePayments(r).forEach(p=>{
+  const pay = p.pay || "未记录";
+  payStats[pay] = (payStats[pay] || 0) + Number(p.amountJPY || 0);
+});
+
 
     const type = r.customerType || r.type || "walkin";
     typeStats[type] = (typeStats[type] || 0) + 1;
@@ -137,7 +196,8 @@ function renderTodayBill(){
   `;
 
   document.getElementById("todayPayStats").innerHTML = `
-    付款渠道：${Object.keys(payStats).map(k=>`${k} ${payStats[k]}笔`).join(" / ") || "暂无"}<br>
+  付款渠道：${Object.keys(payStats).map(k=>`${k} ¥${Math.floor(payStats[k]).toLocaleString()}`).join(" / ") || "暂无"}
+  <br>
     客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔
   `;
 
@@ -161,7 +221,7 @@ function renderTodayBill(){
         <td>¥${Number(original).toLocaleString()}</td>
         <td>¥${Number(toJPY(r)).toLocaleString()}</td>
         <td>¥${Number(toRMB(r)).toLocaleString()}</td>
-        <td>${r.pay || ""}</td>
+        <td>${paymentDetailHTML(r)}</td>
         <td>${r.currency || ""}</td>
         <td>${r.roundRule || ""}</td>
 <td>
