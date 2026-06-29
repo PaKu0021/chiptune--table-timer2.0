@@ -166,12 +166,17 @@ function paymentDetailHTML(r){
 
 function toJPY(r){
   if(Array.isArray(r.payments)){
-    return sumPaymentsJPY(r);
+    return normalizePayments(r)
+      .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
   }
 
   if(r.totalJPY !== undefined) return Number(r.totalJPY || 0);
   if(r.jpy !== undefined) return Number(r.jpy || 0);
-  if(r.currency === "人民币") return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+
+  if(r.currency === "人民币"){
+    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+  }
+
   return 0;
 }
 
@@ -187,19 +192,17 @@ function toRMB(r){
 }
 
 function getAmountByMode(r){
+  const jpy = toJPY(r);
+
   if(currencyMode === "JPY"){
-    return r.currency === "日元" ? Number(r.totalJPY || r.jpy || 0) : 0;
+    return jpy;
   }
 
   if(currencyMode === "RMB"){
-    return r.currency === "人民币" ? Number(r.totalRMB || r.rmb || 0) : 0;
+    return toRMB(r);
   }
 
-  if(r.currency === "人民币"){
-    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
-  }
-
-  return Number(r.totalJPY || r.jpy || 0);
+  return jpy;
 }
 
 function filterName(){
@@ -265,19 +268,18 @@ function renderSummary(){
   let typeStats = {walkin:0, booking:0};
 
   list.forEach(r=>{
-    if(r.currency === "人民币"){
-      const rmb = Number(r.totalRMB || r.rmb || 0);
-      rmbIncome += rmb;
-      convertedJPY += Math.floor(rmb / RATE);
-    }else{
-      const jpy = Number(r.totalJPY || r.jpy || 0);
-      jpyIncome += jpy;
-      convertedJPY += jpy;
-    }
 
-    const pay = r.pay || "未记录";normalizePayments(r).forEach(p=>{
+const jpy = toJPY(r);
+const rmb = toRMB(r);
+
+jpyIncome += jpy;
+rmbIncome += rmb;
+convertedJPY += jpy;
+
+  normalizePayments(r).forEach(p=>{
   const pay = p.pay || "未记录";
   payStats[pay] = (payStats[pay] || 0) + Number(p.amountJPY || 0);
+
 });    
 
     const type = r.customerType || r.type || "walkin";
@@ -836,7 +838,7 @@ function exportCSV(){
     r.originalJPY || r.totalJPY || r.jpy || 0,
     toJPY(r),
     toRMB(r),
-    r.pay || "",
+    paymentDetailHTML(r).replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim(),    
     r.currency || "",
     r.roundRule || ""
   ]);
