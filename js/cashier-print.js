@@ -10,7 +10,47 @@ const payload = raw ? JSON.parse(raw) : {
 
 const rows = payload.rows || [];
 
+function normalizePayments(r){
+  if(Array.isArray(r.payments)) return r.payments;
+
+  const amount = Number(r.totalJPY || r.jpy || 0);
+
+  if(amount !== 0){
+    return [{
+      type:"收入",
+      reason:r.checkoutMethod || "历史记录",
+      pay:r.pay || "未记录",
+      amountJPY:amount
+    }];
+  }
+
+  return [];
+}
+
+function paymentDetailHTML(r){
+  if(r.paymentDetail){
+    return String(r.paymentDetail).replace(/\s*\/\s*/g,"<br>");
+  }
+
+  const list = normalizePayments(r);
+
+  if(!list.length) return r.pay || "未记录";
+
+  return list.map(p=>{
+    const amount = Number(p.amountJPY || 0);
+    const sign = amount < 0 ? "-" : "+";
+
+    return `${p.reason || p.type || ""}｜${p.pay || "未记录"}｜${sign}¥${Math.abs(amount).toLocaleString()}`;
+  }).join("<br>");
+}
+
+
 function toJPY(r){
+  if(Array.isArray(r.payments)){
+    return normalizePayments(r)
+      .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+  }
+
   if(r.totalJPY !== undefined) return Number(r.totalJPY || 0);
   if(r.jpy !== undefined) return Number(r.jpy || 0);
 
@@ -20,7 +60,6 @@ function toJPY(r){
 
   return 0;
 }
-
 
 function renderSummary(rows){
   const pays = {
@@ -34,14 +73,16 @@ function renderSummary(rows){
   let totalJPY = 0;
 
   rows.forEach(r=>{
-    const p = r.pay || "未记录";
-    const jpy = toJPY(r);
+  normalizePayments(r).forEach(p=>{
+    const pay = p.pay || "未记录";
+    const jpy = Number(p.amountJPY || 0);
 
-    if(!pays[p]) pays[p] = 0;
+    if(!pays[pay]) pays[pay] = 0;
 
-    pays[p] += jpy;
+    pays[pay] += jpy;
     totalJPY += jpy;
   });
+});
 
   document.getElementById("printSummary").innerHTML = `
     <table class="record-table">
@@ -75,7 +116,7 @@ rows.map(r=>`
     <td>¥${Number(r.originalJPY || 0).toLocaleString()}</td>
     <td>¥${toJPY(r).toLocaleString()}</td>
     <td>¥${Number(r.totalRMB || r.rmb || 0).toLocaleString()}</td>
-    <td>${r.pay || "未记录"}</td>
+    <td>${paymentDetailHTML(r)}</td>
     <td>${r.currency || ""}</td>
     <td>${r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || "")}</td>
     <td>
@@ -114,7 +155,7 @@ function renderReceiptImages(rows){
       <div>
         ${r.closedTime || r.time || ""}<br>
         ${r.tableName || ""}｜${r.customerName || ""}${r.phoneLast4 ? "（" + r.phoneLast4 + "）" : ""}<br>
-        ${r.pay || "未记录"}｜¥${toJPY(r).toLocaleString()}
+        ${paymentDetailHTML(r)}<br>合计｜¥${toJPY(r).toLocaleString()}
       </div>
     </div>
   `).join("");
