@@ -23,6 +23,9 @@ let runningPayTableIndex = null;
 let dragTempLine = null;
 let moveAreaRect = null;
 let dragFromCenter = null;
+let bookingAutoRefreshTimer = null;
+let runningTimeTextTimer = null;
+
 
 const MOVE_LINE_COLORS = [
   "#e85d5d",
@@ -109,6 +112,7 @@ Promise.all(
 try{
   renderList();
   renderBookingGrid();
+  startBookingAutoRefresh();
 }catch(e){
     alert("预约页面错误：" + e.message);
   }
@@ -500,11 +504,51 @@ return `
     </div>
   `;
 
-  drawExistingBookings();
-  drawRunningTables();
-  updateBookingLockUI();
-
+drawExistingBookings();
+drawRunningTables();
+updateBookingLockUI();
+startRunningTimeTextTimer();
 }
+
+function startBookingAutoRefresh(){
+  if(bookingAutoRefreshTimer) return;
+
+  bookingAutoRefreshTimer = setInterval(()=>{
+    if(!state) return;
+    if(selecting) return;
+    if(draggingMoveFrom !== null) return;
+
+    const openedModal = [...document.querySelectorAll(".modal-bg")]
+      .some(el=>el.style.display === "block");
+
+    if(openedModal) return;
+
+    const scroller =
+      document.querySelector(".booking-grid-wrap") ||
+      document.getElementById("bookingGrid");
+
+    const left = scroller ? scroller.scrollLeft : 0;
+    const top = scroller ? scroller.scrollTop : 0;
+
+    renderBookingGrid();
+    renderList();
+
+    requestAnimationFrame(()=>{
+      if(scroller){
+        scroller.scrollLeft = left;
+        scroller.scrollTop = top;
+      }
+    });
+
+  },30000);
+}
+
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState === "visible" && state){
+    renderBookingGrid();
+    renderList();
+  }
+});
 
 function updateBookingLockUI(){
   const btn = document.getElementById("bookingLockBtn");
@@ -1684,17 +1728,45 @@ const status = getTableStatusText(t);
 
 middleCell.innerHTML = `
   <div class="running-block ${status.className}">
-    <div class="running-time">
+    <div
+      class="running-time"
+      data-running-table="${tableIndex}"
+    >
       ${status.text}
     </div>
   </div>
 `;
 
 
-
       });
 }
 
+function startRunningTimeTextTimer(){
+  if(runningTimeTextTimer) return;
+
+  runningTimeTextTimer = setInterval(()=>{
+    if(!state || !state.tables) return;
+
+    document.querySelectorAll("[data-running-table]").forEach(el=>{
+      const index = Number(el.dataset.runningTable);
+      const t = state.tables[index];
+
+      if(!t || !t.start){
+        el.innerText = "";
+        return;
+      }
+
+      const status = getTableStatusText(t);
+
+      el.innerText = status.text;
+
+      const block = el.closest(".running-block");
+      if(block){
+        block.className = `running-block ${status.className}`;
+      }
+    });
+  },1000);
+}
 
 function openRunningTablePay(tableIndex){
   const t = state.tables[tableIndex];
