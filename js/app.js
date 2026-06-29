@@ -736,16 +736,12 @@ async function start(i){
 t.payTiming = t.payTiming || "prepaid";
 
 if(t.payTiming === "prepaid"){
-  if(!t.pay){
-    alert("先付款模式必须先选择付款方式");
-    return;
-  }
-
   t.paidJPY = Number(p.price || 0);
   t.paidRMB = getRMB(t.paidJPY);
   t.paidAt = Date.now();
 }else{
-  t.paidJPY = 0;
+
+t.paidJPY = 0;
   t.paidRMB = 0;
   t.paidAt = null;
 }
