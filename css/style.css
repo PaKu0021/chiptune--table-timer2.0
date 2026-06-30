@@ -1240,3 +1240,13 @@ button.selected-pop{
   color:#8a8174;
 }
 
+.booking-source{
+    display:inline-block;
+    margin-left:8px;
+    padding:2px 8px;
+    border-radius:20px;
+    background:#4CAF50;
+    color:#fff;
+    font-size:12px;
+    font-weight:bold;
+}

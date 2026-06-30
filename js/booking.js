@@ -13,6 +13,7 @@ let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = currentBookingDate;
 let bookingListOpen = false;
 let moveBookingId = null;
+let assignBookingId = null;
 let movePairs = [];
 let moveMode = "booking";
 let moveRunningFromIndex = null;
@@ -632,21 +633,67 @@ function renderList(){
         </div>
 
         <div class="booking-list-main">
-          <strong>${b.name || "-"}</strong>
-          <span>${String(b.phone || "").slice(-4) || "-"}</span>
-        </div>
+  <strong>${b.name || "-"}</strong>
+  <span>${String(b.phone || "").slice(-4) || "-"}</span>
+
+  ${
+    b.source === "官网"
+      ? `<span class="booking-source">官网</span>`
+      : ""
+  }
+</div>
 
         <div class="booking-list-sub">
-          桌位：${tables || "-"}｜${b.checkedIn ? "已到店" : "未到店"}
-        </div>
 
+桌位：
+
+${
+tables || "<span style='color:red'>未分配</span>"
+}
+
+｜
+
+${b.checkedIn ? "已到店" : "未到店"}
+
+</div>
         ${bookingLocked ? "" : `
-          <div class="action-row" style="margin-top:10px;">
-            <button class="btn-success" onclick="openCheckInSelectModal(${b.id})">到店开始</button>
-            <button class="btn-main" onclick="openBookingAction(${b.id})">修改</button>
-            <button class="btn-ghost" onclick="openMoveTableModal(${b.id})">移动桌位</button>
-            <button class="btn-danger" onclick="cancelBookingById(${b.id})">取消</button>
-          </div>
+         <div class="action-row">
+
+${
+(b.tableIndexes || []).length === 0
+
+?
+
+`<button class="btn-main"
+onclick="openAssignTableModal(${b.id})">
+分配桌位
+</button>`
+
+:
+
+`<button class="btn-success"
+onclick="openCheckInSelectModal(${b.id})">
+到店开始
+</button>`
+}
+
+<button class="btn-main"
+onclick="openBookingAction(${b.id})">
+修改
+</button>
+
+<button class="btn-ghost"
+onclick="openMoveTableModal(${b.id})">
+移动桌位
+</button>
+
+<button class="btn-danger"
+onclick="cancelBookingById(${b.id})">
+取消
+</button>
+
+</div>
+
         `}
       </div>
     `;
@@ -2110,6 +2157,68 @@ function printBookingGrid(){
   location.href = `./print-booking.html?date=${currentBookingDate}`;
 }
 
+function openAssignTableModal(id){
+
+  const b = getBookingById(id);
+  if(!b) return;
+
+  assignBookingId = id;
+
+  document.getElementById("assignBookingInfo").innerHTML = `
+    <b>${b.name}</b><br>
+    ${b.date}<br>
+    ${b.startTime} - ${b.endTime}
+  `;
+
+  const box = document.getElementById("assignTableList");
+
+  box.innerHTML = state.tables.map((t,i)=>{
+
+    const conflict = hasBookingConflict(i,b,b.id);
+
+    return `
+      <button
+        class="btn-${conflict?"danger":"ghost"} full"
+        ${conflict?"disabled":""}
+        onclick="assignBookingTable(${i})"
+      >
+        ${t.name}
+        ${conflict?"（已有预约）":""}
+      </button>
+    `;
+
+  }).join("");
+
+  document.getElementById("assignTableModalBg").style.display="block";
+
+}
+
+async function assignBookingTable(index){
+
+  const b = getBookingById(assignBookingId);
+
+  if(!b) return;
+
+  b.tableIndexes=[index];
+  b.tableIndex=index;
+
+  await save();
+
+  closeAssignTableModal();
+
+  renderList();
+  renderBookingGrid();
+
+}
+
+function closeAssignTableModal(){
+
+  assignBookingId=null;
+
+  document.getElementById("assignTableModalBg").style.display="none";
+
+}
+
 window.printBookingGrid = printBookingGrid;
 window.openDatePicker = openDatePicker;
 window.closeDatePicker = closeDatePicker;
@@ -2145,3 +2254,6 @@ window.openRunningTablePay = openRunningTablePay;
 window.closeRunningTablePay = closeRunningTablePay;
 window.confirmRunningTablePay = confirmRunningTablePay;
 window.openMoveRunningTableModal = openMoveRunningTableModal;
+window.openAssignTableModal=openAssignTableModal;
+window.assignBookingTable=assignBookingTable;
+window.closeAssignTableModal=closeAssignTableModal;
