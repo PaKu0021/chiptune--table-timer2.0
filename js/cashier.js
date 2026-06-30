@@ -266,8 +266,14 @@ function getFilteredRecords(){
 
     if(start && key < start) return false;
     if(end && key > end) return false;
-    if(pay && r.pay !== pay) return false;
 
+if(pay){
+  const hasPay = normalizePayments(r).some(p=>{
+    return (p.pay || "未记录") === pay;
+  });
+
+  if(!hasPay) return false;
+}
     return true;
   }).sort((a,b)=>getRecordTime(a) - getRecordTime(b));
 }
