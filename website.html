@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chiptune 池袋拼豆体验店</title>
+<link rel="stylesheet" href="./css/website.css">
+</head>
+
+<body>
+
+<header class="site-header">
+  <div class="site-logo">Chiptune</div>
+  <nav>
+    <a href="#price">价格</a>
+    <a href="#accessory">配饰</a>
+    <a href="#booking">预约</a>
+    <a href="#access">交通</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="hero-text">
+    <p class="tag">池袋・アイロンビーズ体験工房</p>
+    <h1>来 Chiptune 做属于自己的拼豆作品</h1>
+    <p>
+      221种颜色、丰富配饰、钥匙扣・手机支架・立牌等都可以制作。
+      第一次来也没关系，店员会协助说明。
+    </p>
+    <a class="hero-btn" href="#booking">立即预约</a>
+  </div>
+</section>
+
+<section class="section">
+  <h2>Chiptune 可以做什么？</h2>
+
+  <div class="feature-grid">
+    <div class="feature-card">
+      <h3>221种颜色</h3>
+      <p>颜色齐全，适合角色图、像素图、大图作品。</p>
+    </div>
+
+    <div class="feature-card">
+      <h3>免费加工</h3>
+      <p>可协助熨烫、打孔、组装。</p>
+    </div>
+
+    <div class="feature-card">
+      <h3>丰富配饰</h3>
+      <p>钥匙扣、发夹、手机支架、磁吸、立牌等。</p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="price">
+  <h2>价格</h2>
+
+  <div class="price-grid">
+    <div class="price-card">
+      <h3>平日</h3>
+      <p><b>5小时</b> ¥3,300</p>
+      <p><b>不限时</b> ¥5,500</p>
+    </div>
+
+    <div class="price-card">
+      <h3>周末・节假日</h3>
+      <p><b>3小时</b> ¥3,300</p>
+      <p><b>6小时</b> ¥5,500</p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="accessory">
+  <h2>配饰</h2>
+  <p class="section-lead">
+    一个作品最多可选择一个配饰。具体库存以当日店内为准。
+  </p>
+
+  <div class="accessory-list">
+    <span>钥匙扣</span>
+    <span>手机支架</span>
+    <span>发夹</span>
+    <span>戒指</span>
+    <span>磁吸</span>
+    <span>立牌</span>
+    <span>轴承</span>
+    <span>帆布袋</span>
+  </div>
+</section>
+
+<section class="section booking-section" id="booking">
+  <h2>预约</h2>
+  <p class="section-lead">
+    提交后我们会确认座位和时间。请等待店铺回复。
+  </p>
+
+  <div class="booking-card">
+    <label>姓名</label>
+    <input id="bookingName" placeholder="请输入姓名">
+
+    <label>联系方式</label>
+    <input id="bookingContact" placeholder="电话 / 微信 / Instagram 等">
+
+    <label>人数</label>
+    <input id="bookingPeople" type="number" min="1" value="1">
+
+    <label>预约日期</label>
+    <input id="bookingDate" type="date">
+
+    <label>开始时间</label>
+    <input id="bookingStart" type="time">
+
+    <label>结束时间</label>
+    <input id="bookingEnd" type="time">
+
+    <label>备注</label>
+    <textarea id="bookingNote" placeholder="例：第一次来 / 想做大图 / 需要中文说明"></textarea>
+
+    <button onclick="submitWebsiteBooking()">提交预约</button>
+  </div>
+</section>
+
+<section class="section" id="access">
+  <h2>交通</h2>
+  <p>
+    池袋站步行约5分钟。靠近 Sunshine 通り。
+  </p>
+</section>
+
+<footer>
+  <p>© Chiptune</p>
+</footer>
+
+<script type="module" src="./js/website.js"></script>
+</body>
+</html>
