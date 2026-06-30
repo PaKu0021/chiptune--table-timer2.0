@@ -57,19 +57,30 @@
 
   <h3 class="cashier-filter-title">自定义日期范围</h3>
 
-  <div class="cashier-filter-card">
-    <div class="cashier-date-item">
-      <label>开始日期</label>
+<div class="cashier-filter-card cashier-filter-grid">
+
+  <div class="cashier-date-item">
+    <label>开始日期</label>
+    <div class="pretty-input">
+      <span>📅</span>
       <input id="startDate" type="date">
     </div>
+  </div>
 
-    <div class="cashier-date-item">
-      <label>结束日期</label>
+  <div class="cashier-date-split">～</div>
+
+  <div class="cashier-date-item">
+    <label>结束日期</label>
+    <div class="pretty-input">
+      <span>📅</span>
       <input id="endDate" type="date">
     </div>
+  </div>
 
-    <div class="cashier-date-item">
-      <label>支付方式</label>
+  <div class="cashier-date-item">
+    <label>支付方式</label>
+    <div class="pretty-input">
+      <span>💳</span>
       <select id="payFilter">
         <option value="">全部支付方式</option>
         <option value="现金">现金</option>
@@ -78,9 +89,16 @@
         <option value="支付宝">支付宝</option>
       </select>
     </div>
-
-    <button class="btn-main cashier-search-btn" onclick="applyDateFilter()">查询</button>
   </div>
+
+  <button class="btn-main cashier-search-btn" onclick="applyDateFilter()">
+    🔍 查询
+  </button>
+
+</div>
+
+
+
 </div>
 
 

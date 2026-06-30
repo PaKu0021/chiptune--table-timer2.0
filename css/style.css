@@ -1158,5 +1158,79 @@ button.selected-pop{
   }
 }
 
+.cashier-filter-grid{
+  display:grid;
+  grid-template-columns:1fr auto 1fr 1fr 180px;
+  gap:16px;
+  align-items:end;
+  padding:18px;
+  border:1px solid var(--line);
+  border-radius:22px;
+  background:rgba(255,255,255,.55);
+}
 
+.cashier-date-item label{
+  display:block;
+  font-weight:900;
+  margin:0 0 8px;
+  color:var(--text);
+}
+
+.pretty-input{
+  height:58px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:0 14px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  background:#fff;
+  box-shadow:0 3px 10px rgba(80,60,30,.06);
+}
+
+.pretty-input span{
+  font-size:18px;
+  flex:0 0 auto;
+}
+
+.pretty-input input,
+.pretty-input select{
+  border:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  padding:0 !important;
+  margin:0 !important;
+  height:100%;
+  font-weight:800;
+  color:var(--text);
+}
+
+.cashier-date-split{
+  height:58px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:24px;
+  font-weight:900;
+  color:var(--muted);
+}
+
+.cashier-search-btn{
+  height:58px;
+  font-size:18px;
+}
+
+@media(max-width:900px){
+  .cashier-filter-grid{
+    grid-template-columns:1fr;
+  }
+
+  .cashier-date-split{
+    display:none;
+  }
+
+  .cashier-search-btn{
+    width:100%;
+  }
+}
 
