@@ -269,22 +269,24 @@ function renderSummary(){
 
   list.forEach(r=>{
 
-const jpy = toJPY(r);
-const rmb = toRMB(r);
-
-jpyIncome += jpy;
-rmbIncome += rmb;
-convertedJPY += jpy;
-
   normalizePayments(r).forEach(p=>{
-  const pay = p.pay || "未记录";
-  payStats[pay] = (payStats[pay] || 0) + Number(p.amountJPY || 0);
+    const jpy = Number(p.amountJPY || 0);
 
-});    
+    convertedJPY += jpy;
 
-    const type = r.customerType || r.type || "walkin";
-    typeStats[type] = (typeStats[type] || 0) + 1;
+    if(p.currency === "人民币"){
+      rmbIncome += Number(p.amountRMB || 0);
+    }else{
+      jpyIncome += jpy;
+    }
+
+    const pay = p.pay || "未记录";
+    payStats[pay] = (payStats[pay] || 0) + jpy;
   });
+
+  const type = r.customerType || r.type || "walkin";
+  typeStats[type] = (typeStats[type] || 0) + 1;
+});
 
   document.getElementById("summary").innerHTML =
     `${filterName()}｜日元收入：¥${Math.floor(jpyIncome).toLocaleString()}｜人民币收入：¥${Math.floor(rmbIncome).toLocaleString()}｜换算总收入：¥${Math.floor(convertedJPY).toLocaleString()}｜笔数：${list.length}`;
@@ -305,7 +307,10 @@ function renderChart(){
 
   list.forEach(r=>{
     const key = dateKey(getRecordTime(r));
-    const value = getAmountByMode(r);
+    const value =
+  currencyMode === "RMB"
+    ? toRMB(r)
+    : toJPY(r);    
     grouped[key] = (grouped[key] || 0) + value;
   });
 
@@ -517,10 +522,11 @@ function buildCustomerStats(){
     }
 
     const ts = getRecordTime(r);
-    const jpy = toJPY(r);
 
-    map[key].visitCount += 1;
-    map[key].totalJPY += Number(jpy || 0);
+    const jpy = sumPaymentsJPY(r);
+
+map[key].visitCount += 1;
+map[key].totalJPY += jpy;
 
     if(ts > map[key].lastTime){
       map[key].lastTime = ts;
