@@ -655,12 +655,22 @@ async function handleOwnerReceiptFileChange(e){
   }
 
   try{
-    const compressedBlob = await compressImage(file);
+const compressedBlob = await compressImage(file);
 
-    const path = `receipts/${uploadingRecordId}_${Date.now()}.jpg`;
-    const fileRef = storageRef(storage, path);
+// 先删除旧截图
+if(r.receiptPath){
+  try{
+    await deleteObject(storageRef(storage, r.receiptPath));
+  }catch(e){
+    console.warn("旧截图不存在，可忽略");
+  }
+}
 
-    await uploadBytes(fileRef, compressedBlob);
+const path = `receipts/${uploadingRecordId}_${Date.now()}.jpg`;
+const fileRef = storageRef(storage, path);
+
+await uploadBytes(fileRef, compressedBlob);
+
 
     const url = await getDownloadURL(fileRef);
 

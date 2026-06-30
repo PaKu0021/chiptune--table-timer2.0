@@ -153,6 +153,12 @@ function getOriginalJPY(t){
 }
 
 function roundJPY(jpy){
+  jpy = Number(jpy || 0);
+
+  if(jpy < 0){
+    return -roundJPY(Math.abs(jpy));
+  }
+
   const base = Math.floor(jpy / 1000) * 1000;
   const rest = jpy - base;
 
@@ -404,8 +410,7 @@ record.pay = getPaymentSummary(record.payments);
 
   record.currency = t.currency || "日元";
   record.payTiming = t.payTiming || "prepaid";
-
-  record.paidStatus = dueJPY > 0 ? "未结清" : "已结清";
+  record.paidStatus = Number(record.dueJPY || 0) > 0 ? "未结清" : "已结清";
   record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
   record.checkoutMethod = t.payTiming === "postpaid" ? "后付款" : "先付款";
   record.roundRule = record.roundRule || "不抹零";
@@ -1540,25 +1545,44 @@ async function confirmBatchCheckout(){
         ? (manualAmount > 0 ? manualAmount : dueJPY)
         : dueJPY;
 
-    t.paidJPY = Number(t.paidJPY || 0) + finalPaidJPY;
-    t.paidRMB = getRMB(t.paidJPY);
-    t.paidAt = Date.now();
+const record = await createOrUpdateRecord(t);
 
-    const record = await createOrUpdateRecord(t);
+record.payments = normalizePayments(record);
 
-    record.totalJPY = t.paidJPY;
-    record.totalRMB = getRMB(t.paidJPY);
-    record.paidJPY = t.paidJPY;
-    record.dueJPY = Math.max(0, getOriginalJPY(t) - t.paidJPY);
-    record.pay = pay;
-    record.currency = currency;
-    record.roundRule = "不抹零";
-    record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
-    record.checkoutMethod = "批量结账";
-    record.closedAt = Date.now();
-    record.closedTime = new Date().toLocaleString();
+if(finalPaidJPY !== 0){
+  record.payments.push(
+    makePaymentLine({
+      type: finalPaidJPY < 0 ? "退款" : "收入",
+      reason: finalPaidJPY < 0 ? "批量退款" : "批量结账",
+      pay,
+      amountJPY: finalPaidJPY,
+      note: "批量结账记录"
+    })
+  );
+}
 
-    await updateRecordOnly(record);
+const paymentTotalJPY = sumPaymentsJPY(record.payments);
+
+t.paidJPY = paymentTotalJPY;
+t.paidRMB = getRMB(paymentTotalJPY);
+t.paidAt = Date.now();
+
+record.originalJPY = getOriginalJPY(t);
+record.totalJPY = paymentTotalJPY;
+record.totalRMB = getRMB(paymentTotalJPY);
+record.paidJPY = paymentTotalJPY;
+record.dueJPY = Math.max(0, record.originalJPY - paymentTotalJPY);
+record.pay = getPaymentSummary(record.payments);
+record.currency = currency;
+record.roundRule = "不抹零";
+record.paidStatus = Number(record.dueJPY || 0) > 0 ? "未结清" : "已结清";
+record.checkoutMethod = "批量结账";
+record.closedAt = Date.now();
+record.closedTime = new Date().toLocaleString();
+
+await updateRecordOnly(record);
+
+
 
     state.tables[i] = resetTable(t.name);
   }

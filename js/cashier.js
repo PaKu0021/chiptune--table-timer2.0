@@ -28,12 +28,22 @@ const record = records.find(r=>r.id === recordId);
     return;
   }
 
-  const path =
-    `receipts/${record.id}/${Date.now()}_${file.name}`;
+// 删除旧截图
+if(record.receiptPath){
+  try{
+    await deleteObject(storageRef(storage, record.receiptPath));
+  }catch(e){
+    console.warn("旧截图不存在，可忽略");
+  }
+}
 
-  const imgRef = storageRef(storage,path);
+const path =
+  `receipts/${record.id}/${Date.now()}_${file.name}`;
 
-  await uploadBytes(imgRef,file);
+const imgRef = storageRef(storage,path);
+
+await uploadBytes(imgRef,file);
+
 
   const url = await getDownloadURL(imgRef);
 
@@ -516,10 +526,7 @@ onSnapshot(ref, snap=>{
   }
 });
 
-const recordsQuery = query(
-  collection(db,"records"),
-  where("timestamp",">=",get90DaysAgo())
-);
+const recordsQuery = collection(db,"records");
 
 onSnapshot(recordsQuery,snap=>{
 
