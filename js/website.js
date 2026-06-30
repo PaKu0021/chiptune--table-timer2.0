@@ -1,8 +1,9 @@
 import { db } from "./firebase.js";
 
 import {
-  collection,
-  addDoc
+    doc,
+    getDoc,
+    updateDoc
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 async function submitWebsiteBooking(){
@@ -34,19 +35,58 @@ async function submitWebsiteBooking(){
     return;
   }
 
-  await addDoc(collection(db, "publicBookings"), {
-    name,
-    contact,
-    people,
-    date,
-    startTime,
-    endTime,
-    note,
-    status:"待确认",
-    source:"官网预约",
-    createdAt:Date.now(),
-    createdTime:new Date().toLocaleString()
-  });
+
+  const ref = doc(db,"shop","main");
+
+const snap = await getDoc(ref);
+
+const data = snap.data();
+
+if(!data.bookings){
+
+    data.bookings=[];
+
+}
+
+data.bookings.push({
+  id: Date.now(),
+
+  date,
+  name,
+  phone: contact,
+
+  people,
+  startTime,
+  endTime,
+  note,
+
+  source: "官网",
+  color: "#B7E4C7",
+
+  tableIndex: null,
+  tableIndexes: [],
+
+  packageIndex: 0,
+
+  pay: "",
+  checkedIn: false,
+  checkInTime: null,
+  checkInTimeText: "",
+  checkedInTableIndexes: [],
+  finishedTableIndexes: [],
+
+  cancelled: false,
+  status: "pending",
+
+  createdAt: Date.now(),
+  createdTime: new Date().toLocaleString()
+});
+
+await updateDoc(ref,{
+
+    bookings:data.bookings
+
+});
 
   alert("预约已提交，我们会尽快确认。");
 
