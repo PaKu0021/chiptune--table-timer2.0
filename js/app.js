@@ -44,7 +44,10 @@ onSnapshot(ref, snap=>{
     
     if(!state.packages) state.packages = defaultState.packages;
     if(!state.bookings) state.bookings = [];
-    if(!state.tables) state.tables = defaultState.tables;
+    if(!Array.isArray(state.tables) || state.tables.length === 0){
+  state.tables = defaultState.tables;
+  save();
+}    
     if(!state.customers) state.customers = {};
 
     state.tables.forEach((t,i)=>{
