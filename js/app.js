@@ -1007,14 +1007,13 @@ document.getElementById("checkoutAmount").innerHTML = `
     已收金额：¥${Number(t.paidJPY || 0).toLocaleString()}<br><br>
 
     <label>实际应收金额</label>
-    <input id="checkoutFinalCharge" type="number" value="${originalJPY}">
-
+    <input id="checkoutFinalCharge" type="number" value="${originalJPY}" oninput="refreshCheckoutDiff()">
     <label>备注</label>
     <input id="checkoutNote" placeholder="例：不限时改3小时，现金退款差价">
 
     <br>
-    当前需收/需退：¥${finalJPY.toLocaleString()}<br>
-    人民币参考：¥${totalRMB.toLocaleString()}<br>
+    当前需收/需退：<span id="checkoutDiffText">¥${finalJPY.toLocaleString()}</span><br>
+    人民币参考：<span id="checkoutRmbText">¥${totalRMB.toLocaleString()}</span><br>    
     <small style="color:#8a8174;">
       如果要退款，把实际应收金额改小。系统会自动算成负数退款。
     </small>
@@ -1138,6 +1137,29 @@ alert("结账完成");
 
 }
 
+function refreshCheckoutDiff(){
+  const t = state.tables[checkoutIndex];
+  if(!t) return;
+
+  const defaultOriginalJPY = getOriginalJPY(t);
+  const finalChargeJPY = Number(
+    document.getElementById("checkoutFinalCharge")?.value || defaultOriginalJPY
+  );
+
+  const rawDiffJPY = finalChargeJPY - Number(t.paidJPY || 0);
+  const finalJPY = useRound ? roundJPY(rawDiffJPY) : rawDiffJPY;
+
+  const diffText = document.getElementById("checkoutDiffText");
+  const rmbText = document.getElementById("checkoutRmbText");
+
+  if(diffText){
+    diffText.innerText = `¥${finalJPY.toLocaleString()}`;
+  }
+
+  if(rmbText){
+    rmbText.innerText = `¥${getRMB(finalJPY).toLocaleString()}`;
+  }
+}
 
 function closeCheckout(){
   document.getElementById("checkoutModalBg").style.display = "none";
@@ -1663,3 +1685,4 @@ window.roundBatchAmount = roundBatchAmount;
 window.render = render;
 window.setPayTiming = setPayTiming;
 window.moveRunningTable = moveRunningTable;
+window.refreshCheckoutDiff = refreshCheckoutDiff;
