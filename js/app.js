@@ -981,13 +981,20 @@ function updateCheckout(){
     类型：${t.type === "booking" ? "预约" : "Walk-in"}<br><br>
 
     <select id="checkoutPay">
-      <option value="">请选择付款方式</option>
+      <label style="font-weight:900;display:block;margin:10px 0 6px;">
+  本次结账补收付款方式
+</label>
+
+<select id="checkoutPay">
+  <option value="">请选择【本次补收】付款方式</option>      
       <option value="现金" ${t.pay==="现金"?"selected":""}>现金</option>
       <option value="PayPay" ${t.pay==="PayPay"?"selected":""}>PayPay</option>
       <option value="微信" ${t.pay==="微信"?"selected":""}>微信</option>
       <option value="支付宝" ${t.pay==="支付宝"?"selected":""}>支付宝</option>
     </select>
-
+<div class="pay-tip">
+  仅记录本次新增收款，不会修改之前已收款项。
+</div>
     <select id="checkoutCurrency" style="margin-top:8px;">
       <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
       <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
