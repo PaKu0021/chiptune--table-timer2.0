@@ -2211,6 +2211,61 @@ async function assignBookingTable(index){
 
 }
 
+function findAvailableTablesForBooking(b){
+  return state.tables
+    .map((t,i)=>({t,i}))
+    .filter(({t,i})=>{
+      if(t.start) return false;
+      if(hasBookingConflict(i,b,b.id)) return false;
+      return true;
+    })
+    .map(({i})=>i);
+}
+
+async function autoAssignBookingTable(){
+  const b = getBookingById(assignBookingId);
+  if(!b) return;
+
+  const available = findAvailableTablesForBooking(b);
+
+  if(!available.length){
+    alert("没有可分配的空桌");
+    return;
+  }
+
+  const people = Number(b.people || 1);
+  const needTables = Math.max(1, Math.ceil(people / 2));
+
+  let selected = available.slice(0, needTables);
+
+  for(let i=0; i<available.length; i++){
+    const group = available.slice(i, i + needTables);
+
+    if(group.length === needTables){
+      const continuous = group.every((v,idx)=>{
+        return idx === 0 || v === group[idx - 1] + 1;
+      });
+
+      if(continuous){
+        selected = group;
+        break;
+      }
+    }
+  }
+
+  b.tableIndexes = selected;
+  b.tableIndex = selected[0];
+
+  await save();
+
+  closeAssignTableModal();
+  renderList();
+  renderBookingGrid();
+
+  alert("已自动分配：" + selected.map(i=>state.tables[i]?.name).join("、"));
+}
+
+
 function closeAssignTableModal(){
 
   assignBookingId=null;
@@ -2257,3 +2312,4 @@ window.openMoveRunningTableModal = openMoveRunningTableModal;
 window.openAssignTableModal=openAssignTableModal;
 window.assignBookingTable=assignBookingTable;
 window.closeAssignTableModal=closeAssignTableModal;
+window.autoAssignBookingTable = autoAssignBookingTable;
