@@ -222,11 +222,17 @@
 
   window.addEventListener("DOMContentLoaded", async ()=>{
     renderNav("owner");
-
     import("./js/owner.js").catch(e=>{
-      alert("owner.js 加载失败：\n" + e.message);
-      console.error(e);
-    });
+  console.error(e);
+  alert(
+    e.message +
+    "\n\nURL:\n" +
+    e.url +
+    "\n\nLine: " +
+    e.lineNumber
+  );
+});
+    
   });
 </script>
 
