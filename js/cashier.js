@@ -1,4 +1,5 @@
-import { db, storage } from "./firebase.js";
+import { db } from "./firebase.js";
+
 
 import {
   doc,
@@ -9,48 +10,25 @@ import {
   where
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
-import {
-  ref as storageRef,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject
-} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
 async function uploadReceipt(recordId,file){
-
   if(!file) return;
 
-const record = records.find(r=>r.id === recordId);
-
+  const record = records.find(r=>r.id === recordId);
 
   if(!record){
     alert("找不到这条收银记录");
     return;
   }
 
-// 删除旧截图
-if(record.receiptPath){
-  try{
-    await deleteObject(storageRef(storage, record.receiptPath));
-  }catch(e){
-    console.warn("旧截图不存在，可忽略");
-  }
-}
+  const compressedBlob = await compressImage(file);
+  const base64 = await fileToBase64(compressedBlob);
 
-const path =
-  `receipts/${record.id}/${Date.now()}_${file.name}`;
-
-const imgRef = storageRef(storage,path);
-
-await uploadBytes(imgRef,file);
-
-
-  const url = await getDownloadURL(imgRef);
-
-  record.receiptImage = url;
-  record.receiptPath = path;
+  record.receiptImage = base64;
+  delete record.receiptPath;
   record.receiptFileName = file.name || "";
   record.receiptUploadedAt = Date.now();
+  record.receiptUploadedTime = new Date().toLocaleString();
 
   await setDoc(
     doc(db,"records",record.id),
@@ -60,6 +38,14 @@ await uploadBytes(imgRef,file);
   alert("截图已保存");
 }
 
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 function viewReceipt(timestamp){
   const record = records.find(r=>Number(r.timestamp) === Number(timestamp));
@@ -552,7 +538,6 @@ async function cleanupOldReceipts(){
 
   const limit = Date.now() - 90 * 24 * 60 * 60 * 1000;
   let count = 0;
-  let storageDeleted = 0;
 
   const targets = records.filter(r=>{
     return r.receiptUploadedAt &&
@@ -561,14 +546,6 @@ async function cleanupOldReceipts(){
   });
 
   for(const r of targets){
-    if(r.receiptPath){
-      try{
-        await deleteObject(storageRef(storage, r.receiptPath));
-        storageDeleted++;
-      }catch(e){
-        console.warn("Storage截图删除失败或文件不存在，可忽略：", e);
-      }
-    }
 
     delete r.receiptImage;
     delete r.receiptPath;
@@ -580,7 +557,7 @@ async function cleanupOldReceipts(){
     count++;
   }
 
-  alert(`已清理 ${count} 条90天前截图记录\nStorage删除 ${storageDeleted} 张图片`);
+alert(`已清理 ${count} 条90天前截图`);  
 }
 
 

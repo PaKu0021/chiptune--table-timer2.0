@@ -1,8 +1,6 @@
-import { db, storage } from "./firebase.js";
+import { db } from "./firebase.js";
 
 import { doc, setDoc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-
-import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -661,27 +659,11 @@ async function handleOwnerReceiptFileChange(e){
   }
 
   try{
-const compressedBlob = await compressImage(file);
+    const compressedBlob = await compressImage(file);
+    const base64 = await fileToBase64(compressedBlob);
 
-// 先删除旧截图
-if(r.receiptPath){
-  try{
-    await deleteObject(storageRef(storage, r.receiptPath));
-  }catch(e){
-    console.warn("旧截图不存在，可忽略");
-  }
-}
-
-const path = `receipts/${uploadingRecordId}_${Date.now()}.jpg`;
-const fileRef = storageRef(storage, path);
-
-await uploadBytes(fileRef, compressedBlob);
-
-
-    const url = await getDownloadURL(fileRef);
-
-    r.receiptImage = url;
-    r.receiptPath = path;
+    r.receiptImage = base64;
+    delete r.receiptPath;
     r.receiptFileName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
@@ -689,11 +671,20 @@ await uploadBytes(fileRef, compressedBlob);
     await setDoc(doc(db, "records", r.id), r);
 
     uploadingRecordId = null;
-    alert("收款截图已上传");
+    alert("收款截图已保存");
   }catch(err){
     console.error(err);
-    alert("上传失败：" + err.message);
+    alert("保存失败：" + err.message);
   }
+}
+
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 function confirmExtension(recordId){
@@ -724,19 +715,12 @@ async function deleteOwnerRecord(recordId){
   const ok = confirm(
     "确定删除这条收银记录吗？\n\n" +
     "此操作不可恢复。\n" +
-    "如果这条记录有收款截图，也会一起从 Storage 删除。"
+    "如果这条记录有收款截图，也会一起删除。"
   );
 
   if(!ok) return;
 
   try{
-    if(r.receiptPath){
-      try{
-        await deleteObject(storageRef(storage, r.receiptPath));
-      }catch(e){
-        console.warn("Storage截图删除失败或文件不存在，可忽略：", e);
-      }
-    }
 
     await deleteDoc(doc(db, "records", recordId));
 
