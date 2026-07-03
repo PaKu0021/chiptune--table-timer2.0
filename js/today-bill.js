@@ -1,8 +1,7 @@
 import { doc, onSnapshot, setDoc, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
-import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
 
-import { db, storage } from "./firebase.js";
+import { db } from "./firebase.js";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -258,42 +257,61 @@ function uploadReceipt(recordId){
 }
 
 async function handleReceiptFileChange(e){
+
   const file = e.target.files?.[0];
   const recordId = e.target.dataset.recordId;
 
   if(!file || !recordId) return;
 
-  const r = records.find(x => x.id === recordId);
+  const r = records.find(x=>x.id===recordId);
+
   if(!r){
     alert("找不到这条账单");
     return;
   }
 
   try{
-    const compressedFile = await compressImage(file, 800, 0.6);
 
-    const path = `receipts/${recordId}_${Date.now()}.jpg`;
-    const fileRef = storageRef(storage, path);
+    const compressed = await compressImage(file,800,0.6);
 
-    await uploadBytes(fileRef, compressedFile);
+    const base64 = await fileToBase64(compressed);
 
-    const url = await getDownloadURL(fileRef);
-
-    r.receiptImage = url;
-    r.receiptPath = path;
-    r.receiptFileName = compressedFile.name;
+    r.receiptImage = base64;
+    r.receiptFileName = file.name;
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
 
-    await setDoc(doc(db, "records", r.id), r);
+    await setDoc(
+      doc(db,"records",r.id),
+      r
+    );
 
-    alert("收款截图已上传");
+    alert("收款截图已保存");
+
   }catch(err){
+
     console.error(err);
-    alert("上传失败：" + err.message);
+    alert(err.message);
+
   }
+
 }
 
+function fileToBase64(file){
+
+  return new Promise((resolve,reject)=>{
+
+    const reader = new FileReader();
+
+    reader.onload = ()=>resolve(reader.result);
+
+    reader.onerror = reject;
+
+    reader.readAsDataURL(file);
+
+  });
+
+}
 
 function confirmExtension(recordId){
 const r = records.find(x => x.id === recordId);
