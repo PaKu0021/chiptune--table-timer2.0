@@ -470,7 +470,11 @@ function renderRecords(){
 
         <td>
           ${r.receiptImage
-            ? `<img src="${r.receiptImage}" style="width:60px;border-radius:8px;">`
+            ? `<img
+    src="${r.receiptImage}"
+    onclick="viewReceipt('${r.id}')"
+    style="width:60px;height:60px;object-fit:cover;border-radius:8px;cursor:pointer;"
+  >`
             : `<button class="btn-ghost" onclick="uploadReceipt('${r.id}')">上传</button>`
           }
         </td>
@@ -685,6 +689,42 @@ function fileToBase64(file){
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function viewReceipt(recordId){
+  const r = records.find(x => x.id === recordId);
+
+  if(!r || !r.receiptImage){
+    alert("没有截图");
+    return;
+  }
+
+  let bg = document.getElementById("receiptPreviewBg");
+
+  if(!bg){
+    bg = document.createElement("div");
+    bg.id = "receiptPreviewBg";
+    bg.className = "modal-bg";
+    bg.innerHTML = `
+      <div class="modal" style="max-height:90vh;overflow:auto;">
+        <h2>收款截图</h2>
+        <img
+          id="receiptPreviewImg"
+          style="width:100%;height:auto;border-radius:16px;margin:12px 0;display:block;"
+        >
+        <button class="btn-ghost full" onclick="closeReceiptPreview()">关闭</button>
+      </div>
+    `;
+    document.body.appendChild(bg);
+  }
+
+  document.getElementById("receiptPreviewImg").src = r.receiptImage;
+  bg.style.display = "block";
+}
+
+function closeReceiptPreview(){
+  const bg = document.getElementById("receiptPreviewBg");
+  if(bg) bg.style.display = "none";
 }
 
 function confirmExtension(recordId){
@@ -970,3 +1010,5 @@ window.confirmExtension = confirmExtension;
 window.toggleCustomerPanel = toggleCustomerPanel;
 window.setCustomerSearch = setCustomerSearch;
 window.deleteOwnerRecord = deleteOwnerRecord;
+window.viewReceipt = viewReceipt;
+window.closeReceiptPreview = closeReceiptPreview;
