@@ -47,8 +47,8 @@ function fileToBase64(file){
   });
 }
 
-function viewReceipt(timestamp){
-  const record = records.find(r=>Number(r.timestamp) === Number(timestamp));
+function viewReceipt(recordId){
+  const record = records.find(r=>r.id === recordId);
 
   if(!record || !record.receiptImage){
     alert("没有截图");
@@ -62,9 +62,18 @@ function viewReceipt(timestamp){
     bg.id = "receiptPreviewBg";
     bg.className = "modal-bg";
     bg.innerHTML = `
-      <div class="modal">
+      <div class="modal" style="max-height:90vh;overflow:auto;">
         <h2>收款截图</h2>
-        <img id="receiptPreviewImg" style="width:100%;border-radius:16px;margin:12px 0;">
+        <img
+          id="receiptPreviewImg"
+          style="
+            width:100%;
+            height:auto;
+            border-radius:16px;
+            margin:12px 0;
+            display:block;
+          "
+        >
         <button class="btn-ghost full" onclick="closeReceiptPreview()">关闭</button>
       </div>
     `;
@@ -306,7 +315,7 @@ function renderCashier(){
         ${r.receiptImage ? `
   <img
     src="${r.receiptImage}"
-    onclick="viewReceipt(${r.timestamp})"
+    onclick="viewReceipt('${r.id}')"
     style="width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid #e6dccb;"
   >
 ` : ""}
