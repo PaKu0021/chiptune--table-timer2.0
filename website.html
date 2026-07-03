@@ -12,11 +12,17 @@
 <header class="site-header">
   <div class="site-logo">Chiptune</div>
   <nav>
-    <a href="#price">价格</a>
-    <a href="#accessory">配饰</a>
-    <a href="#booking">预约</a>
-    <a href="#access">交通</a>
-  </nav>
+  <a href="#price" data-i18n="navPrice">价格</a>
+  <a href="#accessory" data-i18n="navAccessory">配饰</a>
+  <a href="#booking" data-i18n="navBooking">预约</a>
+  <a href="#access" data-i18n="navAccess">交通</a>
+</nav>
+
+<div class="lang-switch">
+  <button onclick="setLang('zh')">中文</button>
+  <button onclick="setLang('ja')">日本語</button>
+  <button onclick="setLang('en')">English</button>
+</div>
 </header>
 
 <section class="hero">
@@ -94,30 +100,35 @@
     提交后我们会确认座位和时间。请等待店铺回复。
   </p>
 
-  <div class="booking-card">
-    <label>姓名</label>
-    <input id="bookingName" placeholder="请输入姓名">
+<label data-i18n="nameLabel">姓名</label>
+<input id="bookingName">
 
-    <label>联系方式</label>
-    <input id="bookingContact" placeholder="电话 / 微信 / Instagram 等">
+<label data-i18n="contactLabel">联系方式</label>
+<input id="bookingContact">
 
-    <label>人数</label>
-    <input id="bookingPeople" type="number" min="1" value="1">
+<label data-i18n="peopleLabel">人数</label>
+<input id="bookingPeople" type="number" min="1" value="1">
 
-    <label>预约日期</label>
-    <input id="bookingDate" type="date">
+<label data-i18n="dateLabel">预约日期</label>
+<input id="bookingDate" type="date">
 
-    <label>开始时间</label>
-    <input id="bookingStart" type="time">
+<label data-i18n="startLabel">开始时间</label>
+<input id="bookingStart" type="time">
 
-    <label>结束时间</label>
-    <input id="bookingEnd" type="time">
+<label data-i18n="endLabel">结束时间</label>
+<input id="bookingEnd" type="time">
 
-    <label>备注</label>
-    <textarea id="bookingNote" placeholder="例：第一次来 / 想做大图 / 需要中文说明"></textarea>
+<label data-i18n="noteLabel">备注</label>
+<textarea id="bookingNote"></textarea>
 
-    <button onclick="submitWebsiteBooking()">提交预约</button>
+<button onclick="submitWebsiteBooking()" data-i18n="submitBooking">
+  提交预约
+</button>
+
+
   </div>
+
+  
 </section>
 
 <section class="section" id="access">
