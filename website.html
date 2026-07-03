@@ -102,10 +102,10 @@
 
   <div class="booking-card">
     <label data-i18n="nameLabel">姓名</label>
-    <input id="bookingName">
+    <input id="bookingName" data-i18n-placeholder="namePlaceholder">
 
     <label data-i18n="contactLabel">联系方式</label>
-    <input id="bookingContact">
+    <input id="bookingContact" data-i18n-placeholder="contactPlaceholder">
 
     <label data-i18n="peopleLabel">人数</label>
     <input id="bookingPeople" type="number" min="1" value="1">
@@ -120,7 +120,7 @@
     <input id="bookingEnd" type="time">
 
     <label data-i18n="noteLabel">备注</label>
-    <textarea id="bookingNote"></textarea>
+    <textarea id="bookingNote" data-i18n-placeholder="notePlaceholder"></textarea>
 
     <button onclick="submitWebsiteBooking()" data-i18n="submitBooking">
       提交预约
