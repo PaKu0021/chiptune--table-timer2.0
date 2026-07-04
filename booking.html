@@ -139,6 +139,11 @@
       onclick="cancelBooking()">
       取消预约
     </button>
+    
+    <button class="btn-success full"
+    onclick="openGroupPayment()">
+    💴 整组收款
+    </button>
 
     <button class="btn-ghost full"
       onclick="closeBookingAction()">
@@ -263,6 +268,61 @@
   </div>
 
 </div>
+
+<div class="modal-bg" id="groupPaymentModalBg">
+
+  <div class="modal">
+
+    <h2>整组收款</h2>
+
+    <div id="groupPaymentInfo"></div>
+
+    <label>付款方式</label>
+
+    <select id="groupPayMethod">
+      <option value="现金">现金</option>
+      <option value="PayPay">PayPay</option>
+      <option value="微信">微信</option>
+      <option value="支付宝">支付宝</option>
+    </select>
+
+    <label>付款人</label>
+
+    <input id="groupPayName">
+
+    <label>实收金额</label>
+
+    <input
+      id="groupPayAmount"
+      type="number"
+    >
+
+    <label>备注</label>
+
+    <input id="groupPayNote">
+
+    <div class="action-row">
+
+      <button
+        class="btn-main"
+        onclick="confirmGroupPayment()"
+      >
+        确认收款
+      </button>
+
+      <button
+        class="btn-ghost"
+        onclick="closeGroupPayment()"
+      >
+        取消
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
 
 </body>
 </html>

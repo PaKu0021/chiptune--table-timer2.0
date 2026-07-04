@@ -2274,6 +2274,79 @@ function closeAssignTableModal(){
 
 }
 
+function openGroupPayment(){
+
+    const b=getBookingById(activeBookingId);
+
+    if(!b) return;
+
+    document.getElementById("groupPaymentInfo").innerHTML=
+`
+${b.name}
+
+${b.startTime} - ${b.endTime}
+`;
+
+    document.getElementById("groupPayName").value=b.name;
+
+    document.getElementById("groupPayAmount").value="";
+
+    document.getElementById("groupPayMethod").value="现金";
+
+    document.getElementById("groupPayNote").value="";
+
+    document.getElementById("groupPaymentModalBg").style.display="block";
+
+}
+
+function closeGroupPayment(){
+
+document.getElementById(
+"groupPaymentModalBg"
+).style.display="none";
+
+}
+
+async function confirmGroupPayment(){
+
+    const b=getBookingById(activeBookingId);
+
+    if(!b) return;
+
+    const pay=document.getElementById("groupPayMethod").value;
+
+    const payer=document.getElementById("groupPayName").value;
+
+    const amount=Number(
+        document.getElementById("groupPayAmount").value
+    );
+
+    const note=document.getElementById("groupPayNote").value;
+
+    b.groupPayment={
+
+        paid:true,
+
+        amount,
+
+        pay,
+
+        payer,
+
+        note,
+
+        time:Date.now()
+
+    };
+
+    await save();
+
+    closeGroupPayment();
+
+    alert("已记录整组收款");
+
+}
+
 window.printBookingGrid = printBookingGrid;
 window.openDatePicker = openDatePicker;
 window.closeDatePicker = closeDatePicker;
