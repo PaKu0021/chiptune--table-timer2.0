@@ -9,7 +9,7 @@ const RATE = 0.044;
 
 let state = null;
 let records = [];
-
+let editingRecordId = null;
 
 onSnapshot(ref, snap => {
   if(!snap.exists()) return;
@@ -242,8 +242,15 @@ function renderTodayBill(){
       )
     : "-"
   }
-</td>        
-      </tr>
+</td>
+
+<td>
+  <button class="btn-ghost" onclick="openEditRecord('${r.id}')">
+    修改
+  </button>
+</td>
+      </tr>  
+      
     `;
   }).join("");
 }
@@ -371,9 +378,102 @@ const r = records.find(x => x.id === recordId);
   alert("续费已确认");
 }
 
+function openEditRecord(recordId){
+  const r = records.find(x=>x.id === recordId);
+
+  if(!r){
+    alert("找不到这条账单");
+    return;
+  }
+
+  editingRecordId = recordId;
+
+  document.getElementById("editRecordInfo").innerHTML = `
+    ${r.closedTime || r.time || ""}<br>
+    ${r.tableName || ""}｜${r.customerName || "-"} ${r.phoneLast4 || ""}
+  `;
+
+  document.getElementById("editPay").value = r.pay || "现金";
+  document.getElementById("editTotalJPY").value = toJPY(r);
+
+  document.getElementById("editGroupPaid").value =
+    r.groupPaymentId ? "yes" : "";
+
+  document.getElementById("editGroupPayerName").value =
+    r.groupPayerName || "";
+
+  document.getElementById("editGroupPaymentId").value =
+    r.groupPaymentId || "";
+
+  document.getElementById("editPaymentNote").value =
+    r.paymentNote || r.groupPaymentNote || "";
+
+  document.getElementById("editRecordModalBg").style.display = "block";
+}
+
+function closeEditRecord(){
+  editingRecordId = null;
+  document.getElementById("editRecordModalBg").style.display = "none";
+}
+
+async function saveEditedRecord(){
+  const r = records.find(x=>x.id === editingRecordId);
+
+  if(!r){
+    alert("找不到这条账单");
+    return;
+  }
+
+  const pay = document.getElementById("editPay").value;
+  const totalJPY = Number(document.getElementById("editTotalJPY").value || 0);
+  const groupPaid = document.getElementById("editGroupPaid").value === "yes";
+  const groupPayerName = document.getElementById("editGroupPayerName").value.trim();
+  const groupPaymentId = document.getElementById("editGroupPaymentId").value.trim();
+  const note = document.getElementById("editPaymentNote").value.trim();
+
+  r.pay = pay;
+  r.totalJPY = totalJPY;
+  r.totalRMB = Math.floor(totalJPY * RATE);
+  r.paidJPY = totalJPY;
+  r.dueJPY = 0;
+  r.currency = "日元";
+
+  r.payments = [{
+    type:"收入",
+    reason: groupPaid ? "一人代付/手动修正" : "手动修正",
+    pay,
+    amountJPY: totalJPY,
+    amountRMB: Math.floor(totalJPY * RATE),
+    note,
+    time:new Date().toLocaleString(),
+    timestamp:Date.now()
+  }];
+
+  r.paymentNote = note;
+  r.editedAt = Date.now();
+  r.editedTime = new Date().toLocaleString();
+
+  if(groupPaid){
+    r.groupPaymentId = groupPaymentId || ("manual_group_" + dateKey(Date.now()));
+    r.groupPayerName = groupPayerName;
+    r.groupPaymentNote = note;
+  }else{
+    delete r.groupPaymentId;
+    delete r.groupPayerName;
+    delete r.groupPaymentNote;
+  }
+
+  await setDoc(doc(db,"records",r.id),r);
+
+  closeEditRecord();
+  alert("账单已修改");
+}
 
 window.confirmExtension = confirmExtension;
 window.uploadReceipt = uploadReceipt;
 window.handleReceiptFileChange = handleReceiptFileChange;
 window.viewReceipt = viewReceipt;
 window.closeReceiptPreview = closeReceiptPreview;
+window.openEditRecord = openEditRecord;
+window.closeEditRecord = closeEditRecord;
+window.saveEditedRecord = saveEditedRecord;

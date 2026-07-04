@@ -50,6 +50,7 @@
             <th>抹零</th>
             <th>收款截图</th>
             <th>续费确认</th>
+            <th>修改</th>
           </tr>
         </thead>
         <tbody id="todayRecords"></tbody>
@@ -58,6 +59,47 @@
   </div>
 
 </div>
+
+<div class="modal-bg" id="editRecordModalBg">
+  <div class="modal">
+    <h2>修改账单</h2>
+
+    <div id="editRecordInfo" style="font-weight:900;line-height:1.8;margin-bottom:10px;"></div>
+
+    <label>付款方式</label>
+    <select id="editPay">
+      <option value="现金">现金</option>
+      <option value="PayPay">PayPay</option>
+      <option value="微信">微信</option>
+      <option value="支付宝">支付宝</option>
+      <option value="混合">混合</option>
+    </select>
+
+    <label>实收日元</label>
+    <input id="editTotalJPY" type="number">
+
+    <label>是否一人代付</label>
+    <select id="editGroupPaid">
+      <option value="">否</option>
+      <option value="yes">是</option>
+    </select>
+
+    <label>付款人</label>
+    <input id="editGroupPayerName" placeholder="例：1号桌客人 / 王小姐">
+
+    <label>代付组ID</label>
+    <input id="editGroupPaymentId" placeholder="同一组代付填一样，例如 group_20260704_1">
+
+    <label>备注</label>
+    <input id="editPaymentNote" placeholder="例：A客人代付两人费用，后续加时也由A支付">
+
+    <div class="action-row">
+      <button class="btn-main" onclick="saveEditedRecord()">保存修改</button>
+      <button class="btn-ghost" onclick="closeEditRecord()">取消</button>
+    </div>
+  </div>
+</div>
+
 <input
   id="receiptInput"
   type="file"
