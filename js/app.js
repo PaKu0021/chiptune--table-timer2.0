@@ -1535,6 +1535,16 @@ function roundBatchAmount(i){
   btn.classList.add("disabled-round");
 }
 
+function toggleGroupPayMode(){
+  const checked = document.getElementById("groupPayMode")?.checked;
+  const box = document.getElementById("groupPayBox");
+
+  if(box){
+    box.style.display = checked ? "block" : "none";
+  }
+}
+
+
 function closeBatchCheckout(){
   document.getElementById("batchCheckoutModalBg").style.display = "none";
 }
@@ -1686,3 +1696,4 @@ window.render = render;
 window.setPayTiming = setPayTiming;
 window.moveRunningTable = moveRunningTable;
 window.refreshCheckoutDiff = refreshCheckoutDiff;
+window.toggleGroupPayMode = toggleGroupPayMode;

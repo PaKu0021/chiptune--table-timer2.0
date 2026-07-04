@@ -122,12 +122,40 @@
   <div class="modal">
     <h2>批量结账</h2>
 
+    <div class="panel" style="margin:12px 0;">
+      <label style="font-weight:900;">
+        <input type="checkbox" id="groupPayMode" onchange="toggleGroupPayMode()">
+        整组代付
+      </label>
+
+      <div id="groupPayBox" style="display:none;margin-top:12px;">
+        <label>付款人</label>
+        <input id="groupPayerName" placeholder="例：2号桌客人 / 王小姐">
+
+        <label>整组付款方式</label>
+        <select id="groupPayMethod">
+          <option value="">请选择付款方式</option>
+          <option value="现金">现金</option>
+          <option value="PayPay">PayPay</option>
+          <option value="微信">微信</option>
+          <option value="支付宝">支付宝</option>
+        </select>
+
+        <label>整组实收总金额</label>
+        <input id="groupPayTotal" type="number" placeholder="例：9900">
+
+        <label>备注</label>
+        <input id="groupPayNote" placeholder="例：2号桌代付全组费用">
+      </div>
+    </div>
+
     <div id="batchCheckoutTableChecks" class="table-grid"></div>
 
     <button class="btn-success full" onclick="confirmBatchCheckout()">确认批量结账</button>
     <button class="btn-ghost full" onclick="closeBatchCheckout()">取消</button>
   </div>
 </div>
+
 
 <div id="checkoutModalBg" class="modal-bg">
   <div class="modal">
