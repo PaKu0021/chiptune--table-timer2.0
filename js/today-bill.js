@@ -167,16 +167,18 @@ function renderTodayBill(){
   let typeStats = {walkin:0, booking:0};
 
   list.forEach(r=>{
-    if(r.currency === "人民币"){
-      const rmb = Number(r.totalRMB || r.rmb || 0);
-      rmbIncome += rmb;
-      convertedJPY += Math.floor(rmb / RATE);
-    }else{
-      const jpy = Number(r.totalJPY || r.jpy || 0);
-      jpyIncome += jpy;
-      convertedJPY += jpy;
-    }
 
+
+const jpy = toJPY(r);
+const rmb = toRMB(r);
+
+if(r.currency === "人民币"){
+  rmbIncome += rmb;
+}else{
+  jpyIncome += jpy;
+}
+
+convertedJPY += jpy;
     normalizePayments(r).forEach(p=>{
   const pay = p.pay || "未记录";
   payStats[pay] = (payStats[pay] || 0) + Number(p.amountJPY || 0);
