@@ -10,6 +10,9 @@ const RATE = 0.044;
 let state = null;
 let records = [];
 let editingRecordId = null;
+let uploadingPaymentRecordId = null;
+let uploadingPaymentIndex = null;
+
 
 onSnapshot(ref, snap => {
   if(!snap.exists()) return;
@@ -70,23 +73,50 @@ function paymentDetailHTML(r){
 
   if(!list.length) return r.pay || "未记录";
 
-  return list.map(p=>{
+  return list.map((p,i)=>{
     const amount = Number(p.amountJPY || 0);
     const sign = amount < 0 ? "-" : "+";
     const style = amount < 0
       ? "color:#e85d5d;font-weight:900;"
       : "font-weight:800;";
 
+    const pay = p.pay || "未记录";
+    const needReceipt = pay !== "现金" && amount !== 0;
+
+    let receiptHTML = "";
+
+    if(needReceipt){
+      if(p.receiptImage){
+        receiptHTML = `
+          <br>
+          <button class="btn-ghost" onclick="viewPaymentReceipt('${r.id}',${i})">
+            查看截图
+          </button>
+        `;
+      }else{
+        receiptHTML = `
+          <br>
+          <button class="btn-main" onclick="uploadPaymentReceipt('${r.id}',${i})">
+            上传截图
+          </button>
+        `;
+      }
+    }else{
+      receiptHTML = `<br><small style="color:#8a8174;">现金无需截图</small>`;
+    }
+
     return `
       <div style="${style}">
         ${p.reason || p.type || ""}｜
-        ${p.pay || "未记录"}｜
+        ${pay}｜
         ${sign}¥${Math.abs(amount).toLocaleString()}
         ${p.note ? `<br><small style="color:#8a8174;">${p.note}</small>` : ""}
+        ${receiptHTML}
       </div>
     `;
   }).join("");
 }
+
 
 function getTodayRecords(){
   return records.filter(r=>{
@@ -269,12 +299,33 @@ function uploadReceipt(recordId){
   input.click();
 }
 
+function uploadPaymentReceipt(recordId, paymentIndex){
+  const input = document.getElementById("receiptInput");
+
+  if(!input){
+    alert("找不到 receiptInput");
+    return;
+  }
+
+  uploadingPaymentRecordId = recordId;
+  uploadingPaymentIndex = Number(paymentIndex);
+
+  input.value = "";
+  input.dataset.recordId = "";
+  input.click();
+}
+
 async function handleReceiptFileChange(e){
 
   const file = e.target.files?.[0];
   const recordId = e.target.dataset.recordId;
 
   if(!file || !recordId) return;
+
+  if(uploadingPaymentRecordId !== null && uploadingPaymentIndex !== null){
+  await handlePaymentReceiptFile(file);
+  return;
+}
 
   const r = records.find(x=>x.id===recordId);
 
@@ -326,6 +377,57 @@ function fileToBase64(file){
 
 }
 
+async function handlePaymentReceiptFile(file){
+
+  const record = records.find(r=>r.id===uploadingPaymentRecordId);
+
+  if(!record){
+    alert("找不到账单");
+    return;
+  }
+
+  if(!Array.isArray(record.payments)){
+    alert("这条账单没有 payments");
+    return;
+  }
+
+  const payment = record.payments[uploadingPaymentIndex];
+
+  if(!payment){
+    alert("找不到付款记录");
+    return;
+  }
+
+  try{
+
+    const compressed = await compressImage(file,800,0.6);
+
+    const base64 = await fileToBase64(compressed);
+
+    payment.receiptImage = base64;
+    payment.receiptFileName = file.name;
+    payment.receiptUploadedAt = Date.now();
+    payment.receiptUploadedTime = new Date().toLocaleString();
+
+    await setDoc(
+      doc(db,"records",record.id),
+      record
+    );
+
+    uploadingPaymentRecordId = null;
+    uploadingPaymentIndex = null;
+
+    alert("付款截图已保存");
+
+  }catch(err){
+
+    console.error(err);
+    alert(err.message);
+
+  }
+
+}
+
 function viewReceipt(recordId){
   const r = records.find(x => x.id === recordId);
 
@@ -356,6 +458,37 @@ function viewReceipt(recordId){
   document.getElementById("receiptPreviewImg").src = r.receiptImage;
   bg.style.display = "block";
 }
+
+
+function viewPaymentReceipt(recordId, paymentIndex){
+  const r = records.find(x=>x.id === recordId);
+  const p = r?.payments?.[paymentIndex];
+
+  if(!p || !p.receiptImage){
+    alert("没有截图");
+    return;
+  }
+
+  let bg = document.getElementById("receiptPreviewBg");
+
+  if(!bg){
+    bg = document.createElement("div");
+    bg.id = "receiptPreviewBg";
+    bg.className = "modal-bg";
+    bg.innerHTML = `
+      <div class="modal" style="max-height:90vh;overflow:auto;">
+        <h2>付款截图</h2>
+        <img id="receiptPreviewImg" style="width:100%;height:auto;border-radius:16px;margin:12px 0;display:block;">
+        <button class="btn-ghost full" onclick="closeReceiptPreview()">关闭</button>
+      </div>
+    `;
+    document.body.appendChild(bg);
+  }
+
+  document.getElementById("receiptPreviewImg").src = p.receiptImage;
+  bg.style.display = "block";
+}
+
 
 function closeReceiptPreview(){
   const bg = document.getElementById("receiptPreviewBg");
@@ -479,3 +612,5 @@ window.closeReceiptPreview = closeReceiptPreview;
 window.openEditRecord = openEditRecord;
 window.closeEditRecord = closeEditRecord;
 window.saveEditedRecord = saveEditedRecord;
+window.uploadPaymentReceipt = uploadPaymentReceipt;
+window.viewPaymentReceipt = viewPaymentReceipt;
