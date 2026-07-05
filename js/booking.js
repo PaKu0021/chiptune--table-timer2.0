@@ -57,6 +57,61 @@ function getNextBookingColor(){
   return BOOKING_COLORS[count % BOOKING_COLORS.length];
 }
 
+function makeGroupId(){
+  return "group_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
+}
+
+function getGroupById(groupId){
+  if(!state.groups) state.groups = [];
+  return state.groups.find(g=>String(g.id) === String(groupId));
+}
+
+function createOrUpdateGroup({
+  groupId,
+  groupName,
+  groupColor,
+  tableIndexes = [],
+  bookingId = null
+}){
+  if(!state.groups) state.groups = [];
+
+  let group = getGroupById(groupId);
+
+  if(!group){
+    group = {
+      id: groupId,
+      name: groupName || "未命名组",
+      color: groupColor || getNextBookingColor(),
+      tableIndexes: [],
+      bookingIds: [],
+      payments: [],
+      createdAt: Date.now()
+    };
+
+    state.groups.push(group);
+  }
+
+  group.name = groupName || group.name;
+  group.color = groupColor || group.color;
+
+  group.tableIndexes = Array.from(new Set([
+    ...group.tableIndexes.map(Number),
+    ...tableIndexes.map(Number)
+  ]));
+
+  if(bookingId){
+    group.bookingIds = Array.from(new Set([
+      ...group.bookingIds.map(String),
+      String(bookingId)
+    ]));
+  }
+
+  group.updatedAt = Date.now();
+
+  return group;
+}
+
+
 function darkenColor(hex, amount = 28){
   hex = String(hex || "#B7E4C7").replace("#","");
   const num = parseInt(hex,16);
@@ -85,7 +140,15 @@ onSnapshot(ref, snap=>{
 
   if(!state.bookings) state.bookings = [];
   if(!state.customers) state.customers = [];
-
+  if(!Array.isArray(state.groups)){
+  state.groups = [];
+}
+  state.bookings.forEach(b=>{
+  if(!b.groupId) b.groupId = "group_" + b.id;
+  if(!b.groupColor) b.groupColor = b.color || getNextBookingColor();
+  if(!b.groupName) b.groupName = b.name ? `${b.name}一组` : "未命名组";
+  if(!b.color) b.color = b.groupColor;
+});
   if(!Array.isArray(state.tables) || state.tables.length === 0){
     state.tables = Array.from({length:12},(_,i)=>({
       name:(i+1)+"号桌"
@@ -108,7 +171,6 @@ Promise.all(
     save();
   }
 });
-
 
 try{
   renderList();
@@ -202,6 +264,10 @@ async function createOrUpdateTableRecord(t, {
   record.timestamp = record.timestamp || now;
   record.time = record.time || new Date(now).toLocaleString();
 
+
+  record.groupId = t.groupId || "";
+  record.groupColor = t.groupColor || t.activeColor || "";
+  record.groupName = t.groupName || "";
   record.tableName = t.name;
   record.customerName = t.customer?.name || "";
   record.phoneLast4 = t.customer?.phoneLast4 || "";
@@ -1481,10 +1547,16 @@ renderList();
 
   const packageIndex = findPackageIndexByDuration(startTime,endTime);
 
+  const groupId = makeGroupId();
+  const groupColor = getNextBookingColor();
+
   const booking = {
-    id: Date.now(),
-    date: currentBookingDate,
-    color: getNextBookingColor(),
+  id: Date.now(),
+  groupId,
+  groupColor,
+  groupName: name ? `${name}一组` : "未命名组",
+  date: currentBookingDate,
+  color: groupColor,    
     name,
     phone,
     tableIndexes,
@@ -1496,6 +1568,14 @@ renderList();
     checkInTimeText:"",
     cancelled:false,
   };
+
+  createOrUpdateGroup({
+  groupId,
+  groupName: booking.groupName,
+  groupColor,
+  tableIndexes,
+  bookingId: booking.id
+});
 
   state.bookings.push(booking);
 
@@ -1715,6 +1795,34 @@ function drawExistingBookings(){
   });
 }
 
+
+
+function getRunningGroups(){
+  const map = {};
+
+  state.tables.forEach((t,index)=>{
+    if(!t.start) return;
+
+    const key = t.groupId || ("table_" + index);
+
+    if(!map[key]){
+      map[key] = {
+        id:key,
+        color:t.groupColor || t.activeColor || "#B7E4C7",
+        name:t.groupName || "未命名组",
+        tables:[]
+      };
+    }
+
+    map[key].tables.push({
+      index,
+      table:t
+    });
+  });
+
+  return Object.values(map);
+}
+
 function drawRunningTables(){
   document.querySelectorAll(".running-block").forEach(el=>{
     el.remove();
@@ -1737,7 +1845,7 @@ function drawRunningTables(){
 
     if(startRow === -1) return;
 
-    const bgColor = darkenColor(getRunningColor(t), 35);
+    const bgColor = darkenColor(t.groupColor || getRunningColor(t), 35);
 
     for(let row=startRow; row<=endRow; row++){
       const cell = document.querySelector(
@@ -1774,7 +1882,7 @@ if(!middleCell) return;
 const status = getTableStatusText(t);
 
 middleCell.innerHTML = `
-  <div class="running-block ${status.className}">
+  <div class="running-block ${status.className}" style="border:3px solid ${t.groupColor || t.activeColor || "#B7E4C7"};">
     <div
       class="running-time"
       data-running-table="${tableIndex}"
@@ -2073,6 +2181,15 @@ if(startIndexes.length === 0){
   return;
 }
 
+const group = getGroupById(b.groupId);
+
+if(group){
+  group.tableIndexes = Array.from(new Set([
+    ...group.tableIndexes,
+    ...startIndexes
+  ]));
+}
+
 const now = Date.now();
 
 for(const idx of startIndexes){
@@ -2083,7 +2200,11 @@ for(const idx of startIndexes){
 
     t.type = "booking";
     t.bookingId = b.id;
-    t.activeColor = b.color || getNextBookingColor();
+    t.groupId = b.groupId;
+    t.groupColor = b.groupColor || b.color || getNextBookingColor();
+    t.groupName = b.groupName || (b.name ? `${b.name}一组` : "未命名组");
+    t.activeColor = t.groupColor;
+
     t.customerKey = getCustomerKey(b.name, b.phone);
 
     t.pay = b.pay || "";
@@ -2295,28 +2416,30 @@ function closeAssignTableModal(){
 }
 
 function openGroupPayment(){
+  const b = getBookingById(activeBookingId);
+  if(!b) return;
 
-    const b=getBookingById(activeBookingId);
+  const group = getGroupById(b.groupId);
 
-    if(!b) return;
+  const tables = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(i=>state.tables[Number(i)]?.name)
+    .filter(Boolean)
+    .join("、");
 
-    document.getElementById("groupPaymentInfo").innerHTML=
-`
-${b.name}
+  document.getElementById("groupPaymentInfo").innerHTML = `
+    <b>${b.groupName || b.name || "未命名组"}</b><br>
+    桌位：${tables || "-"}<br>
+    时间：${b.startTime || "-"} - ${b.endTime || "-"}<br>
+    已记录付款：${group?.payments?.length || 0}笔
+  `;
 
-${b.startTime} - ${b.endTime}
-`;
+  document.getElementById("groupPayName").value = b.name || "";
+  document.getElementById("groupPayAmount").value = "";
+  document.getElementById("groupPayMethod").value = "现金";
+  document.getElementById("groupPayNote").value = "";
 
-    document.getElementById("groupPayName").value=b.name;
-
-    document.getElementById("groupPayAmount").value="";
-
-    document.getElementById("groupPayMethod").value="现金";
-
-    document.getElementById("groupPayNote").value="";
-
-    document.getElementById("groupPaymentModalBg").style.display="block";
-
+  document.getElementById("groupPaymentModalBg").style.display = "block";
 }
 
 function closeGroupPayment(){
@@ -2328,43 +2451,67 @@ document.getElementById(
 }
 
 async function confirmGroupPayment(){
+  const b = getBookingById(activeBookingId);
+  if(!b) return;
 
-    const b=getBookingById(activeBookingId);
+  const pay = document.getElementById("groupPayMethod").value;
+  const payer = document.getElementById("groupPayName").value.trim();
+  const amount = Number(document.getElementById("groupPayAmount").value || 0);
+  const note = document.getElementById("groupPayNote").value.trim();
 
-    if(!b) return;
+  if(!pay){
+    alert("请选择付款方式");
+    return;
+  }
 
-    const pay=document.getElementById("groupPayMethod").value;
+  if(amount <= 0){
+    alert("请输入实收金额");
+    return;
+  }
 
-    const payer=document.getElementById("groupPayName").value;
+  const tableIndexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
 
-    const amount=Number(
-        document.getElementById("groupPayAmount").value
-    );
+  const tableNames = tableIndexes
+    .map(i=>state.tables[i]?.name)
+    .filter(Boolean);
 
-    const note=document.getElementById("groupPayNote").value;
+  const group = createOrUpdateGroup({
+    groupId:b.groupId,
+    groupName:b.groupName || (b.name ? `${b.name}一组` : "未命名组"),
+    groupColor:b.groupColor || b.color || getNextBookingColor(),
+    tableIndexes,
+    bookingId:b.id
+  });
 
-    b.groupPayment={
+  const payment = {
+    id:"pay_" + Date.now() + "_" + Math.random().toString(36).slice(2,8),
+    type:"收入",
+    reason:"整组收款",
+    pay,
+    payer:payer || b.name || "",
+    amountJPY:amount,
+    amountRMB:Math.floor(amount * 0.044),
+    tableIndexes,
+    tableNames,
+    note,
+    receiptImage:"",
+    receiptFileName:"",
+    createdAt:Date.now(),
+    createdTime:new Date().toLocaleString()
+  };
 
-        paid:true,
+  group.payments.push(payment);
 
-        amount,
+  b.groupPaymentStatus = "paid";
+  b.groupPaymentUpdatedAt = Date.now();
 
-        pay,
+  await save();
 
-        payer,
+  closeGroupPayment();
 
-        note,
-
-        time:Date.now()
-
-    };
-
-    await save();
-
-    closeGroupPayment();
-
-    alert("已记录整组收款");
-
+  alert("已记录整组收款");
 }
 
 window.printBookingGrid = printBookingGrid;
