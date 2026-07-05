@@ -2051,16 +2051,33 @@ async function confirmCheckInSelected(){
     }
   }
 
-  const busy = indexes.filter(idx=>state.tables[idx]?.start);
+  const busy = indexes.filter(idx=>{
+  const t = state.tables[idx];
+  if(!t?.start) return false;
 
-  if(busy.length){
-    alert("以下桌位正在使用中，不能开始：\n" + busy.map(i=>state.tables[i].name).join("、"));
-    return;
-  }
+  return String(t.bookingId || "") !== String(b.id || "");
+});
 
-  const now = Date.now();
+if(busy.length){
+  alert("以下桌位正在使用中，不能开始：\n" + busy.map(i=>state.tables[i].name).join("、"));
+  return;
+}
 
-    for(const idx of indexes){
+const startIndexes = indexes.filter(idx=>{
+  const t = state.tables[idx];
+  return !t?.start;
+});
+
+if(startIndexes.length === 0){
+  alert("这些桌位已经开始计时了");
+  return;
+}
+
+const now = Date.now();
+
+for(const idx of startIndexes){
+
+
     const t = state.tables[idx];
     if(!t) return;
 
