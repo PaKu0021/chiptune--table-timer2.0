@@ -19,7 +19,12 @@ onSnapshot(ref, snap => {
 
   state = snap.data();
 
-  renderTodayBill();
+if(!Array.isArray(state.groups)){
+  state.groups = [];
+}
+
+renderTodayBill();
+  
 });
 
 onSnapshot(recordsRef, snap => {
@@ -126,6 +131,32 @@ const d = new Date(getRecordTime(r));
   });
 }
 
+function getGroupMap(){
+  const map = {};
+
+  (state?.groups || []).forEach(g=>{
+    map[g.id] = g;
+  });
+
+  return map;
+}
+
+function getRecordsByGroup(list){
+  const map = {};
+  const singles = [];
+
+  list.forEach(r=>{
+    if(r.groupId){
+      if(!map[r.groupId]) map[r.groupId] = [];
+      map[r.groupId].push(r);
+    }else{
+      singles.push(r);
+    }
+  });
+
+  return {map, singles};
+}
+
 function toJPY(r){
   if(Array.isArray(r.payments)){
     return sumPaymentsJPY(r);
@@ -189,6 +220,7 @@ function compressImage(file, maxWidth = 600, quality = 0.45){
 
 function renderTodayBill(){
   const list = getTodayRecords();
+  const groupMap = getGroupMap();
 
   let jpyIncome = 0;
   let rmbIncome = 0;
@@ -232,59 +264,101 @@ convertedJPY += jpy;
     客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔
   `;
 
-  document.getElementById("todayRecords").innerHTML = [...list].reverse().map(r=>{
-    const table = r.tableName || r.table || "";
-    const name = r.customerName || r.name || "";
-    const phone = r.phoneLast4 || "";
-    const type = (r.customerType || r.type) === "booking" ? "预约" : "Walk-in";
-    const packageName = r.packageName || "";
-    const extra = r.extraMinutes || 0;
-    const original = r.originalJPY || r.totalJPY || r.jpy || 0;
+  const { map:groupRecords, singles } = getRecordsByGroup([...list].reverse());
 
-    return `
-      <tr>
-        <td>${r.closedTime || r.time || ""}</td>
-        <td>${table}</td>
-        <td>${name}${phone ? "("+phone+")" : ""}</td>
-        <td>${type}</td>
-        <td>${packageName}</td>
-        <td>${extra}分</td>
-        <td>¥${Number(original).toLocaleString()}</td>
-        <td>¥${Number(toJPY(r)).toLocaleString()}</td>
-        <td>¥${Number(toRMB(r)).toLocaleString()}</td>
-        <td>${paymentDetailHTML(r)}</td>
-        <td>${r.currency || ""}</td>
-        <td>${r.roundRule || ""}</td>
-<td>
-  ${r.receiptImage
-    ? `<img
-    src="${r.receiptImage}"
-    onclick="viewReceipt('${r.id}')"
-    style="width:60px;height:60px;object-fit:cover;border-radius:8px;cursor:pointer;"
-  >`
-    : `<button class="btn-ghost" onclick="uploadReceipt('${r.id}')">上传</button>`
-  }
-</td>
-<td>
-  ${Number(r.extraMinutes || 0) > 0
-    ? (
-        r.extensionConfirmed
-          ? `已确认<br><small>${r.extensionConfirmedTime || ""}</small>`
-          : `<button class="btn-main" onclick="confirmExtension('${r.id}')">续费确认</button>`
-      )
-    : "-"
-  }
-</td>
+  let html = "";
 
-<td>
-  <button class="btn-ghost" onclick="openEditRecord('${r.id}')">
-    修改
-  </button>
-</td>
-      </tr>  
-      
+  Object.keys(groupRecords).forEach(groupId=>{
+    const rows = groupRecords[groupId];
+    const group = groupMap[groupId];
+
+    html += `
+      <tr style="background:${group?.color || "#eef8ff"};font-weight:900;">
+        <td colspan="15">
+          👥 ${group?.name || rows[0]?.groupName || "未命名组"}
+          （${rows.map(r=>r.tableName).join("、")}）
+        </td>
+      </tr>
     `;
-  }).join("");
+
+    if(group?.payments?.length){
+      html += `
+        <tr>
+          <td colspan="15" style="background:#fffaf0;font-weight:800;">
+            整组付款：${group.payments.map(p=>`
+              ${p.reason || "整组收款"}｜
+              ${p.pay || "未记录"}｜
+              ¥${Number(p.amountJPY || 0).toLocaleString()}｜
+              付款人：${p.payer || "-"}
+            `).join("<br>")}
+          </td>
+        </tr>
+      `;
+    }
+
+    rows.forEach(r=>{
+      html += renderRecordRow(r,false);
+    });
+  });
+
+  singles.forEach(r=>{
+    html += renderRecordRow(r,true);
+  });
+
+  document.getElementById("todayRecords").innerHTML = html;
+}
+
+
+function renderRecordRow(r, showReceipt = true){
+  const table = r.tableName || r.table || "";
+  const name = r.customerName || r.name || "";
+  const phone = r.phoneLast4 || "";
+  const type = (r.customerType || r.type) === "booking" ? "预约" : "Walk-in";
+  const packageName = r.packageName || "";
+  const extra = r.extraMinutes || 0;
+  const original = r.originalJPY || r.totalJPY || r.jpy || 0;
+
+  return `
+    <tr>
+      <td>${r.closedTime || r.time || ""}</td>
+      <td>${table}</td>
+      <td>${name}${phone ? "(" + phone + ")" : ""}</td>
+      <td>${type}</td>
+      <td>${packageName}</td>
+      <td>${extra}分</td>
+      <td>¥${Number(original).toLocaleString()}</td>
+      <td>¥${Number(toJPY(r)).toLocaleString()}</td>
+      <td>¥${Number(toRMB(r)).toLocaleString()}</td>
+      <td>${paymentDetailHTML(r)}</td>
+      <td>${r.currency || ""}</td>
+      <td>${r.roundRule || ""}</td>
+      <td>
+        ${showReceipt
+          ? (
+              r.receiptImage
+                ? `<img src="${r.receiptImage}" onclick="viewReceipt('${r.id}')" style="width:60px;height:60px;object-fit:cover;border-radius:8px;cursor:pointer;">`
+                : `<button class="btn-ghost" onclick="uploadReceipt('${r.id}')">上传</button>`
+            )
+          : "-"
+        }
+      </td>
+      <td>
+        ${Number(r.extraMinutes || 0) > 0
+          ? (
+              r.extensionConfirmed
+                ? `已确认<br><small>${r.extensionConfirmedTime || ""}</small>`
+                : `<button class="btn-main" onclick="confirmExtension('${r.id}')">续费确认</button>`
+            )
+          : "-"
+        }
+      </td>
+      <td>
+        <button class="btn-ghost" onclick="openEditRecord('${r.id}')">
+          修改
+        </button>
+      </td>
+    </tr>
+  `;
 }
 
 function uploadReceipt(recordId){
@@ -320,12 +394,14 @@ async function handleReceiptFileChange(e){
   const file = e.target.files?.[0];
   const recordId = e.target.dataset.recordId;
 
-  if(!file || !recordId) return;
+  if(!file) return;
 
-  if(uploadingPaymentRecordId !== null && uploadingPaymentIndex !== null){
+if(uploadingPaymentRecordId !== null && uploadingPaymentIndex !== null){
   await handlePaymentReceiptFile(file);
   return;
 }
+
+if(!recordId) return;
 
   const r = records.find(x=>x.id===recordId);
 
