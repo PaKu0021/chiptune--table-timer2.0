@@ -12,6 +12,8 @@ let records = [];
 let editingRecordId = null;
 let uploadingPaymentRecordId = null;
 let uploadingPaymentIndex = null;
+let uploadingGroupId = null;
+let uploadingGroupPaymentIndex = null;
 
 
 onSnapshot(ref, snap => {
@@ -286,10 +288,20 @@ convertedJPY += jpy;
         <tr>
           <td colspan="15" style="background:#fffaf0;font-weight:800;">
             整组付款：${group.payments.map(p=>`
+
               ${p.reason || "整组收款"}｜
               ${p.pay || "未记录"}｜
               ¥${Number(p.amountJPY || 0).toLocaleString()}｜
               付款人：${p.payer || "-"}
+              ${p.pay && p.pay !== "现金"
+  ? (
+      p.receiptImage
+        ? `<br><button class="btn-ghost" onclick="viewGroupPaymentReceipt('${group.id}',${group.payments.indexOf(p)})">查看整组截图</button>`
+        : `<br><button class="btn-main" onclick="uploadGroupPaymentReceipt('${group.id}',${group.payments.indexOf(p)})">上传整组截图</button>`
+    )
+  : `<br><small style="color:#8a8174;">现金无需截图</small>`
+}
+
             `).join("<br>")}
           </td>
         </tr>
@@ -389,12 +401,36 @@ function uploadPaymentReceipt(recordId, paymentIndex){
   input.click();
 }
 
+function uploadGroupPaymentReceipt(groupId, paymentIndex){
+  const input = document.getElementById("receiptInput");
+
+  if(!input){
+    alert("找不到 receiptInput");
+    return;
+  }
+
+  uploadingGroupId = groupId;
+  uploadingGroupPaymentIndex = Number(paymentIndex);
+
+  uploadingPaymentRecordId = null;
+  uploadingPaymentIndex = null;
+
+  input.value = "";
+  input.dataset.recordId = "";
+  input.click();
+}
+
 async function handleReceiptFileChange(e){
 
   const file = e.target.files?.[0];
   const recordId = e.target.dataset.recordId;
 
-  if(!file) return;
+if(!file) return;
+
+if(uploadingGroupId !== null && uploadingGroupPaymentIndex !== null){
+  await handleGroupPaymentReceiptFile(file);
+  return;
+}
 
 if(uploadingPaymentRecordId !== null && uploadingPaymentIndex !== null){
   await handlePaymentReceiptFile(file);
@@ -504,6 +540,44 @@ async function handlePaymentReceiptFile(file){
 
 }
 
+async function handleGroupPaymentReceiptFile(file){
+  const group = (state.groups || []).find(g=>String(g.id) === String(uploadingGroupId));
+
+  if(!group){
+    alert("找不到整组记录");
+    return;
+  }
+
+  const payment = group.payments?.[uploadingGroupPaymentIndex];
+
+  if(!payment){
+    alert("找不到整组付款记录");
+    return;
+  }
+
+  try{
+    const compressed = await compressImage(file,800,0.6);
+    const base64 = await fileToBase64(compressed);
+
+    payment.receiptImage = base64;
+    payment.receiptFileName = file.name;
+    payment.receiptUploadedAt = Date.now();
+    payment.receiptUploadedTime = new Date().toLocaleString();
+
+    await setDoc(ref,state);
+
+    uploadingGroupId = null;
+    uploadingGroupPaymentIndex = null;
+
+    alert("整组付款截图已保存");
+
+  }catch(err){
+    console.error(err);
+    alert(err.message);
+  }
+}
+
+
 function viewReceipt(recordId){
   const r = records.find(x => x.id === recordId);
 
@@ -565,6 +639,34 @@ function viewPaymentReceipt(recordId, paymentIndex){
   bg.style.display = "block";
 }
 
+function viewGroupPaymentReceipt(groupId, paymentIndex){
+  const group = (state.groups || []).find(g=>String(g.id) === String(groupId));
+  const p = group?.payments?.[paymentIndex];
+
+  if(!p || !p.receiptImage){
+    alert("没有截图");
+    return;
+  }
+
+  let bg = document.getElementById("receiptPreviewBg");
+
+  if(!bg){
+    bg = document.createElement("div");
+    bg.id = "receiptPreviewBg";
+    bg.className = "modal-bg";
+    bg.innerHTML = `
+      <div class="modal" style="max-height:90vh;overflow:auto;">
+        <h2>整组付款截图</h2>
+        <img id="receiptPreviewImg" style="width:100%;height:auto;border-radius:16px;margin:12px 0;display:block;">
+        <button class="btn-ghost full" onclick="closeReceiptPreview()">关闭</button>
+      </div>
+    `;
+    document.body.appendChild(bg);
+  }
+
+  document.getElementById("receiptPreviewImg").src = p.receiptImage;
+  bg.style.display = "block";
+}
 
 function closeReceiptPreview(){
   const bg = document.getElementById("receiptPreviewBg");
@@ -690,3 +792,5 @@ window.closeEditRecord = closeEditRecord;
 window.saveEditedRecord = saveEditedRecord;
 window.uploadPaymentReceipt = uploadPaymentReceipt;
 window.viewPaymentReceipt = viewPaymentReceipt;
+window.uploadGroupPaymentReceipt = uploadGroupPaymentReceipt;
+window.viewGroupPaymentReceipt = viewGroupPaymentReceipt;
