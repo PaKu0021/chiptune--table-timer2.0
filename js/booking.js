@@ -2131,6 +2131,9 @@ for(const idx of startIndexes){
   });
 
 await save();
+
+alert("已写入计时器数据，请去计时器页面查看");
+
 closeCheckInSelectModal();
 closeBookingAction();  
   renderBookingGrid();
@@ -2403,3 +2406,6 @@ window.openAssignTableModal=openAssignTableModal;
 window.assignBookingTable=assignBookingTable;
 window.closeAssignTableModal=closeAssignTableModal;
 window.autoAssignBookingTable = autoAssignBookingTable;
+window.openGroupPayment = openGroupPayment;
+window.closeGroupPayment = closeGroupPayment;
+window.confirmGroupPayment = confirmGroupPayment;
