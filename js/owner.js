@@ -80,17 +80,30 @@ function getRecordTime(r){
   return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
 }
 
+function getRecordBusinessDate(r){
+  if(r.businessDate) return r.businessDate;
+
+  const d = new Date(r.startAt || r.timestamp || r.time || r.date || Date.now());
+  return dateKey(d.getTime());
+}
 
 function getFilteredRecords(){
   const now = new Date();
 
-return records.filter(r=>{
-  const d = new Date(getRecordTime(r));
-    if(isNaN(d.getTime())) return currentFilter === "all";
+  return records.filter(r=>{
+    const businessDate = getRecordBusinessDate(r);
+
+    if(currentFilter === "all"){
+      return true;
+    }
 
     if(currentFilter === "today"){
-      return dateKey(d.getTime()) === dateKey(Date.now());
+      return businessDate === dateKey(Date.now());
     }
+
+    const d = new Date(businessDate + "T00:00:00");
+
+    if(isNaN(d.getTime())) return false;
 
     if(currentFilter === "week"){
       const day = now.getDay() || 7;
@@ -116,6 +129,7 @@ return records.filter(r=>{
     return true;
   });
 }
+
 
 function normalizePayments(r){
   if(Array.isArray(r.payments)) return r.payments;
@@ -304,7 +318,7 @@ function renderChart(){
   const grouped = {};
 
   list.forEach(r=>{
-    const key = dateKey(getRecordTime(r));
+    const key = getRecordBusinessDate(r);
     const value =
   currencyMode === "RMB"
     ? toRMB(r)
