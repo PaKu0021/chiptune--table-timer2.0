@@ -1499,7 +1499,10 @@ function fillModalPackages(){
     (_,idx)=>startTable + idx
   );
 
-  const busyTables = tableIndexes.filter(idx=>state.tables[idx]?.start);
+  const busyTables =
+  currentBookingDate === getTodayDate()
+    ? tableIndexes.filter(idx=>state.tables[idx]?.start)
+    : [];
 
   if(busyTables.length){
     alert("以下桌位正在使用中，不能操作：\n" + busyTables.map(i=>state.tables[i].name).join("、"));
@@ -2017,6 +2020,8 @@ function openBookingAction(id){
   document.getElementById("detailPay").value =
     b.pay || "";
 
+  document.getElementById("detailStartTime").value = b.startTime || "";
+  document.getElementById("detailEndTime").value = b.endTime || "";
   const indexes = (b.tableIndexes || [b.tableIndex])
   .filter(v=>v !== undefined && v !== null)
   .map(Number);
@@ -2046,11 +2051,43 @@ function saveBookingDetail(){
   const newPhone = document.getElementById("detailPhone").value.trim();
   const newPay = document.getElementById("detailPay").value;
   const newPackageIndex = Number(document.getElementById("detailPackage").value || 0);
+  const newStartTime = document.getElementById("detailStartTime").value;
+  const newEndTime = document.getElementById("detailEndTime").value;
+
+if(!newStartTime || !newEndTime){
+  alert("请选择预约开始和结束时间");
+  return;
+}
+
+if(timeToMinutes(newStartTime) >= timeToMinutes(newEndTime)){
+  alert("结束时间必须晚于开始时间");
+  return;
+}
+
+  const tempBooking = {
+  ...b,
+  startTime:newStartTime,
+  endTime:newEndTime
+};
+
+const conflictTables = indexes.filter(idx=>{
+  return hasBookingConflict(idx, tempBooking, b.id);
+});
+
+if(conflictTables.length){
+  alert(
+    "这个时间段已有预约，冲突桌位：\n" +
+    conflictTables.map(i=>state.tables[i]?.name).join("、")
+  );
+  return;
+}
 
   b.name = newName;
   b.phone = newPhone;
   b.pay = newPay;
   b.packageIndex = newPackageIndex;
+  b.startTime = newStartTime;
+  b.endTime = newEndTime;
 
   const indexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
@@ -2361,7 +2398,7 @@ function findAvailableTablesForBooking(b){
   return state.tables
     .map((t,i)=>({t,i}))
     .filter(({t,i})=>{
-      if(t.start) return false;
+      if(currentBookingDate === getTodayDate() && t.start) return false;
       if(hasBookingConflict(i,b,b.id)) return false;
       return true;
     })
