@@ -19,6 +19,7 @@ let typeFilter = "";
 let payFilter = "";
 let sortDirection = "asc";
 let filterPanelOpen = true;
+let autoClosingOldTables = false;
 
 function newTable(i){
   return resetTable(i + "号桌");
@@ -77,6 +78,7 @@ onSnapshot(ref, snap=>{
 
     /*alert("准备render");*/
     render();
+    autoCloseOldTables();
   }else{
     state = defaultState;
     save();
@@ -375,6 +377,9 @@ record = {
     record.businessDate ||
     getDateText(record.timestamp || Date.now());
   record.tableName = t.name;
+  record.groupId = t.groupId || record.groupId || "";
+record.groupName = t.groupName || record.groupName || "";
+record.groupColor = t.groupColor || t.activeColor || record.groupColor || "";
   record.customerName = t.customer?.name || "";
   record.phoneLast4 = t.customer?.phoneLast4 || "";
   record.customerType = t.type || "walkin";
@@ -1154,6 +1159,101 @@ alert("结账完成");
 
 }
 
+async function autoCloseOldTables(){
+  if(!state || autoClosingOldTables) return;
+
+  const today = getDateText(Date.now());
+
+  const targets = state.tables
+    .map((t,i)=>({t,i}))
+    .filter(({t})=>{
+      if(!t.start) return false;
+      return getDateText(t.start) < today;
+    });
+
+  if(!targets.length) return;
+
+  autoClosingOldTables = true;
+
+  try{
+    for(const {t,i} of targets){
+      stopAlertLoop(i);
+
+      const now = Date.now();
+
+      const record = await createOrUpdateRecord(t);
+
+      record.businessDate =
+        record.businessDate ||
+        getDateText(t.start || record.timestamp || now);
+
+      record.closedAt = now;
+      record.closedTime = new Date(now).toLocaleString();
+
+      record.checkoutMethod = "系统自动跨天结账";
+      record.roundRule = "自动结账";
+
+      record.payments = normalizePayments(record);
+
+      const paymentTotalJPY = sumPaymentsJPY(record.payments);
+
+      record.originalJPY = getOriginalJPY(t);
+      record.totalJPY = paymentTotalJPY;
+      record.totalRMB = getRMB(paymentTotalJPY);
+      record.paidJPY = paymentTotalJPY;
+      record.dueJPY = Math.max(0, record.originalJPY - paymentTotalJPY);
+      record.pay = getPaymentSummary(record.payments);
+      record.currency = t.currency || "日元";
+      record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+
+      await updateRecordOnly(record);
+
+      const visit = createOrUpdateCustomerVisit(t);
+      if(visit){
+        visit.endAt = now;
+        visit.range = getVisitRangeText(t);
+        visit.closed = true;
+        visit.finalJPY = paymentTotalJPY;
+        visit.closedTime = new Date(now).toLocaleString();
+      }
+
+      if(t.bookingId){
+        const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
+
+        if(b){
+          if(!Array.isArray(b.finishedTableIndexes)){
+            b.finishedTableIndexes = [];
+          }
+
+          b.finishedTableIndexes = Array.from(new Set([
+            ...b.finishedTableIndexes.map(Number),
+            i
+          ]));
+
+          if(Array.isArray(b.checkedInTableIndexes)){
+            b.checkedInTableIndexes = b.checkedInTableIndexes
+              .map(Number)
+              .filter(idx=>idx !== i);
+          }
+        }
+      }
+
+      state.tables[i] = resetTable(t.name);
+    }
+
+    await save();
+    render();
+
+    console.log(`已自动结账 ${targets.length} 桌跨天未结账记录`);
+  }catch(e){
+    console.error(e);
+    alert("自动跨天结账失败：" + e.message);
+  }finally{
+    autoClosingOldTables = false;
+  }
+}
+
+
 function refreshCheckoutDiff(){
   const t = state.tables[checkoutIndex];
   if(!t) return;
@@ -1769,16 +1869,6 @@ record.businessDate =
     record.businessDate ||
     getDateText(record.timestamp || now);
 
-
-    const now = Date.now();
-
-record.closedAt = now;
-record.closedTime = new Date(now).toLocaleString();
-
-record.businessDate =
-    record.businessDate ||
-    getDateText(record.timestamp || now);
-    record.closedTime = new Date().toLocaleString();
 
     await updateRecordOnly(record);
 
