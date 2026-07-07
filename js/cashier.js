@@ -120,6 +120,14 @@ function getRecordTime(r){
   return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || 0;
 }
 
+function getRecordBusinessDate(r){
+  if(r.businessDate) return r.businessDate;
+
+  const d = new Date(r.startAt || r.timestamp || r.time || r.date || Date.now());
+  return dateKey(d.getTime());
+}
+
+
 function normalizePayments(r){
   if(Array.isArray(r.payments)) return r.payments;
 
@@ -262,27 +270,30 @@ function getFilteredRecords(){
   const end = document.getElementById("endDate").value;
   const pay = document.getElementById("payFilter").value;
 
-    return records.filter(r=>{
-    const ts = getRecordTime(r);
-    const d = new Date(ts);
-    if(isNaN(d.getTime())) return false;
-
-    const key = dateKey(d.getTime());
+  return records.filter(r=>{
+    const key = getRecordBusinessDate(r);
 
     if(start && key < start) return false;
     if(end && key > end) return false;
 
-if(pay){
-  const hasPay = normalizePayments(r).some(p=>{
-    return (p.pay || "未记录") === pay;
-  });
+    if(pay){
+      const hasPay = normalizePayments(r).some(p=>{
+        return (p.pay || "未记录") === pay;
+      });
 
-  if(!hasPay) return false;
-}
+      if(!hasPay) return false;
+    }
+
     return true;
-  }).sort((a,b)=>getRecordTime(a) - getRecordTime(b));
-}
+  }).sort((a,b)=>{
+    const da = getRecordBusinessDate(a);
+    const db = getRecordBusinessDate(b);
 
+    if(da !== db) return da.localeCompare(db);
+
+    return getRecordTime(a) - getRecordTime(b);
+  });
+}
 
 function renderCashier(){
   const rows = getFilteredRecords();
