@@ -47,9 +47,17 @@ function dateKey(ts){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
+function getRecordBusinessDate(r){
+  if(r.businessDate) return r.businessDate;
+
+  const d = new Date(r.startAt || r.timestamp || r.time || r.date || Date.now());
+  return dateKey(d.getTime());
+}
+
 function getRecordTime(r){
   return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
 }
+
 
 function normalizePayments(r){
   if(Array.isArray(r.payments)) return r.payments;
@@ -124,14 +132,13 @@ function paymentDetailHTML(r){
   }).join("");
 }
 
-
 function getTodayRecords(){
   return records.filter(r=>{
-const d = new Date(getRecordTime(r));
-    if(isNaN(d.getTime())) return false;
-    return dateKey(d.getTime()) === dateKey(Date.now());
+    return getRecordBusinessDate(r) === dateKey(Date.now());
   });
 }
+
+
 
 function getGroupMap(){
   const map = {};
@@ -708,6 +715,8 @@ function openEditRecord(recordId){
 
   document.getElementById("editPay").value = r.pay || "现金";
   document.getElementById("editTotalJPY").value = toJPY(r);
+  document.getElementById("editBusinessDate").value =
+  r.businessDate || getRecordBusinessDate(r);
 
   document.getElementById("editGroupPaid").value =
     r.groupPaymentId ? "yes" : "";
@@ -743,6 +752,7 @@ async function saveEditedRecord(){
   const groupPayerName = document.getElementById("editGroupPayerName").value.trim();
   const groupPaymentId = document.getElementById("editGroupPaymentId").value.trim();
   const note = document.getElementById("editPaymentNote").value.trim();
+  const businessDate = document.getElementById("editBusinessDate").value;
 
   r.pay = pay;
   r.totalJPY = totalJPY;
@@ -750,6 +760,7 @@ async function saveEditedRecord(){
   r.paidJPY = totalJPY;
   r.dueJPY = 0;
   r.currency = "日元";
+  r.businessDate = businessDate || getRecordBusinessDate(r);
 
   r.payments = [{
     type:"收入",

@@ -391,8 +391,13 @@ function findPackageIndexByDuration(startTime,endTime){
 }
 
 function isTableBusyAtSlot(t, rowIndex){
-  if(!t.start) return false;
+  // 只有查看“今天”时，才需要让正在使用中的桌位占用时间表
+  // 查看明天/后天预约时，不应该被今天的计时占住
+  if(currentBookingDate !== getTodayDate()){
+    return false;
+  }
 
+  if(!t.start) return false;
   const slots = getSlots();
   const slotTime = slots[rowIndex];
   if(!slotTime) return false;
