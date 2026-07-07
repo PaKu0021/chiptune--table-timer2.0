@@ -40,7 +40,10 @@ function paymentDetailHTML(r){
     const amount = Number(p.amountJPY || 0);
     const sign = amount < 0 ? "-" : "+";
 
-    return `${p.reason || p.type || ""}｜${p.pay || "未记录"}｜${sign}¥${Math.abs(amount).toLocaleString()}`;
+    return `${p.reason || p.type || ""}｜${p.pay || "未记录"}｜${isRmbPayment(p, r)
+  ? `${sign}人民币 ¥${Math.abs(paymentRMB(p)).toLocaleString()}（日元换算 ¥${Math.abs(amount).toLocaleString()}）`
+  : `${sign}日元 ¥${Math.abs(amount).toLocaleString()}`
+}`;
   }).join("<br>");
 }
 

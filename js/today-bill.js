@@ -78,6 +78,22 @@ function normalizePayments(r){
   return [];
 }
 
+function isRmbPayment(p, r){
+  const pay = p.pay || r.pay || "";
+  return pay === "微信" || pay === "支付宝" || p.currency === "人民币" || r.currency === "人民币";
+}
+
+function paymentJPY(p){
+  return Number(p.amountJPY || 0);
+}
+
+function paymentRMB(p){
+  if(p.amountRMB !== undefined){
+    return Number(p.amountRMB || 0);
+  }
+  return Math.floor(Number(p.amountJPY || 0) * RATE);
+}
+
 function sumPaymentsJPY(r){
   return normalizePayments(r)
     .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
@@ -124,7 +140,10 @@ function paymentDetailHTML(r){
       <div style="${style}">
         ${p.reason || p.type || ""}｜
         ${pay}｜
-        ${sign}¥${Math.abs(amount).toLocaleString()}
+        ${isRmbPayment(p, r)
+  ? `${sign}人民币 ¥${Math.abs(paymentRMB(p)).toLocaleString()}（日元换算 ¥${Math.abs(amount).toLocaleString()}）`
+  : `${sign}日元 ¥${Math.abs(amount).toLocaleString()}`
+}
         ${p.note ? `<br><small style="color:#8a8174;">${p.note}</small>` : ""}
         ${receiptHTML}
       </div>
@@ -188,6 +207,24 @@ function toRMB(r){
   return Math.floor(toJPY(r) * RATE);
 }
 
+function actualRMBIncome(r){
+  return normalizePayments(r).reduce((sum,p)=>{
+    if(isRmbPayment(p,r)){
+      return sum + paymentRMB(p);
+    }
+    return sum;
+  },0);
+}
+
+function displayCurrency(r){
+  const list = normalizePayments(r);
+  const hasRmb = list.some(p=>isRmbPayment(p,r));
+  const hasJpy = list.some(p=>!isRmbPayment(p,r));
+
+  if(hasRmb && hasJpy) return "混合";
+  if(hasRmb) return "人民币";
+  return "日元";
+}
 
 function compressImage(file, maxWidth = 600, quality = 0.45){
   return new Promise((resolve, reject)=>{
@@ -239,26 +276,25 @@ function renderTodayBill(){
 
   list.forEach(r=>{
 
+  normalizePayments(r).forEach(p=>{
+    const jpy = paymentJPY(p);
 
-const jpy = toJPY(r);
-const rmb = toRMB(r);
+    convertedJPY += jpy;
 
-if(r.currency === "人民币"){
-  rmbIncome += rmb;
-}else{
-  jpyIncome += jpy;
-}
+    if(isRmbPayment(p, r)){
+      rmbIncome += paymentRMB(p);
+    }else{
+      jpyIncome += jpy;
+    }
 
-convertedJPY += jpy;
-    normalizePayments(r).forEach(p=>{
-  const pay = p.pay || "未记录";
-  payStats[pay] = (payStats[pay] || 0) + Number(p.amountJPY || 0);
+    const pay = p.pay || r.pay || "未记录";
+    payStats[pay] = (payStats[pay] || 0) + jpy;
+  });
+
+  const type = r.customerType || r.type || "walkin";
+  typeStats[type] = (typeStats[type] || 0) + 1;
 });
 
-
-    const type = r.customerType || r.type || "walkin";
-    typeStats[type] = (typeStats[type] || 0) + 1;
-  });
 
   document.getElementById("todaySummary").innerHTML = `
     日元收入：¥${Math.floor(jpyIncome).toLocaleString()}<br>
@@ -347,9 +383,9 @@ function renderRecordRow(r, showReceipt = true){
       <td>${extra}分</td>
       <td>¥${Number(original).toLocaleString()}</td>
       <td>¥${Number(toJPY(r)).toLocaleString()}</td>
-      <td>¥${Number(toRMB(r)).toLocaleString()}</td>
+      <td>¥${Number(actualRMBIncome(r)).toLocaleString()}</td>
       <td>${paymentDetailHTML(r)}</td>
-      <td>${r.currency || ""}</td>
+      <td>${displayCurrency(r)}</td>
       <td>${r.roundRule || ""}</td>
       <td>
         ${showReceipt
@@ -759,7 +795,7 @@ async function saveEditedRecord(){
   r.totalRMB = Math.floor(totalJPY * RATE);
   r.paidJPY = totalJPY;
   r.dueJPY = 0;
-  r.currency = "日元";
+  r.currency = pay === "微信" || pay === "支付宝" ? "人民币" : "日元";
   r.businessDate = businessDate || getRecordBusinessDate(r);
 
   r.payments = [{

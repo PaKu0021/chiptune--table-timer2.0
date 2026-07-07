@@ -150,6 +150,23 @@ function normalizePayments(r){
   return [];
 }
 
+function isRmbPayment(p, r){
+  const pay = p.pay || r.pay || "";
+  return pay === "微信" || pay === "支付宝" || p.currency === "人民币" || r.currency === "人民币";
+}
+
+function paymentJPY(p){
+  return Number(p.amountJPY || 0);
+}
+
+function paymentRMB(p){
+  if(p.amountRMB !== undefined){
+    return Number(p.amountRMB || 0);
+  }
+  return Math.floor(Number(p.amountJPY || 0) * RATE);
+}
+
+
 function sumPaymentsJPY(r){
   return normalizePayments(r)
     .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
@@ -168,7 +185,10 @@ function paymentDetailHTML(r){
       <div>
         ${p.reason || p.type || ""}｜
         ${p.pay || "未记录"}｜
-        ${sign}¥${Math.abs(amount).toLocaleString()}
+        ${isRmbPayment(p, r)
+  ? `${sign}人民币 ¥${Math.abs(paymentRMB(p)).toLocaleString()}（日元换算 ¥${Math.abs(amount).toLocaleString()}）`
+  : `${sign}日元 ¥${Math.abs(amount).toLocaleString()}`
+}
         ${p.note ? `<br><small>${p.note}</small>` : ""}
       </div>
     `;
@@ -203,6 +223,25 @@ function toRMB(r){
   return Math.floor(toJPY(r) * RATE);
 }
 
+function actualRMBIncome(r){
+  return normalizePayments(r).reduce((sum,p)=>{
+    if(isRmbPayment(p,r)){
+      return sum + paymentRMB(p);
+    }
+    return sum;
+  },0);
+}
+
+function displayCurrency(r){
+  const list = normalizePayments(r);
+  const hasRmb = list.some(p=>isRmbPayment(p,r));
+  const hasJpy = list.some(p=>!isRmbPayment(p,r));
+
+  if(hasRmb && hasJpy) return "混合";
+  if(hasRmb) return "人民币";
+  return "日元";
+}
+
 function getAmountByMode(r){
   const jpy = toJPY(r);
 
@@ -211,8 +250,8 @@ function getAmountByMode(r){
   }
 
   if(currencyMode === "RMB"){
-    return toRMB(r);
-  }
+  return actualRMBIncome(r);
+}
 
   return jpy;
 }
@@ -281,21 +320,20 @@ function renderSummary(){
 
   list.forEach(r=>{
 
-  normalizePayments(r).forEach(p=>{
-    const jpy = Number(p.amountJPY || 0);
+normalizePayments(r).forEach(p=>{
+  const jpy = paymentJPY(p);
 
-    convertedJPY += jpy;
+  convertedJPY += jpy;
 
-    if(p.currency === "人民币"){
-      rmbIncome += Number(p.amountRMB || 0);
-    }else{
-      jpyIncome += jpy;
-    }
+  if(isRmbPayment(p, r)){
+    rmbIncome += paymentRMB(p);
+  }else{
+    jpyIncome += jpy;
+  }
 
-    const pay = p.pay || "未记录";
-    payStats[pay] = (payStats[pay] || 0) + jpy;
-  });
-
+  const pay = p.pay || r.pay || "未记录";
+  payStats[pay] = (payStats[pay] || 0) + jpy;
+});
   const type = r.customerType || r.type || "walkin";
   typeStats[type] = (typeStats[type] || 0) + 1;
 });
@@ -319,9 +357,10 @@ function renderChart(){
 
   list.forEach(r=>{
     const key = getRecordBusinessDate(r);
+
     const value =
   currencyMode === "RMB"
-    ? toRMB(r)
+    ? actualRMBIncome(r)
     : toJPY(r);    
     grouped[key] = (grouped[key] || 0) + value;
   });
@@ -465,7 +504,7 @@ function renderRecords(){
     const extra = Number(r.extraMinutes || 0);
     const original = r.originalJPY || r.totalJPY || r.jpy || 0;
     const jpy = toJPY(r);
-    const rmb = toRMB(r);
+    const rmb = actualRMBIncome(r);
 
     return `
       <tr>
@@ -479,7 +518,7 @@ function renderRecords(){
         <td>¥${Number(jpy).toLocaleString()}</td>
         <td>¥${Number(rmb).toLocaleString()}</td>
         <td>${paymentDetailHTML(r)}</td>        
-        <td>${r.currency || ""}</td>
+        <td>${displayCurrency(r)}</td>
         <td>${r.roundRule || ""}</td>
 
         <td>
@@ -891,9 +930,9 @@ function exportCSV(){
     r.extraMinutes || 0,
     r.originalJPY || r.totalJPY || r.jpy || 0,
     toJPY(r),
-    toRMB(r),
+    actualRMBIncome(r),
     paymentDetailHTML(r).replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim(),    
-    r.currency || "",
+    displayCurrency(r),
     r.roundRule || ""
   ]);
 

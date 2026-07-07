@@ -149,6 +149,22 @@ function normalizePayments(r){
   return [];
 }
 
+function isRmbPayment(p, r){
+  const pay = p.pay || r.pay || "";
+  return pay === "微信" || pay === "支付宝" || p.currency === "人民币" || r.currency === "人民币";
+}
+
+function paymentJPY(p){
+  return Number(p.amountJPY || 0);
+}
+
+function paymentRMB(p){
+  if(p.amountRMB !== undefined){
+    return Number(p.amountRMB || 0);
+  }
+  return Math.floor(Number(p.amountJPY || 0) * RATE);
+}
+
 function sumPaymentsJPY(r){
   return normalizePayments(r)
     .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
@@ -163,7 +179,10 @@ function paymentDetailText(r){
     const amount = Number(p.amountJPY || 0);
     const sign = amount < 0 ? "-" : "+";
 
-    return `${p.reason || p.type || ""}｜${p.pay || "未记录"}｜${sign}¥${Math.abs(amount).toLocaleString()}${p.note ? "｜" + p.note : ""}`;
+    return `${p.reason || p.type || ""}｜${p.pay || "未记录"}｜${isRmbPayment(p, r)
+  ? `${sign}人民币 ¥${Math.abs(paymentRMB(p)).toLocaleString()}（日元换算 ¥${Math.abs(amount).toLocaleString()}）`
+  : `${sign}日元 ¥${Math.abs(amount).toLocaleString()}`
+}${p.note ? "｜" + p.note : ""}`;
   }).join(" / ");
 }
 
@@ -181,7 +200,10 @@ function paymentDetailHTML(r){
       <div style="${cls}">
         ${p.reason || p.type || ""}｜
         ${p.pay || "未记录"}｜
-        ${sign}¥${Math.abs(amount).toLocaleString()}
+        ${isRmbPayment(p, r)
+  ? `${sign}人民币 ¥${Math.abs(paymentRMB(p)).toLocaleString()}（日元换算 ¥${Math.abs(amount).toLocaleString()}）`
+  : `${sign}日元 ¥${Math.abs(amount).toLocaleString()}`
+}
         ${p.note ? `<br><small style="color:#8a8174;">${p.note}</small>` : ""}
       </div>
     `;
@@ -225,6 +247,24 @@ function toRMB(r){
   return Math.floor(toJPY(r) * RATE);
 }
 
+function actualRMBIncome(r){
+  return normalizePayments(r).reduce((sum,p)=>{
+    if(isRmbPayment(p,r)){
+      return sum + paymentRMB(p);
+    }
+    return sum;
+  },0);
+}
+
+function displayCurrency(r){
+  const list = normalizePayments(r);
+  const hasRmb = list.some(p=>isRmbPayment(p,r));
+  const hasJpy = list.some(p=>!isRmbPayment(p,r));
+
+  if(hasRmb && hasJpy) return "混合";
+  if(hasRmb) return "人民币";
+  return "日元";
+}
 
 function setQuickRange(type){
   quickRange = type;
@@ -315,7 +355,7 @@ function renderCashier(){
         <td>¥${toJPY(r).toLocaleString()}</td>
         <td>¥${toRMB(r).toLocaleString()}</td>
         <td>${paymentDetailHTML(r)}</td>
-        <td>${r.currency || ""}</td>
+        <td>${displayCurrency(r)}</td>        
         <td>${r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || "")}</td>
         <td>
   ${
@@ -366,20 +406,21 @@ function renderSummary(rows){
   let totalJPY = 0;
   let totalRMB = 0;
 
-  rows.forEach(r=>{
+rows.forEach(r=>{
   normalizePayments(r).forEach(p=>{
     const pay = p.pay || "未记录";
-    const jpy = Number(p.amountJPY || 0);
+    const jpy = paymentJPY(p);
 
     if(!pays[pay]) pays[pay] = 0;
 
     pays[pay] += jpy;
     totalJPY += jpy;
+
+    if(isRmbPayment(p,r)){
+      totalRMB += paymentRMB(p);
+    }
   });
-
-  totalRMB += toRMB(r);
 });
-
 
   document.getElementById("cashierSummary").innerHTML = `
     <table class="record-table">
@@ -422,7 +463,7 @@ function exportCashierCSV(){
     toJPY(r),
     toRMB(r),
     paymentDetailText(r),    
-    r.currency || "",
+    displayCurrency(r),
     r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || ""),
     r.receiptImage ? "已上传" : "未上传"
   ]);
@@ -441,17 +482,18 @@ function exportCashierCSV(){
 rows.forEach(r=>{
   normalizePayments(r).forEach(p=>{
     const pay = p.pay || "未记录";
-    const jpy = Number(p.amountJPY || 0);
+    const jpy = paymentJPY(p);
 
     if(!pays[pay]) pays[pay] = 0;
 
     pays[pay] += jpy;
     totalJPY += jpy;
+
+    if(isRmbPayment(p,r)){
+      totalRMB += paymentRMB(p);
+    }
   });
-
-  totalRMB += toRMB(r);
-});  
-
+});
   const summaryRows = [
     [],
     ["支付方式总计"],
