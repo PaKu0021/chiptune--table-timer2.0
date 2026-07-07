@@ -1251,3 +1251,27 @@ button.selected-pop{
     font-weight:bold;
 }
 
+.move-drag-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;
+  position:relative;
+  z-index:2;
+}
+
+.move-table-btn{
+  border:1px solid #e6dccb;
+  border-radius:14px;
+  padding:14px 8px;
+  background:#fff;
+  font-weight:900;
+}
+
+.move-table-btn.selected{
+  background:#f2c94c;
+  border-color:#d8a900;
+}
+
+.move-table-btn.disabled{
+  opacity:.35;
+}

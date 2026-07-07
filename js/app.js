@@ -20,6 +20,12 @@ let payFilter = "";
 let sortDirection = "asc";
 let filterPanelOpen = true;
 let autoClosingOldTables = false;
+let movingRunningFromIndex = null;
+let movingRunningToIndex = null;
+let draggingRunningFrom = null;
+let runningMoveTempLine = null;
+let runningMoveAreaRect = null;
+
 
 function newTable(i){
   return resetTable(i + "号桌");
@@ -1290,45 +1296,170 @@ async function moveRunningTable(fromIndex){
     return;
   }
 
-  if(fromTable.type === "booking"){
-    alert("预约客人请在预约系统里移动桌位");
+  movingRunningFromIndex = fromIndex;
+  movingRunningToIndex = null;
+  draggingRunningFrom = null;
+
+  document.getElementById("moveRunningInfo").innerHTML = `
+    当前：${fromTable.name}<br>
+    客人：${fromTable.customer?.name || "-"} ${fromTable.customer?.phoneLast4 || ""}
+  `;
+
+  document.getElementById("moveRunningFromBox").innerHTML = `
+    <button
+      class="move-table-btn"
+      id="running-from-${fromIndex}"
+      onpointerdown="startRunningMoveDrag(event,${fromIndex})"
+    >
+      ${fromTable.name}<br>
+      <small>使用中</small>
+    </button>
+  `;
+
+  document.getElementById("moveRunningToBox").innerHTML = state.tables.map((t,i)=>{
+    const disabled = i === fromIndex || !!t.start;
+
+    return `
+      <button
+        class="move-table-btn ${disabled ? "disabled" : ""}"
+        id="running-to-${i}"
+        data-index="${i}"
+        ${disabled ? "disabled" : ""}
+      >
+        ${t.name}<br>
+        <small>${disabled ? "不可移动" : "空闲"}</small>
+      </button>
+    `;
+  }).join("");
+
+  document.getElementById("moveRunningModalBg").style.display = "block";
+}
+
+function startRunningMoveDrag(e, fromIndex){
+  e.preventDefault();
+
+  draggingRunningFrom = fromIndex;
+
+  const area = document.getElementById("moveRunningLineArea");
+  const svg = document.getElementById("moveRunningSvg");
+  const fromEl = document.getElementById("running-from-" + fromIndex);
+
+  if(!area || !svg || !fromEl) return;
+
+  runningMoveAreaRect = area.getBoundingClientRect();
+
+  const r = fromEl.getBoundingClientRect();
+  const x1 = r.left + r.width / 2 - runningMoveAreaRect.left;
+  const y1 = r.top + r.height / 2 - runningMoveAreaRect.top;
+
+  const ns = "http://www.w3.org/2000/svg";
+  runningMoveTempLine = document.createElementNS(ns,"line");
+
+  runningMoveTempLine.setAttribute("x1",x1);
+  runningMoveTempLine.setAttribute("y1",y1);
+  runningMoveTempLine.setAttribute("x2",x1);
+  runningMoveTempLine.setAttribute("y2",y1);
+  runningMoveTempLine.setAttribute("stroke","#d8a900");
+  runningMoveTempLine.setAttribute("stroke-width","5");
+  runningMoveTempLine.setAttribute("stroke-linecap","round");
+  runningMoveTempLine.setAttribute("stroke-dasharray","8 6");
+
+  svg.replaceChildren(runningMoveTempLine);
+
+  window.addEventListener("pointermove", moveRunningDragLine, {passive:false});
+  window.addEventListener("pointerup", endRunningMoveDrag);
+}
+
+function moveRunningDragLine(e){
+  if(draggingRunningFrom === null || !runningMoveTempLine || !runningMoveAreaRect) return;
+
+  e.preventDefault();
+
+  const x = e.clientX - runningMoveAreaRect.left;
+  const y = e.clientY - runningMoveAreaRect.top;
+
+  runningMoveTempLine.setAttribute("x2",x);
+  runningMoveTempLine.setAttribute("y2",y);
+}
+
+function endRunningMoveDrag(e){
+  if(draggingRunningFrom === null) return;
+
+  const target = document.elementFromPoint(e.clientX,e.clientY);
+  const toBtn = target?.closest?.("[id^='running-to-']");
+
+  if(toBtn && !toBtn.disabled){
+    movingRunningToIndex = Number(toBtn.dataset.index);
+
+    document.querySelectorAll("#moveRunningToBox .move-table-btn")
+      .forEach(btn=>btn.classList.remove("selected"));
+
+    toBtn.classList.add("selected");
+
+    drawFinalRunningMoveLine();
+  }else{
+    if(runningMoveTempLine) runningMoveTempLine.remove();
+  }
+
+  draggingRunningFrom = null;
+  runningMoveTempLine = null;
+  runningMoveAreaRect = null;
+
+  window.removeEventListener("pointermove", moveRunningDragLine);
+  window.removeEventListener("pointerup", endRunningMoveDrag);
+}
+
+function drawFinalRunningMoveLine(){
+  const svg = document.getElementById("moveRunningSvg");
+  const area = document.getElementById("moveRunningLineArea");
+  const fromEl = document.getElementById("running-from-" + movingRunningFromIndex);
+  const toEl = document.getElementById("running-to-" + movingRunningToIndex);
+
+  if(!svg || !area || !fromEl || !toEl) return;
+
+  const rect = area.getBoundingClientRect();
+
+  function center(el){
+    const r = el.getBoundingClientRect();
+    return {
+      x:r.left + r.width / 2 - rect.left,
+      y:r.top + r.height / 2 - rect.top
+    };
+  }
+
+  const a = center(fromEl);
+  const b = center(toEl);
+
+  const ns = "http://www.w3.org/2000/svg";
+  const line = document.createElementNS(ns,"line");
+
+  line.setAttribute("x1",a.x);
+  line.setAttribute("y1",a.y);
+  line.setAttribute("x2",b.x);
+  line.setAttribute("y2",b.y);
+  line.setAttribute("stroke","#d8a900");
+  line.setAttribute("stroke-width","5");
+  line.setAttribute("stroke-linecap","round");
+
+  svg.replaceChildren(line);
+}
+
+async function confirmMoveRunningLine(){
+  if(movingRunningFromIndex === null || movingRunningToIndex === null){
+    alert("请先拖线选择目标桌位");
     return;
   }
 
-  const freeTables = state.tables
-    .map((t,i)=>({t,i}))
-    .filter(({t,i})=>!t.start && i !== fromIndex);
+  const fromTable = state.tables[movingRunningFromIndex];
+  const toTable = state.tables[movingRunningToIndex];
 
-  if(!freeTables.length){
-    alert("没有空闲桌位可以移动");
+  if(!fromTable || !fromTable.start){
+    alert("原桌位不是使用中");
     return;
   }
 
-  const listText = freeTables
-    .map(({t,i})=>`${i + 1}：${t.name}`)
-    .join("\n");
-
-  const input = prompt(
-    `要移动到哪张空桌？请输入编号：\n\n${listText}`
-  );
-
-  if(input === null) return;
-
-  const toIndex = Number(String(input).replace("号桌","").trim()) - 1;
-
-  if(
-    Number.isNaN(toIndex) ||
-    !state.tables[toIndex] ||
-    toIndex === fromIndex
-  ){
-    alert("桌位编号不正确");
-    return;
-  }
-
-  const toTable = state.tables[toIndex];
-
-  if(toTable.start){
-    alert(`${toTable.name} 正在使用中，不能移动`);
+  if(!toTable || toTable.start){
+    alert("目标桌位不是空闲");
     return;
   }
 
@@ -1336,28 +1467,43 @@ async function moveRunningTable(fromIndex){
     return;
   }
 
-  stopAlertLoop(fromIndex);
-  stopAlertLoop(toIndex);
+  stopAlertLoop(movingRunningFromIndex);
+  stopAlertLoop(movingRunningToIndex);
 
-  delete remindLocks[fromIndex];
-  delete remindLocks[toIndex];
+  delete remindLocks[movingRunningFromIndex];
+  delete remindLocks[movingRunningToIndex];
 
   const oldFromName = fromTable.name;
   const oldToName = toTable.name;
 
-  state.tables[toIndex] = {
+  state.tables[movingRunningToIndex] = {
     ...fromTable,
-    name: oldToName
+    name:oldToName
   };
 
-  state.tables[fromIndex] = resetTable(oldFromName);
+  state.tables[movingRunningFromIndex] = resetTable(oldFromName);
 
-  await createOrUpdateRecord(state.tables[toIndex]);
+  await createOrUpdateRecord(state.tables[movingRunningToIndex]);
 
   await save();
+
+  closeMoveRunningLineModal();
   render();
 
   alert(`已移动到 ${oldToName}`);
+}
+
+function closeMoveRunningLineModal(){
+  document.getElementById("moveRunningModalBg").style.display = "none";
+
+  movingRunningFromIndex = null;
+  movingRunningToIndex = null;
+  draggingRunningFrom = null;
+  runningMoveTempLine = null;
+  runningMoveAreaRect = null;
+
+  const svg = document.getElementById("moveRunningSvg");
+  if(svg) svg.replaceChildren();
 }
 
 
@@ -1942,3 +2088,6 @@ window.setPayTiming = setPayTiming;
 window.moveRunningTable = moveRunningTable;
 window.refreshCheckoutDiff = refreshCheckoutDiff;
 window.toggleGroupPayMode = toggleGroupPayMode;
+window.startRunningMoveDrag = startRunningMoveDrag;
+window.confirmMoveRunningLine = confirmMoveRunningLine;
+window.closeMoveRunningLineModal = closeMoveRunningLineModal;

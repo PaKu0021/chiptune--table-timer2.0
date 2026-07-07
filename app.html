@@ -173,5 +173,33 @@
   renderNav("app");
   import "./js/app.js";
 </script>
+<div id="moveRunningModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>移动桌位</h2>
+
+    <div id="moveRunningInfo" style="font-weight:900;margin-bottom:12px;"></div>
+
+    <div id="moveRunningLineArea" style="position:relative;">
+      <svg
+        id="moveRunningSvg"
+        style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:1;"
+      ></svg>
+
+      <div style="font-weight:900;margin:10px 0;">当前桌位</div>
+      <div id="moveRunningFromBox" class="move-drag-grid"></div>
+
+      <div style="font-weight:900;margin:16px 0 10px;">拖到目标空桌</div>
+      <div id="moveRunningToBox" class="move-drag-grid"></div>
+    </div>
+
+    <button class="btn-success full" onclick="confirmMoveRunningLine()">
+      确认移动
+    </button>
+
+    <button class="btn-ghost full" onclick="closeMoveRunningLineModal()">
+      取消
+    </button>
+  </div>
+</div>
 </body>
 </html>
