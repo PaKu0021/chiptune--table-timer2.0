@@ -87,6 +87,24 @@ function getTodayDate(){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
+function getRecordBusinessDate(r){
+  if(r.businessDate) return r.businessDate;
+
+  const ts =
+    r.timestamp ||
+    r.closedAt ||
+    r.paidAt ||
+    r.time ||
+    r.date;
+
+  if(!ts) return "";
+
+  const d = new Date(ts);
+  if(isNaN(d.getTime())) return "";
+
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
 onSnapshot(ref,snap=>{
   if(!snap.exists()) return;
 
@@ -125,17 +143,12 @@ function updateHome(){
   const todayRevenue = records
     .filter(r=>{
 
-const ts = r.closedAt || r.paidAt || r.timestamp || r.time || r.date;
-
-      if(!ts) return false;
-
-      const d = new Date(ts);
-      if(isNaN(d.getTime())) return false;
-
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      const key = getRecordBusinessDate(r);
       return key === today;
+
+
     })
-    .reduce((sum,r)=>sum + Number(r.totalJPY || r.jpy || 0),0);
+    .reduce((sum,r)=>sum + sumPaymentsJPY(r),0);
 
   document.getElementById("homeUsingCount").innerText = `${usingCount}桌`;
   document.getElementById("homeFreeCount").innerText = `${freeCount}桌`;
@@ -173,6 +186,20 @@ if(activeCard){
 
   document.getElementById(activeCard)?.classList.add("primary");
 }
+
+function normalizePayments(r){
+  if(Array.isArray(r.payments)) return r.payments;
+
+  return [{
+    amountJPY:Number(r.totalJPY || r.jpy || 0)
+  }];
+}
+
+function sumPaymentsJPY(r){
+  return normalizePayments(r)
+    .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+}
+
 </script>
 
 </body>
