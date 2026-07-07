@@ -2043,7 +2043,8 @@ document.getElementById("detailTablesBox").innerHTML = `
   document.getElementById("bookingActionModalBg").style.display = "block";
 }
 
-function saveBookingDetail(){
+
+async function saveBookingDetail(){
   const b = getBookingById(activeBookingId);
   if(!b) return;
 
@@ -2054,33 +2055,37 @@ function saveBookingDetail(){
   const newStartTime = document.getElementById("detailStartTime").value;
   const newEndTime = document.getElementById("detailEndTime").value;
 
-if(!newStartTime || !newEndTime){
-  alert("请选择预约开始和结束时间");
-  return;
-}
+  if(!newStartTime || !newEndTime){
+    alert("请选择预约开始和结束时间");
+    return;
+  }
 
-if(timeToMinutes(newStartTime) >= timeToMinutes(newEndTime)){
-  alert("结束时间必须晚于开始时间");
-  return;
-}
+  if(timeToMinutes(newStartTime) >= timeToMinutes(newEndTime)){
+    alert("结束时间必须晚于开始时间");
+    return;
+  }
+
+  const indexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
 
   const tempBooking = {
-  ...b,
-  startTime:newStartTime,
-  endTime:newEndTime
-};
+    ...b,
+    startTime:newStartTime,
+    endTime:newEndTime
+  };
 
-const conflictTables = indexes.filter(idx=>{
-  return hasBookingConflict(idx, tempBooking, b.id);
-});
+  const conflictTables = indexes.filter(idx=>{
+    return hasBookingConflict(idx, tempBooking, b.id);
+  });
 
-if(conflictTables.length){
-  alert(
-    "这个时间段已有预约，冲突桌位：\n" +
-    conflictTables.map(i=>state.tables[i]?.name).join("、")
-  );
-  return;
-}
+  if(conflictTables.length){
+    alert(
+      "这个时间段已有预约，冲突桌位：\n" +
+      conflictTables.map(i=>state.tables[i]?.name).join("、")
+    );
+    return;
+  }
 
   b.name = newName;
   b.phone = newPhone;
@@ -2088,10 +2093,6 @@ if(conflictTables.length){
   b.packageIndex = newPackageIndex;
   b.startTime = newStartTime;
   b.endTime = newEndTime;
-
-  const indexes = (b.tableIndexes || [b.tableIndex])
-    .filter(v=>v !== undefined && v !== null)
-    .map(Number);
 
   indexes.forEach(idx=>{
     const t = state.tables[idx];
@@ -2107,14 +2108,13 @@ if(conflictTables.length){
     t.type = "booking";
   });
 
-  save();
+  await save();
   closeBookingAction();
   renderBookingGrid();
   renderList();
 
   alert("修改成功");
 }
-
 
 
 
@@ -2235,41 +2235,40 @@ if(group){
 const now = Date.now();
 
 for(const idx of startIndexes){
+  const oldName = state.tables[idx]?.name || `${idx + 1}号桌`;
 
-
-    const t = state.tables[idx];
-    if(!t) return;
-
-    t.type = "booking";
-    t.bookingId = b.id;
-    t.groupId = b.groupId;
-    t.groupColor = b.groupColor || b.color || getNextBookingColor();
-    t.groupName = b.groupName || (b.name ? `${b.name}一组` : "未命名组");
-    t.activeColor = t.groupColor;
-
-    t.customerKey = getCustomerKey(b.name, b.phone);
-
-    t.pay = b.pay || "";
-    t.packageIndex = Number(b.packageIndex || 0);
-
-    t.customer = {
+  const t = {
+    ...resetTable(oldName),
+    type:"booking",
+    bookingId:b.id,
+    groupId:b.groupId,
+    groupColor:b.groupColor || b.color || getNextBookingColor(),
+    groupName:b.groupName || (b.name ? `${b.name}一组` : "未命名组"),
+    activeColor:b.groupColor || b.color || getNextBookingColor(),
+    customerKey:getCustomerKey(b.name, b.phone),
+    pay:b.pay || "",
+    currency:"日元",
+    packageIndex:Number(b.packageIndex || 0),
+    customer:{
       name:b.name || "",
       phoneLast4:String(b.phone || "").slice(-4)
-    };
+    },
+    start:now,
+    pausedAt:null,
+    extra:0,
+    alerted:false,
+    alerting:false,
+    lastAction:"start"
+  };
 
-    t.start = now;
-    t.pausedAt = null;
-    t.alerted = false;
-    t.alerting = false;
-    t.lastAction = "start";
+  state.tables[idx] = t;
 
-    await createOrUpdateTableRecord(t, {
-  customerType:"booking",
-  checkoutMethod:"预约到店开始计时"
-});
+  await createOrUpdateTableRecord(state.tables[idx], {
+    customerType:"booking",
+    checkoutMethod:"预约到店开始计时"
+  });
+}
 
-
-  }
 
   if(!b.checkedInTableIndexes){
     b.checkedInTableIndexes = [];
@@ -2293,7 +2292,7 @@ for(const idx of startIndexes){
     endTime:b.endTime
   });
 
-await save();
+await setDoc(ref, JSON.parse(JSON.stringify(state)));
 
 alert("已写入计时器数据，请去计时器页面查看");
 
