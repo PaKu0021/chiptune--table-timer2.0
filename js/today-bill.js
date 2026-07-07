@@ -721,10 +721,15 @@ const r = records.find(x => x.id === recordId);
 
   if(!r) return;
 
-  if(!r.receiptImage){
-    const ok = confirm("这笔续费还没有上传收款截图，确定先确认吗？");
-    if(!ok) return;
-  }
+  const hasReceipt = normalizePayments(r).some(p=>{
+  if(p.pay === "现金") return true;
+  return !!p.receiptImage;
+});
+
+if(!hasReceipt){
+  const ok = confirm("这笔付款还没有上传收款截图，确定先确认吗？");
+  if(!ok) return;
+}
 
   r.extensionConfirmed = true;
   r.extensionConfirmedAt = Date.now();
@@ -803,7 +808,10 @@ async function saveEditedRecord(){
     reason: groupPaid ? "一人代付/手动修正" : "手动修正",
     pay,
     amountJPY: totalJPY,
-    amountRMB: Math.floor(totalJPY * RATE),
+    amountRMB:
+  pay === "微信" || pay === "支付宝"
+    ? Math.floor(totalJPY * RATE)
+    : 0,    
     note,
     time:new Date().toLocaleString(),
     timestamp:Date.now()
