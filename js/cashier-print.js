@@ -11,7 +11,9 @@ const payload = raw ? JSON.parse(raw) : {
 const rows = payload.rows || [];
 
 function normalizePayments(r){
-  if(Array.isArray(r.payments)) return r.payments;
+  if(r.payments){
+    return r.payments;
+  }
 
   const amount = Number(r.totalJPY || r.jpy || 0);
 
@@ -20,11 +22,36 @@ function normalizePayments(r){
       type:"收入",
       reason:r.checkoutMethod || "历史记录",
       pay:r.pay || "未记录",
-      amountJPY:amount
+      amountJPY:amount,
+      amountRMB:Number(r.totalRMB || r.rmb || 0)
     }];
   }
 
   return [];
+}
+
+function isRmbPayment(p, r){
+  const pay = p.pay || r.pay || "";
+  return pay === "微信" ||
+         pay === "支付宝" ||
+         p.currency === "人民币" ||
+         r.currency === "人民币";
+}
+
+function paymentRMB(p){
+  if(p.amountRMB !== undefined){
+    return Number(p.amountRMB || 0);
+  }
+  return Math.floor(Number(p.amountJPY || 0) * RATE);
+}
+
+function actualRMBIncome(r){
+  return normalizePayments(r).reduce((sum,p)=>{
+    if(isRmbPayment(p,r)){
+      return sum + paymentRMB(p);
+    }
+    return sum;
+  },0);
 }
 
 function paymentDetailHTML(r){
@@ -74,18 +101,23 @@ function renderSummary(rows){
   };
 
   let totalJPY = 0;
+  let totalRMB = 0;
 
   rows.forEach(r=>{
-  normalizePayments(r).forEach(p=>{
-    const pay = p.pay || "未记录";
-    const jpy = Number(p.amountJPY || 0);
+    normalizePayments(r).forEach(p=>{
+      const pay = p.pay || "未记录";
+      const jpy = Number(p.amountJPY || 0);
 
-    if(!pays[pay]) pays[pay] = 0;
+      if(!pays[pay]) pays[pay] = 0;
 
-    pays[pay] += jpy;
-    totalJPY += jpy;
+      pays[pay] += jpy;
+      totalJPY += jpy;
+
+      if(isRmbPayment(p,r)){
+        totalRMB += paymentRMB(p);
+      }
+    });
   });
-});
 
   document.getElementById("printSummary").innerHTML = `
     <table class="record-table">
@@ -96,9 +128,15 @@ function renderSummary(rows){
             <td>¥${Math.floor(pays[k]).toLocaleString()}</td>
           </tr>
         `).join("")}
+
         <tr>
           <td><b>日元总计</b></td>
           <td><b>¥${Math.floor(totalJPY).toLocaleString()}</b></td>
+        </tr>
+
+        <tr>
+          <td><b>人民币总计</b></td>
+          <td><b>¥${Math.floor(totalRMB).toLocaleString()}</b></td>
         </tr>
       </tbody>
     </table>
@@ -118,9 +156,19 @@ rows.map(r=>`
     <td>${r.packageName || ""}</td>
     <td>¥${Number(r.originalJPY || 0).toLocaleString()}</td>
     <td>¥${toJPY(r).toLocaleString()}</td>
-    <td>¥${Number(r.totalRMB || r.rmb || 0).toLocaleString()}</td>
+    <td>¥${actualRMBIncome(r).toLocaleString()}</td>
     <td>${paymentDetailHTML(r)}</td>
-    <td>${r.currency || ""}</td>
+    <td>${
+(()=>{
+    const list = normalizePayments(r);
+    const hasRmb = list.some(p=>isRmbPayment(p,r));
+    const hasJpy = list.some(p=>!isRmbPayment(p,r));
+
+    if(hasRmb && hasJpy) return "混合";
+    if(hasRmb) return "人民币";
+    return "日元";
+})()
+}</td>    
     <td>${r.roundRule === "批量结账" ? "不抹零" : (r.roundRule || "")}</td>
     <td>
   ${
