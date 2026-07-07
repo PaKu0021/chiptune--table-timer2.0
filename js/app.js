@@ -354,17 +354,26 @@ const dueJPY = Math.max(0, originalJPY - paidJPY);
     const id = "rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
     t.recordId = id;
 
-    record = {
-      id,
-      timestamp: Date.now(),
-      time: new Date().toLocaleString(),
-      tableName: t.name,
-      receiptImage:"",
-      receiptFileName:"",
-    };
 
+    const now = Date.now();
+
+record = {
+  id,
+  timestamp: now,
+  businessDate: getDateText(now),
+
+  time: new Date(now).toLocaleString(),
+
+  tableName: t.name,
+
+  receiptImage:"",
+  receiptFileName:"",
+};
   }
 
+  record.businessDate =
+    record.businessDate ||
+    getDateText(record.timestamp || Date.now());
   record.tableName = t.name;
   record.customerName = t.customer?.name || "";
   record.phoneLast4 = t.customer?.phoneLast4 || "";
@@ -1088,8 +1097,14 @@ record.pay = getPaymentSummary(record.payments);
   record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
   record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
   record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
-  record.closedAt = Date.now();
-  record.closedTime = new Date().toLocaleString();
+  const now = Date.now();
+
+  record.closedAt = now;
+  record.closedTime = new Date(now).toLocaleString();
+
+  record.businessDate =
+    record.businessDate ||
+    getDateText(record.timestamp || now);
 
   await updateRecordOnly(record);
 
@@ -1664,7 +1679,14 @@ async function confirmBatchCheckout(){
       record.groupPaymentTotalJPY = groupTotalJPY;
       record.groupPaymentTableNames = tableNames;
       record.groupPaymentNote = groupPayNote;
-      record.closedAt = Date.now();
+      const now = Date.now();
+
+record.closedAt = now;
+record.closedTime = new Date(now).toLocaleString();
+
+record.businessDate =
+    record.businessDate ||
+    getDateText(record.timestamp || now);
       record.closedTime = new Date().toLocaleString();
 
       await updateRecordOnly(record);
@@ -1737,7 +1759,25 @@ async function confirmBatchCheckout(){
     record.roundRule = "不抹零";
     record.paidStatus = Number(record.dueJPY || 0) > 0 ? "未结清" : "已结清";
     record.checkoutMethod = "批量结账";
-    record.closedAt = Date.now();
+
+    const now = Date.now();
+
+record.closedAt = now;
+record.closedTime = new Date(now).toLocaleString();
+
+record.businessDate =
+    record.businessDate ||
+    getDateText(record.timestamp || now);
+
+
+    const now = Date.now();
+
+record.closedAt = now;
+record.closedTime = new Date(now).toLocaleString();
+
+record.businessDate =
+    record.businessDate ||
+    getDateText(record.timestamp || now);
     record.closedTime = new Date().toLocaleString();
 
     await updateRecordOnly(record);
