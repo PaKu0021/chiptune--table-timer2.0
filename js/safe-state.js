@@ -2,12 +2,17 @@ import {
   runTransaction,
   collection,
   addDoc,
-  serverTimestamp
+  serverTimestamp,
+  doc,
+  setDoc
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const DB_NAME = "chiptune_local_first_v1";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STATE_KEY = "shop_main";
+const RECORDS_KEY = "records";
+const STATE_SHADOW = "chiptune_state_shadow_v2";
+const RECORDS_SHADOW = "chiptune_records_shadow_v2";
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -21,6 +26,7 @@ function role(){
   if(p.includes("booking")) return "booking";
   if(p.includes("owner")) return "owner";
   if(p.includes("today-bill") || p.includes("cashier")) return "report";
+  if(p.endsWith("/") || p.includes("index.html")) return "home";
   return "timer";
 }
 
@@ -31,6 +37,7 @@ function openLocalDb(){
       const db = req.result;
       if(!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
       if(!db.objectStoreNames.contains("queue")) db.createObjectStore("queue", {keyPath:"id"});
+      if(!db.objectStoreNames.contains("recordQueue")) db.createObjectStore("recordQueue", {keyPath:"id"});
     };
     req.onsuccess = ()=>resolve(req.result);
     req.onerror = ()=>reject(req.error);
@@ -77,6 +84,13 @@ async function idbAll(store){
   });
 }
 
+function writeShadow(key,value){
+  try{ localStorage.setItem(key, JSON.stringify(value)); }catch(err){ console.warn("本地同步备份写入失败",err); }
+}
+function readShadow(key){
+  try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; }catch{ return null; }
+}
+
 function ensureBadge(){
   if(badge) return badge;
   badge = document.createElement("div");
@@ -118,10 +132,17 @@ export function getDeviceId(){
 }
 
 export async function loadLocalState(){
+  const shadow = readShadow(STATE_SHADOW);
+  if(shadow?.state){
+    baseline = clone(shadow.cloudBaseline || shadow.state);
+    setSyncStatus(navigator.onLine ? "cache" : "offline");
+    return clone(shadow.state);
+  }
   try{
     const value = await idbGet("kv",STATE_KEY);
     if(value?.state){
       baseline = clone(value.cloudBaseline || value.state);
+      writeShadow(STATE_SHADOW,value);
       setSyncStatus(navigator.onLine ? "cache" : "offline");
       return clone(value.state);
     }
@@ -130,12 +151,43 @@ export async function loadLocalState(){
 }
 
 async function writeLocalState(state, cloudBaseline=baseline){
-  await idbPut("kv",{
-    state:clone(state),
-    cloudBaseline:clone(cloudBaseline),
-    savedAt:Date.now(),
-    deviceId:getDeviceId()
-  },STATE_KEY);
+  const box = {state:clone(state),cloudBaseline:clone(cloudBaseline),savedAt:Date.now(),deviceId:getDeviceId()};
+  writeShadow(STATE_SHADOW,box);
+  await idbPut("kv",box,STATE_KEY);
+}
+
+export async function loadLocalRecords(){
+  const shadow = readShadow(RECORDS_SHADOW);
+  if(Array.isArray(shadow)) return clone(shadow);
+  try{
+    const value = await idbGet("kv",RECORDS_KEY);
+    const list = Array.isArray(value) ? value : [];
+    writeShadow(RECORDS_SHADOW,list);
+    return clone(list);
+  }catch(err){ console.warn("读取本机账单失败",err); return []; }
+}
+
+async function writeLocalRecords(records){
+  const list = clone(records || []);
+  writeShadow(RECORDS_SHADOW,list);
+  await idbPut("kv",list,RECORDS_KEY);
+}
+
+export async function getLocalRecord(recordId){
+  if(!recordId) return null;
+  const list = await loadLocalRecords();
+  return clone(list.find(r=>String(r.id)===String(recordId)) || null);
+}
+
+export function mergeRecordLists(cloudRecords=[], localRecords=[]){
+  const map = new Map();
+  for(const r of cloudRecords || []) map.set(String(r.id),clone(r));
+  for(const r of localRecords || []){
+    const key = String(r.id);
+    const cloud = map.get(key);
+    if(!cloud || Number(r.localUpdatedAt || r.updatedAt || r.timestamp || 0) >= Number(cloud.localUpdatedAt || cloud.updatedAt || cloud.timestamp || 0)) map.set(key,clone(r));
+  }
+  return [...map.values()].filter(r=>r.id !== "init");
 }
 
 function changedKeys(local, base){
@@ -149,7 +201,7 @@ async function pendingKeys(){
 }
 
 export async function reconcileCloudState(cloud){
-  const localBox = await idbGet("kv",STATE_KEY).catch(()=>null);
+  const localBox = readShadow(STATE_SHADOW) || await idbGet("kv",STATE_KEY).catch(()=>null);
   const local = localBox?.state;
   if(!local){
     baseline = clone(cloud);
@@ -160,7 +212,7 @@ export async function reconcileCloudState(cloud){
   const pending = await pendingKeys();
   const merged = clone(cloud || {});
   const currentRole = role();
-  const alwaysLocal = currentRole === "timer" ? new Set(["tables"]) : new Set();
+  const alwaysLocal = (currentRole === "timer" || currentRole === "home") ? new Set(["tables"]) : new Set();
 
   for(const key of Object.keys(local)){
     if(key === "_sync") continue;
@@ -174,9 +226,8 @@ export async function reconcileCloudState(cloud){
 
 export function setStateBaseline(nextState){
   baseline = clone(nextState);
-  idbGet("kv",STATE_KEY).then(box=>{
-    if(box?.state) return writeLocalState(box.state,nextState);
-  }).catch(()=>{});
+  const shadow = readShadow(STATE_SHADOW);
+  if(shadow?.state) writeLocalState(shadow.state,nextState).catch(()=>{});
 }
 
 function mergeState(latest, local, base, keys){
@@ -196,21 +247,13 @@ function mergeState(latest, local, base, keys){
       merged[key] = clone(localValue);
     }
   }
-  merged._sync = {
-    revision:Number(latest?._sync?.revision || 0)+1,
-    updatedAt:Date.now(),
-    deviceId:getDeviceId()
-  };
+  merged._sync = {revision:Number(latest?._sync?.revision || 0)+1,updatedAt:Date.now(),deviceId:getDeviceId()};
   return {merged,changed};
 }
 
 async function enqueue(local,base,action){
   const changed = changedKeys(local,base);
-  const item = {
-    id:`${getDeviceId()}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
-    state:clone(local), base:clone(base), changed, action,
-    createdAt:Date.now(), deviceId:getDeviceId()
-  };
+  const item = {id:`${getDeviceId()}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,state:clone(local),base:clone(base),changed,action,createdAt:Date.now(),deviceId:getDeviceId()};
   await idbPut("queue",item);
   return item;
 }
@@ -225,32 +268,38 @@ async function flushOne({db,ref}, item){
   });
   await idbDelete("queue",item.id);
   baseline = clone(result.merged);
-  const box = await idbGet("kv",STATE_KEY);
+  const box = readShadow(STATE_SHADOW) || await idbGet("kv",STATE_KEY);
   if(box?.state) await writeLocalState(box.state,result.merged);
   try{
-    await addDoc(collection(db,"operationLogs"),{
-      action:item.action, changed:item.changed, deviceId:item.deviceId,
-      createdAt:serverTimestamp(), clientTime:item.createdAt
-    });
+    await addDoc(collection(db,"operationLogs"),{action:item.action,changed:item.changed,deviceId:item.deviceId,createdAt:serverTimestamp(),clientTime:item.createdAt});
   }catch(err){ console.warn("操作日志写入失败",err); }
+}
+
+async function flushRecordOne({db}, item){
+  await setDoc(doc(db,"records",String(item.record.id)), item.record);
+  await idbDelete("recordQueue",item.id);
 }
 
 export async function flushPending({db,ref}){
   if(!navigator.onLine) return;
   const items = (await idbAll("queue")).sort((a,b)=>a.createdAt-b.createdAt);
-  if(!items.length){ setSyncStatus("synced"); return; }
-  setSyncStatus("syncing",`● 本机已保存 · 正在上传 ${items.length} 项`);
-  for(const item of items){
-    if(!navigator.onLine) break;
-    await flushOne({db,ref},item);
-  }
-  const left = await idbAll("queue");
-  setSyncStatus(left.length ? "pending" : "synced", left.length ? `● 已保存本机 · ${left.length} 项等待上传` : undefined);
+  const recordItems = (await idbAll("recordQueue")).sort((a,b)=>a.createdAt-b.createdAt);
+  const total = items.length + recordItems.length;
+  if(!total){ setSyncStatus("synced"); return; }
+  setSyncStatus("syncing",`● 本机已保存 · 正在上传 ${total} 项`);
+  for(const item of items){ if(!navigator.onLine) break; await flushOne({db,ref},item); }
+  for(const item of recordItems){ if(!navigator.onLine) break; await flushRecordOne({db},item); }
+  const left = (await idbAll("queue")).length + (await idbAll("recordQueue")).length;
+  setSyncStatus(left ? "pending" : "synced", left ? `● 已保存本机 · ${left} 项等待上传` : undefined);
+}
+
+async function pendingCount(){
+  return (await idbAll("queue").catch(()=>[])).length + (await idbAll("recordQueue").catch(()=>[])).length;
 }
 
 export function installConnectionGuard(){
   const update = async ()=>{
-    const count = (await idbAll("queue").catch(()=>[])).length;
+    const count = await pendingCount();
     if(!navigator.onLine) setSyncStatus("offline",`● 已保存本机 · 离线 · ${count} 项待上传`);
     else setSyncStatus(count ? "pending" : "synced",count ? `● 已保存本机 · ${count} 项等待上传` : undefined);
     window.dispatchEvent(new CustomEvent("chiptune-online-change",{detail:{online:navigator.onLine}}));
@@ -262,13 +311,17 @@ export function installConnectionGuard(){
 }
 
 export function saveStateSafely({db,ref,getState,action="state_update"}){
+  const immediate = clone(getState());
+  const immediateBase = clone(baseline || immediate);
+  writeShadow(STATE_SHADOW,{state:immediate,cloudBaseline:immediateBase,savedAt:Date.now(),deviceId:getDeviceId()});
+
   saveQueue = saveQueue.catch(()=>{}).then(async()=>{
     const local = clone(getState());
-    const base = clone(baseline || local);
+    const base = clone(baseline || immediateBase || local);
     setSyncStatus("saving");
     await writeLocalState(local,base);
     await enqueue(local,base,action);
-    const count = (await idbAll("queue")).length;
+    const count = await pendingCount();
     setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? `● 已保存本机 · ${count} 项等待上传` : `● 已保存本机 · 离线 · ${count} 项待上传`);
     if(navigator.onLine){
       clearTimeout(flushTimer);
@@ -284,6 +337,26 @@ export function saveStateSafely({db,ref,getState,action="state_update"}){
     throw err;
   });
   return saveQueue;
+}
+
+export async function saveRecordSafely({db,ref,record}){
+  const next = clone(record);
+  next.localUpdatedAt = Date.now();
+  const current = await loadLocalRecords();
+  const merged = mergeRecordLists(current,[next]);
+  writeShadow(RECORDS_SHADOW,merged);
+  await writeLocalRecords(merged);
+  await idbPut("recordQueue",{id:`record_${next.id}`,record:next,createdAt:Date.now()});
+  const count = await pendingCount();
+  setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? `● 已保存本机 · ${count} 项等待上传` : `● 已保存本机 · 离线 · ${count} 项待上传`);
+  if(navigator.onLine){
+    clearTimeout(flushTimer);
+    flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
+      console.warn("账单同步失败，将自动重试",err);
+      setSyncStatus("pending","● 账单已保存本机 · 云端同步失败，将重试");
+    }),150);
+  }
+  return next;
 }
 
 export async function atomicAdjustTableExtra({db,ref,tableIndex,deltaMs,action,getState}){

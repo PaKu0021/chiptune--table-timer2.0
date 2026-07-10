@@ -1,7 +1,7 @@
 /*alert("app.js 已加载");*/
 import { db } from "./firebase.js";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, saveRecordSafely } from "./safe-state.js";
 /*import { formatTime } from "./common.js";*/
 import { resetTable, formatTime } from "./common.js";
 const ref = doc(db, "shop", "main");
@@ -263,8 +263,17 @@ function getDueJPY(t){
 async function getTableRecord(t){
   if(!t.recordId) return null;
 
-  const snap = await getDoc(doc(db, "records", t.recordId));
-  return snap.exists() ? snap.data() : null;
+  const local = await getLocalRecord(t.recordId);
+  if(local) return local;
+
+  if(!navigator.onLine) return null;
+  try{
+    const snap = await getDoc(doc(db, "records", t.recordId));
+    return snap.exists() ? snap.data() : null;
+  }catch(err){
+    console.warn("读取云端账单失败，继续使用本机数据", err);
+    return null;
+  }
 }
 
 function makeCustomerKey(name, phoneLast4){
@@ -471,12 +480,12 @@ if(visit){
   record.visitRange = visit.range;
 }
 
-await setDoc(doc(db, "records", record.id), record);
+await saveRecordSafely({db, ref, record});
   return record;
 }
 
 async function updateRecordOnly(record){
-  await setDoc(doc(db, "records", record.id), record);
+  await saveRecordSafely({db, ref, record});
 }
 
 function getStatus(t){
@@ -922,7 +931,7 @@ await createOrUpdateRecord(t);
     booking.checkInTimeText = new Date(startTime).toLocaleString();
   }
 }
-  save();
+  await save("start_table");
 }
 
 function pause(i){

@@ -1,5 +1,5 @@
 import { doc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely } from "./safe-state.js";
 
 
 import { db } from "./firebase.js";
@@ -21,6 +21,10 @@ window.addEventListener("chiptune-online-change",e=>{
 });
 
 let records = [];
+loadLocalRecords().then(localRecords=>{
+  records = mergeRecordLists(records, localRecords);
+  renderTodayBill();
+}).catch(err=>console.warn("读取本机账单失败",err));
 let editingRecordId = null;
 let uploadingPaymentRecordId = null;
 let uploadingPaymentIndex = null;
@@ -45,15 +49,17 @@ renderTodayBill();
 
 onSnapshot(recordsRef, snap => {
 
-  records = snap.docs
+  const cloudRecords = snap.docs
   .map(d => ({
     id: d.id,
     ...d.data()
   }))
   .filter(r => r.id !== "init");
 
-
-  renderTodayBill();
+  loadLocalRecords().then(localRecords=>{
+    records = mergeRecordLists(cloudRecords, localRecords);
+    renderTodayBill();
+  });
 });
 
 function dateKey(ts){
@@ -730,7 +736,7 @@ function closeReceiptPreview(){
   if(bg) bg.style.display = "none";
 }
 
-function confirmExtension(recordId){
+async function confirmExtension(recordId){
 const r = records.find(x => x.id === recordId);
 
   if(!r) return;
@@ -749,7 +755,7 @@ if(!hasReceipt){
   r.extensionConfirmedAt = Date.now();
   r.extensionConfirmedTime = new Date().toLocaleString();
 
-  setDoc(doc(db, "records", r.id), r);
+  await saveRecordSafely({db, ref, record:r});
   alert("续费已确认");
 }
 
@@ -845,7 +851,7 @@ async function saveEditedRecord(){
     delete r.groupPaymentNote;
   }
 
-  await setDoc(doc(db,"records",r.id),r);
+  await saveRecordSafely({db, ref, record:r});
 
   closeEditRecord();
   alert("账单已修改");
