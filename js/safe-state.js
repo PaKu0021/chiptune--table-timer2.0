@@ -188,6 +188,13 @@ async function writeLocalRecords(records){
   await idbPut("kv",list,RECORDS_KEY);
 }
 
+
+export async function replaceLocalRecords(records){
+  const merged = mergeRecordLists([], records || []);
+  await writeLocalRecords(merged);
+  return clone(merged);
+}
+
 export async function getLocalRecord(recordId){
   if(!recordId) return null;
   const list = await loadLocalRecords();

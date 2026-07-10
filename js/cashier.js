@@ -1,6 +1,6 @@
 import { db } from "./firebase.js";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending } from "./safe-state.js";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, loadLocalState, replaceLocalRecords } from "./safe-state.js";
 
 
 import {
@@ -9,7 +9,9 @@ import {
   setDoc,
   collection,
   query,
-  where
+  where,
+  getDocsFromServer,
+  getDocFromServer
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 
@@ -607,6 +609,105 @@ function applyDateFilter(){
   renderCashier();
 }
 
+
+function looksLikeRecord(r){
+  if(!r || typeof r !== "object" || Array.isArray(r)) return false;
+  const hasTime = r.timestamp || r.closedAt || r.paidAt || r.startAt || r.time || r.date || r.businessDate;
+  const hasMoney = r.totalJPY !== undefined || r.jpy !== undefined || r.originalJPY !== undefined || Array.isArray(r.payments);
+  const hasBillInfo = r.tableName || r.packageName || r.pay || r.checkoutMethod || r.type;
+  return Boolean(hasTime && (hasMoney || hasBillInfo));
+}
+
+function stableRecoveredId(r,index=0){
+  if(r.id) return String(r.id);
+  const ts = Number(r.closedAt || r.paidAt || r.timestamp || r.startAt || 0);
+  const table = String(r.tableName || r.table || r.tableIndex || "table").replace(/[^a-zA-Z0-9_-]/g,"");
+  const amount = Number(r.totalJPY || r.jpy || r.originalJPY || 0);
+  return `recovered_${ts || Date.now()}_${table}_${amount}_${index}`;
+}
+
+function collectRecordsFromUnknown(value,out,depth=0){
+  if(depth > 4 || value == null) return;
+  if(Array.isArray(value)){
+    value.forEach((item,i)=>{
+      if(looksLikeRecord(item)) out.push({...item,id:stableRecoveredId(item,i)});
+      else collectRecordsFromUnknown(item,out,depth+1);
+    });
+    return;
+  }
+  if(typeof value !== "object") return;
+  if(Array.isArray(value.records)) collectRecordsFromUnknown(value.records,out,depth+1);
+  if(value.state && typeof value.state === "object") collectRecordsFromUnknown(value.state,out,depth+1);
+}
+
+async function recoverHistoricalRecords(){
+  const btn = document.getElementById("recoverRecordsBtn");
+  if(btn){ btn.disabled = true; btn.textContent = "正在查找…"; }
+
+  const found = [];
+  const notes = [];
+
+  try{
+    const serverSnap = await getDocsFromServer(collection(db,"records"));
+    found.push(...serverSnap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.id!=="init"));
+    notes.push(`云端 records：${serverSnap.size} 条`);
+  }catch(err){
+    notes.push(`云端 records 读取失败：${err?.message || err}`);
+  }
+
+  try{
+    const mainSnap = await getDocFromServer(ref);
+    if(mainSnap.exists()){
+      const legacy = mainSnap.data()?.records;
+      if(Array.isArray(legacy)){
+        collectRecordsFromUnknown(legacy,found);
+        notes.push(`旧 shop/main.records：${legacy.length} 条`);
+      }
+    }
+  }catch(err){
+    notes.push(`旧云端账单读取失败：${err?.message || err}`);
+  }
+
+  try{
+    const localState = await loadLocalState();
+    if(Array.isArray(localState?.records)){
+      collectRecordsFromUnknown(localState.records,found);
+      notes.push(`本机旧 state.records：${localState.records.length} 条`);
+    }
+  }catch(err){ console.warn(err); }
+
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const key = localStorage.key(i);
+      if(!key) continue;
+      const raw = localStorage.getItem(key);
+      if(!raw || raw.length < 10) continue;
+      try{
+        const value = JSON.parse(raw);
+        const before = found.length;
+        collectRecordsFromUnknown(value,found);
+        if(found.length > before) notes.push(`本机备份 ${key}：发现 ${found.length-before} 条`);
+      }catch{}
+    }
+  }catch(err){ console.warn("扫描本机备份失败",err); }
+
+  const currentLocal = await loadLocalRecords().catch(()=>[]);
+  const merged = mergeRecordLists(records, mergeRecordLists(currentLocal,found));
+  records = await replaceLocalRecords(merged);
+  renderCashier();
+
+  // 将仅存在于旧结构/本机备份的记录排队上传，失败也不影响恢复显示。
+  Promise.resolve().then(async()=>{
+    for(const r of records){
+      try{ await saveRecordSafely({db,ref,record:r}); }catch(err){ console.warn("历史账单等待以后同步",r.id,err); }
+    }
+  });
+
+  if(btn){ btn.disabled = false; btn.textContent = "恢复历史记录"; }
+  const msg = `恢复扫描完成：当前共 ${records.length} 条。\n\n${notes.join("\n")}`;
+  alert(msg);
+}
+
 async function cleanupOldReceipts(){
   if(!confirm("确定清理90天前的收款截图吗？\n\nFirestore里的截图字段会清空，Storage里的图片文件也会删除。")) return;
 
@@ -644,3 +745,4 @@ window.uploadReceipt = uploadReceipt;
 window.viewReceipt = viewReceipt;
 window.closeReceiptPreview = closeReceiptPreview;
 window.cleanupOldReceipts = cleanupOldReceipts;
+window.recoverHistoricalRecords = recoverHistoricalRecords;
