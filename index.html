@@ -74,12 +74,30 @@
  
 <script type="module">
 import { db } from "./js/firebase.js";
+import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending } from "./js/safe-state.js";
 import { doc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
 
 let homeState = null;
 let allRecords = [];
+installConnectionGuard();
+
+loadLocalState().then(local=>{
+  if(local){
+    homeState = local;
+    updateHome();
+  }
+});
+
+loadLocalRecords().then(localRecords=>{
+  allRecords = mergeRecordLists(allRecords, localRecords);
+  updateHome();
+});
+
+window.addEventListener("chiptune-online-change",e=>{
+  if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
+});
 
 
 function getTodayDate(){
@@ -105,23 +123,26 @@ function getRecordBusinessDate(r){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
-onSnapshot(ref,snap=>{
+onSnapshot(ref,async snap=>{
   if(!snap.exists()) return;
 
-  homeState = snap.data();
+  homeState = await reconcileCloudState(snap.data());
   updateHome();
 });
 
 onSnapshot(recordsRef,snap=>{
  
-allRecords = snap.docs
+const cloudRecords = snap.docs
   .map(d=>({
     id: d.id,
     ...d.data()
   }))
   .filter(r=>r.id !== "init");
 
-  updateHome();
+  loadLocalRecords().then(localRecords=>{
+    allRecords = mergeRecordLists(cloudRecords, localRecords);
+    updateHome();
+  });
 });
 
 function updateHome(){
