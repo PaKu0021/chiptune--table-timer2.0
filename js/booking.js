@@ -1,12 +1,22 @@
 import { db } from "./firebase.js";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js";
 import { resetTable } from "./common.js";
 
 
 const ref = doc(db, "shop", "main");
 let state = null;
 installConnectionGuard();
+loadLocalState().then(local=>{
+  if(local && !state){
+    state = local;
+    try{ renderList(); renderBookingGrid(); startBookingAutoRefresh(); }catch(err){ console.warn("本机预约缓存显示失败",err); }
+  }
+});
+window.addEventListener("chiptune-online-change",e=>{
+  if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
+});
+
 let activeBookingId = null;
 let bookingLocked = true;
 let currentBookingDate = getTodayDate();
@@ -135,12 +145,12 @@ function getRunningColor(t){
   return t.activeColor || "#B7E4C7";
 }
 
-onSnapshot(ref, { includeMetadataChanges:true }, snap=>{
+onSnapshot(ref, { includeMetadataChanges:true }, async snap=>{
   if(!snap.exists()) return;
 
-  state = snap.data();
+  state = await reconcileCloudState(snap.data());
   if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
-  setSyncStatus(snap.metadata.fromCache ? "cache" : "synced");
+  if(snap.metadata.fromCache) setSyncStatus("cache");
 
   if(!state.bookings) state.bookings = [];
   if(!state.customers) state.customers = [];

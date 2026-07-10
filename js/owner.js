@@ -1,7 +1,7 @@
 import { db } from "./firebase.js";
 
 import { doc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -9,6 +9,16 @@ const RATE = 0.044;
 
 let state = null;
 installConnectionGuard();
+loadLocalState().then(local=>{
+  if(local && !state){
+    state = local;
+    try{ render(); renderBusinessHours(); }catch(err){ console.warn("本机设置显示失败",err); }
+  }
+});
+window.addEventListener("chiptune-online-change",e=>{
+  if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
+});
+
 let currentFilter = "today";
 let currencyMode = "CONVERTED";
 let packagePanelOpen = false;
@@ -33,12 +43,12 @@ function newTable(i){
   };
 }
 
-onSnapshot(ref,{ includeMetadataChanges:true },snap=>{
+onSnapshot(ref,{ includeMetadataChanges:true },async snap=>{
   if(!snap.exists()) return;
 
-  state = snap.data();
+  state = await reconcileCloudState(snap.data());
   if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
-  setSyncStatus(snap.metadata.fromCache ? "cache" : "synced");
+  if(snap.metadata.fromCache) setSyncStatus("cache");
 
   if(!state.packages) state.packages = [];
   if(!state.tables) state.tables = [];

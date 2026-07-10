@@ -1,5 +1,5 @@
 import { doc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js";
 
 
 import { db } from "./firebase.js";
@@ -10,6 +10,16 @@ const RATE = 0.044;
 
 let state = null;
 installConnectionGuard();
+loadLocalState().then(local=>{
+  if(local && !state){
+    state = local;
+    try{ renderTodayBill(); }catch(err){ console.warn("本机账单状态显示失败",err); }
+  }
+});
+window.addEventListener("chiptune-online-change",e=>{
+  if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
+});
+
 let records = [];
 let editingRecordId = null;
 let uploadingPaymentRecordId = null;
@@ -18,12 +28,12 @@ let uploadingGroupId = null;
 let uploadingGroupPaymentIndex = null;
 
 
-onSnapshot(ref, { includeMetadataChanges:true }, snap => {
+onSnapshot(ref, { includeMetadataChanges:true }, async snap => {
   if(!snap.exists()) return;
 
-  state = snap.data();
+  state = await reconcileCloudState(snap.data());
   if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
-  setSyncStatus(snap.metadata.fromCache ? "cache" : "synced");
+  if(snap.metadata.fromCache) setSyncStatus("cache");
 
 if(!Array.isArray(state.groups)){
   state.groups = [];

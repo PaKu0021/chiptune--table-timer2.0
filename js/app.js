@@ -1,7 +1,7 @@
 /*alert("app.js 已加载");*/
 import { db } from "./firebase.js";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js";
 /*import { formatTime } from "./common.js";*/
 import { resetTable, formatTime } from "./common.js";
 const ref = doc(db, "shop", "main");
@@ -11,6 +11,16 @@ const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpU
 
 let state = null;
 installConnectionGuard();
+loadLocalState().then(local=>{
+  if(local && !state){
+    state = local;
+    try{ render(); autoCloseOldTables(); }catch(err){ console.warn("本机状态初始显示失败",err); }
+  }
+});
+window.addEventListener("chiptune-online-change",e=>{
+  if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
+});
+
 let checkoutIndex = null;
 let useRound = false;
 let alertLoops = {};
@@ -46,11 +56,11 @@ const defaultState = {
   customers:{}
 };
 
-onSnapshot(ref, { includeMetadataChanges:true }, snap=>{
+onSnapshot(ref, { includeMetadataChanges:true }, async snap=>{
   if(snap.exists()){
-    state = snap.data();
+    state = await reconcileCloudState(snap.data());
     if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
-    setSyncStatus(snap.metadata.fromCache ? "cache" : "synced");
+    if(snap.metadata.fromCache) setSyncStatus("cache");
 /*alert("Firestore已读取");*/
     
     if(!state.packages) state.packages = defaultState.packages;
@@ -947,7 +957,7 @@ async function addHour(i){
   stopAlertLoop(i);
   try{
     const updated = await atomicAdjustTableExtra({
-      db, ref, tableIndex:i, deltaMs:60 * 60 * 1000, action:"extend_one_hour"
+      db, ref, tableIndex:i, deltaMs:60 * 60 * 1000, action:"extend_one_hour", getState:()=>state
     });
     state.tables[i] = {...state.tables[i], ...updated};
     await createOrUpdateRecord(state.tables[i]);
@@ -961,7 +971,7 @@ async function undoHour(i){
   stopAlertLoop(i);
   try{
     const updated = await atomicAdjustTableExtra({
-      db, ref, tableIndex:i, deltaMs:-60 * 60 * 1000, action:"undo_one_hour"
+      db, ref, tableIndex:i, deltaMs:-60 * 60 * 1000, action:"undo_one_hour", getState:()=>state
     });
     state.tables[i] = {...state.tables[i], ...updated};
     if(state.tables[i].start) await createOrUpdateRecord(state.tables[i]);
