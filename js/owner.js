@@ -1,12 +1,14 @@
 import { db } from "./firebase.js";
 
-import { doc, setDoc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus } from "./safe-state.js";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
 const RATE = 0.044;
 
 let state = null;
+installConnectionGuard();
 let currentFilter = "today";
 let currencyMode = "CONVERTED";
 let packagePanelOpen = false;
@@ -31,10 +33,12 @@ function newTable(i){
   };
 }
 
-onSnapshot(ref,snap=>{
+onSnapshot(ref,{ includeMetadataChanges:true },snap=>{
   if(!snap.exists()) return;
 
   state = snap.data();
+  if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
+  setSyncStatus(snap.metadata.fromCache ? "cache" : "synced");
 
   if(!state.packages) state.packages = [];
   if(!state.tables) state.tables = [];
@@ -67,8 +71,8 @@ records = snap.docs
   }  
 });
 
-function save(){
-  return setDoc(ref,state);
+function save(action="owner_update"){
+  return saveStateSafely({db, ref, getState:()=>state, action});
 }
 
 function dateKey(ts){

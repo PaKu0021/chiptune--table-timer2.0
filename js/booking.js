@@ -1,10 +1,12 @@
 import { db } from "./firebase.js";
-import { doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus } from "./safe-state.js";
 import { resetTable } from "./common.js";
 
 
 const ref = doc(db, "shop", "main");
 let state = null;
+installConnectionGuard();
 let activeBookingId = null;
 let bookingLocked = true;
 let currentBookingDate = getTodayDate();
@@ -133,10 +135,12 @@ function getRunningColor(t){
   return t.activeColor || "#B7E4C7";
 }
 
-onSnapshot(ref, snap=>{
+onSnapshot(ref, { includeMetadataChanges:true }, snap=>{
   if(!snap.exists()) return;
 
   state = snap.data();
+  if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
+  setSyncStatus(snap.metadata.fromCache ? "cache" : "synced");
 
   if(!state.bookings) state.bookings = [];
   if(!state.customers) state.customers = [];
@@ -181,8 +185,8 @@ try{
   }
 });
 
-async function save(){
-  await setDoc(ref,state);
+async function save(action="booking_update"){
+  return saveStateSafely({db, ref, getState:()=>state, action});
 }
 
 
@@ -2292,7 +2296,7 @@ for(const idx of startIndexes){
     endTime:b.endTime
   });
 
-await setDoc(ref, JSON.parse(JSON.stringify(state)));
+await save("booking_checkin");
 
 alert("已写入计时器数据，请去计时器页面查看");
 

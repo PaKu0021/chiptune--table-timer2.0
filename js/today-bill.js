@@ -1,4 +1,5 @@
-import { doc, onSnapshot, setDoc, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus } from "./safe-state.js";
 
 
 import { db } from "./firebase.js";
@@ -8,6 +9,7 @@ const recordsRef = collection(db, "records");
 const RATE = 0.044;
 
 let state = null;
+installConnectionGuard();
 let records = [];
 let editingRecordId = null;
 let uploadingPaymentRecordId = null;
@@ -16,10 +18,12 @@ let uploadingGroupId = null;
 let uploadingGroupPaymentIndex = null;
 
 
-onSnapshot(ref, snap => {
+onSnapshot(ref, { includeMetadataChanges:true }, snap => {
   if(!snap.exists()) return;
 
   state = snap.data();
+  if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
+  setSyncStatus(snap.metadata.fromCache ? "cache" : "synced");
 
 if(!Array.isArray(state.groups)){
   state.groups = [];
@@ -607,7 +611,7 @@ async function handleGroupPaymentReceiptFile(file){
     payment.receiptUploadedAt = Date.now();
     payment.receiptUploadedTime = new Date().toLocaleString();
 
-    await setDoc(ref,state);
+    await saveStateSafely({db, ref, getState:()=>state, action:"today_bill_update"});
 
     uploadingGroupId = null;
     uploadingGroupPaymentIndex = null;

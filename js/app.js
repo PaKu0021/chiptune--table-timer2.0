@@ -1,6 +1,7 @@
 /*alert("app.js 已加载");*/
 import { db } from "./firebase.js";
-import { doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra } from "./safe-state.js";
 /*import { formatTime } from "./common.js";*/
 import { resetTable, formatTime } from "./common.js";
 const ref = doc(db, "shop", "main");
@@ -9,6 +10,7 @@ const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpU
 
 
 let state = null;
+installConnectionGuard();
 let checkoutIndex = null;
 let useRound = false;
 let alertLoops = {};
@@ -44,9 +46,11 @@ const defaultState = {
   customers:{}
 };
 
-onSnapshot(ref, snap=>{
+onSnapshot(ref, { includeMetadataChanges:true }, snap=>{
   if(snap.exists()){
     state = snap.data();
+    if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
+    setSyncStatus(snap.metadata.fromCache ? "cache" : "synced");
 /*alert("Firestore已读取");*/
     
     if(!state.packages) state.packages = defaultState.packages;
@@ -80,6 +84,7 @@ onSnapshot(ref, snap=>{
   if(t.visitRange === undefined) t.visitRange = "";
   if(t.bookingId === undefined) t.bookingId = null;
   if(t.activeColor === undefined) t.activeColor = "";
+  if(!t.customPackage) t.customPackage = { enabled:false, name:"自定义套餐", minutes:60, price:0, extensionPrice:0 };
 });
 
     /*alert("准备render");*/
@@ -93,12 +98,23 @@ onSnapshot(ref, snap=>{
 
 
 
-async function save(){
-  await setDoc(ref,state);
+async function save(action="state_update"){
+  return saveStateSafely({db, ref, getState:()=>state, action});
 }
 
 
 function getPackage(t){
+  if(t.customPackage?.enabled){
+    return {
+      name: String(t.customPackage.name || "自定义套餐"),
+      minutes: Math.max(1, Number(t.customPackage.minutes || 60)),
+      price: Math.max(0, Number(t.customPackage.price || 0)),
+      extensionPrice: Math.max(0, Number(t.customPackage.extensionPrice || 0)),
+      unlimited:false,
+      custom:true
+    };
+  }
+
   const idx = Number(t.packageIndex ?? 0);
   return state.packages[idx] || state.packages[0] || {
     name:"1小时",
@@ -156,6 +172,13 @@ function getOriginalJPY(t){
 
   if(p.unlimited){
     return Number(p.price || 0);
+  }
+
+  const extraHours = Math.floor(Number(t.extra || 0) / 3600000);
+
+  // 临时自定义套餐完全独立于固定套餐的阶梯价格。
+  if(p.custom){
+    return Number(p.price || 0) + extraHours * Number(p.extensionPrice || 0);
   }
 
   const baseMinutes = Number(p.minutes || 0);
@@ -575,13 +598,36 @@ filteredTables.forEach(({t,i})=>{
     div.innerHTML = `
       <h3>${t.name}</h3>
 
-    <select onchange="setPackage(${i},this.value)" ${t.start ? "disabled" : ""}>
+    <select onchange="setPackage(${i},this.value)" ${t.start || t.customPackage?.enabled ? "disabled" : ""}>
   ${state.packages.map((pkg,idx)=>`
     <option value="${idx}" ${idx===t.packageIndex ? "selected" : ""}>
       ${pkg.name} | ${pkg.unlimited ? "不限时" : pkg.minutes + "分钟"} | ¥${pkg.price}
     </option>
   `).join("")}
 </select>
+
+${!t.start ? `
+  <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-weight:800;">
+    <input type="checkbox" style="width:auto;" ${t.customPackage?.enabled ? "checked" : ""}
+      onchange="setCustomPackageEnabled(${i},this.checked)">
+    使用临时自定义套餐
+  </label>
+
+  ${t.customPackage?.enabled ? `
+    <div class="custom-package-box" style="padding:10px;border:1px solid #ddd;border-radius:10px;margin-bottom:10px;">
+      <input value="${t.customPackage.name || "自定义套餐"}" placeholder="套餐名"
+        onchange="updateCustomPackage(${i},'name',this.value)">
+      <div class="row">
+        <input type="number" min="1" value="${Number(t.customPackage.minutes || 60)}" placeholder="套餐分钟"
+          onchange="updateCustomPackage(${i},'minutes',this.value)">
+        <input type="number" min="0" value="${Number(t.customPackage.price || 0)}" placeholder="套餐金额"
+          onchange="updateCustomPackage(${i},'price',this.value)">
+      </div>
+      <input type="number" min="0" value="${Number(t.customPackage.extensionPrice || 0)}" placeholder="每续1小时金额"
+        onchange="updateCustomPackage(${i},'extensionPrice',this.value)">
+    </div>
+  ` : ""}
+` : ""}
 
 <div class="timer" style="color:${status==="overtime" ? "#e85d5d" : status==="warning" ? "#ff9800" : "#333"};">
   ${timeText}
@@ -622,9 +668,17 @@ ${t.start ? `
 </div>
 
       ${p.unlimited ? "" : `
-        <button class="${status==="warning" ? "btn-warn" : "btn-main"} full" onclick="addHour(${i})">
-          +1小时 → ¥${calcPriceByTotalMinutes((Number(p.minutes || 0) + Math.floor(Number(t.extra || 0) / 60000) + 60)).toLocaleString()}
-        </button>
+        <div class="action-row">
+          <button class="${status==="warning" ? "btn-warn" : "btn-main"}" onclick="addHour(${i})">
+            +1小时 → ¥${(p.custom
+              ? getOriginalJPY({...t, extra:Number(t.extra || 0) + 3600000})
+              : calcPriceByTotalMinutes((Number(p.minutes || 0) + Math.floor(Number(t.extra || 0) / 60000) + 60))
+            ).toLocaleString()}
+          </button>
+          <button class="btn-ghost" onclick="undoHour(${i})" ${Number(t.extra || 0) < 3600000 ? "disabled" : ""}>
+            撤回1小时
+          </button>
+        </div>
       `}
       
       <select onchange="setPayTiming(${i},this.value)" ${t.start ? "disabled" : ""}>
@@ -769,6 +823,7 @@ async function setPackage(i,v){
   const t = state.tables[i];
 
   t.packageIndex = Number(v);
+  if(t.customPackage) t.customPackage.enabled = false;
 
   if(t.start){
     await createOrUpdateRecord(t);
@@ -922,14 +977,60 @@ function resume(i){
 }
 
 async function addHour(i){
-  const t = state.tables[i];
-
   stopAlertLoop(i);
+  try{
+    const updated = await atomicAdjustTableExtra({
+      db, ref, tableIndex:i, deltaMs:60 * 60 * 1000, action:"extend_one_hour"
+    });
+    state.tables[i] = {...state.tables[i], ...updated};
+    await createOrUpdateRecord(state.tables[i]);
+    render();
+  }catch(err){
+    alert(err.message || "续时保存失败");
+  }
+}
 
-  t.extra += 60 * 60 * 1000;
-  t.alerted = false;
-  t.alerting = false;
-  await createOrUpdateRecord(t);
+async function undoHour(i){
+  stopAlertLoop(i);
+  try{
+    const updated = await atomicAdjustTableExtra({
+      db, ref, tableIndex:i, deltaMs:-60 * 60 * 1000, action:"undo_one_hour"
+    });
+    state.tables[i] = {...state.tables[i], ...updated};
+    if(state.tables[i].start) await createOrUpdateRecord(state.tables[i]);
+    render();
+  }catch(err){
+    alert(err.message || "撤回续时失败");
+  }
+}
+
+function setCustomPackageEnabled(i, enabled){
+  const t = state.tables[i];
+  if(t.start) return;
+
+  if(!t.customPackage){
+    t.customPackage = { enabled:false, name:"自定义套餐", minutes:60, price:0, extensionPrice:0 };
+  }
+
+  t.customPackage.enabled = Boolean(enabled);
+  render();
+  save();
+}
+
+function updateCustomPackage(i, field, value){
+  const t = state.tables[i];
+  if(t.start) return;
+
+  if(!t.customPackage){
+    t.customPackage = { enabled:true, name:"自定义套餐", minutes:60, price:0, extensionPrice:0 };
+  }
+
+  if(field === "name"){
+    t.customPackage.name = String(value || "自定义套餐");
+  }else{
+    t.customPackage[field] = Math.max(field === "minutes" ? 1 : 0, Number(value || 0));
+  }
+
   save();
 }
 
@@ -2073,6 +2174,9 @@ window.start = start;
 window.pause = pause;
 window.resume = resume;
 window.addHour = addHour;
+window.undoHour = undoHour;
+window.setCustomPackageEnabled = setCustomPackageEnabled;
+window.updateCustomPackage = updateCustomPackage;
 window.setPay = setPay;
 window.setCurrency = setCurrency;
 window.openCheckout = openCheckout;

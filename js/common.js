@@ -29,6 +29,13 @@ export function resetTable(name){
     extra:0,
 
     packageIndex:0,
+    customPackage:{
+      enabled:false,
+      name:"自定义套餐",
+      minutes:60,
+      price:0,
+      extensionPrice:0
+    },
 
     recordId:null,
 
