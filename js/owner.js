@@ -1,7 +1,7 @@
 import { db } from "./firebase.js";
 
-import { doc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js";
+import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely } from "./safe-state.js";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -23,6 +23,10 @@ let currentFilter = "today";
 let currencyMode = "CONVERTED";
 let packagePanelOpen = false;
 let records = [];
+loadLocalRecords().then(localRecords=>{
+  records = mergeRecordLists(records, localRecords);
+  if(state) render();
+}).catch(err=>console.warn("读取本机收银记录失败",err));
 let customerPanelOpen = false;
 let customerSearch = "";
 
@@ -68,17 +72,21 @@ renderBusinessHours();
 });
 
 onSnapshot(recordsRef, snap=>{
+  const cloudRecords = snap.docs
+    .map(d=>({
+      id: d.id,
+      ...d.data()
+    }))
+    .filter(r=>r.id !== "init");
 
-records = snap.docs
-  .map(d=>({
-    id: d.id,
-    ...d.data()
-  }))
-  .filter(r=>r.id !== "init");
-
-  if(state){
-    render();
-  }  
+  loadLocalRecords().then(localRecords=>{
+    records = mergeRecordLists(cloudRecords, localRecords);
+    if(state) render();
+  }).catch(err=>{
+    console.warn("合并本机收银记录失败",err);
+    records = cloudRecords;
+    if(state) render();
+  });
 });
 
 function save(action="owner_update"){

@@ -1,5 +1,7 @@
 import { db } from "./firebase.js";
 
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending } from "./safe-state.js";
+
 
 import {
   doc,
@@ -95,6 +97,14 @@ const RATE = 0.044;
 
 let state = null;
 let records = [];
+installConnectionGuard();
+loadLocalRecords().then(localRecords=>{
+  records = mergeRecordLists(records, localRecords);
+  if(state) renderCashier();
+}).catch(err=>console.warn("读取本机收银记录失败",err));
+window.addEventListener("chiptune-online-change",e=>{
+  if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
+});
 let quickRange = "today";
 let initialized = false; 
 
@@ -577,17 +587,21 @@ onSnapshot(ref, snap=>{
 const recordsQuery = collection(db,"records");
 
 onSnapshot(recordsQuery,snap=>{
+  const cloudRecords = snap.docs
+    .map(d=>({
+      id: d.id,
+      ...d.data()
+    }))
+    .filter(r=>r.id !== "init");
 
-records = snap.docs
-  .map(d=>({
-    id: d.id,
-    ...d.data()
-  }))
-  .filter(r=>r.id !== "init");    
-
-  if(state){
-    renderCashier();
-  }
+  loadLocalRecords().then(localRecords=>{
+    records = mergeRecordLists(cloudRecords, localRecords);
+    if(state) renderCashier();
+  }).catch(err=>{
+    console.warn("合并本机收银记录失败",err);
+    records = cloudRecords;
+    if(state) renderCashier();
+  });
 });
 
 
