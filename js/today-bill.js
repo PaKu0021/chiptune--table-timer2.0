@@ -1,5 +1,5 @@
 import { doc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, migrateLegacyRecordsOnce } from "./safe-state.js";
 
 
 import { db } from "./firebase.js";
@@ -17,7 +17,10 @@ loadLocalState().then(local=>{
   }
 });
 window.addEventListener("chiptune-online-change",e=>{
-  if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
+  if(e.detail?.online){
+    flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
+    migrateLegacyRecordsOnce({db,ref}).then(result=>{ records = mergeRecordLists(records,result.records); renderTodayBill(); }).catch(()=>{});
+  }
 });
 
 let records = [];
@@ -25,6 +28,11 @@ loadLocalRecords().then(localRecords=>{
   records = mergeRecordLists(records, localRecords);
   renderTodayBill();
 }).catch(err=>console.warn("读取本机账单失败",err));
+
+migrateLegacyRecordsOnce({db,ref}).then(result=>{
+  records = mergeRecordLists(records,result.records);
+  renderTodayBill();
+}).catch(err=>console.warn("历史账单一次性迁移暂未完成",err));
 let editingRecordId = null;
 let uploadingPaymentRecordId = null;
 let uploadingPaymentIndex = null;

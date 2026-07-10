@@ -5,7 +5,9 @@ import {
   serverTimestamp,
   doc,
   setDoc,
-  deleteDoc
+  deleteDoc,
+  getDocs,
+  getDoc
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const DB_NAME = "chiptune_local_first_v1";
@@ -15,6 +17,8 @@ const RECORDS_KEY = "records";
 const STATE_SHADOW = "chiptune_state_shadow_v2";
 const RECORDS_SHADOW = "chiptune_records_shadow_v2";
 const DELETED_RECORDS_SHADOW = "chiptune_deleted_record_ids_v1";
+const RECORD_MIGRATION_KEY = "records_migration_v3";
+const RECORD_MIGRATION_SHADOW = "chiptune_records_migration_v3";
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -214,6 +218,159 @@ export function mergeRecordLists(cloudRecords=[], localRecords=[]){
     if(!cloud || Number(r.localUpdatedAt || r.updatedAt || r.timestamp || 0) >= Number(cloud.localUpdatedAt || cloud.updatedAt || cloud.timestamp || 0)) map.set(key,clone(r));
   }
   return [...map.values()].filter(r=>r.id !== "init");
+}
+
+
+function migrationStatus(){
+  const shadow = readShadow(RECORD_MIGRATION_SHADOW);
+  return shadow && typeof shadow === "object" ? shadow : {};
+}
+
+function saveMigrationStatus(status){
+  const next = {...status, updatedAt:Date.now()};
+  writeShadow(RECORD_MIGRATION_SHADOW,next);
+  idbPut("kv",next,RECORD_MIGRATION_KEY).catch(err=>console.warn("迁移状态写入失败",err));
+  return next;
+}
+
+function looksLikeLegacyRecord(r){
+  if(!r || typeof r !== "object" || Array.isArray(r)) return false;
+  const hasTime = r.timestamp || r.closedAt || r.paidAt || r.startAt || r.time || r.date || r.businessDate;
+  const hasMoney = r.totalJPY !== undefined || r.jpy !== undefined || r.originalJPY !== undefined || Array.isArray(r.payments);
+  const hasBillInfo = r.tableName || r.packageName || r.pay || r.checkoutMethod || r.type;
+  return Boolean(hasTime && (hasMoney || hasBillInfo));
+}
+
+function smallStableHash(value){
+  const text = JSON.stringify(value || {});
+  let hash = 2166136261;
+  for(let i=0;i<text.length;i++){
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash,16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function legacyRecordId(r,index=0){
+  if(r.id) return String(r.id);
+  const ts = Number(r.closedAt || r.paidAt || r.timestamp || r.startAt || 0);
+  const table = String(r.tableName || r.table || r.tableIndex || "table").replace(/[^a-zA-Z0-9_-]/g,"");
+  const amount = Number(r.totalJPY || r.jpy || r.originalJPY || 0);
+  return `legacy_${ts || 0}_${table}_${amount}_${smallStableHash(r)}_${index}`;
+}
+
+function collectLegacyRecords(value,out,depth=0){
+  if(depth > 5 || value == null) return;
+  if(Array.isArray(value)){
+    value.forEach((item,i)=>{
+      if(looksLikeLegacyRecord(item)) out.push({...clone(item),id:legacyRecordId(item,i)});
+      else collectLegacyRecords(item,out,depth+1);
+    });
+    return;
+  }
+  if(typeof value !== "object") return;
+  if(Array.isArray(value.records)) collectLegacyRecords(value.records,out,depth+1);
+  if(value.state && typeof value.state === "object") collectLegacyRecords(value.state,out,depth+1);
+}
+
+function withTimeout(promise,ms,label){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error(`${label || "操作"}超时`)),ms))
+  ]);
+}
+
+async function queueMigratedRecords(records){
+  const db = await openLocalDb();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction("recordQueue","readwrite");
+    const store = tx.objectStore("recordQueue");
+    for(const r of records){
+      store.put({id:`record_${r.id}`,record:clone(r),createdAt:Date.now()});
+    }
+    tx.oncomplete = ()=>resolve();
+    tx.onerror = ()=>reject(tx.error);
+    tx.onabort = ()=>reject(tx.error || new Error("迁移队列写入中止"));
+  });
+}
+
+/**
+ * 一次性账单迁移：
+ * 1. 本机旧 state / localStorage 只扫描一次；
+ * 2. 云端 records 与旧 shop/main.records 成功读取后只导入一次；
+ * 3. 迁移结果统一写入新版本机 records，之后所有页面直接读取它。
+ */
+export async function migrateLegacyRecordsOnce({db,ref,onProgress}={}){
+  const report = msg=>{ try{ onProgress?.(msg); }catch{} };
+  let status = migrationStatus();
+  const current = await loadLocalRecords().catch(()=>[]);
+  let merged = current;
+  const recovered = [];
+  const notes = [];
+
+  if(!status.localDone){
+    report("正在迁移本机旧账单…");
+    try{
+      const localState = await loadLocalState();
+      if(Array.isArray(localState?.records)) collectLegacyRecords(localState.records,recovered);
+    }catch(err){ notes.push(`旧本机状态读取失败：${err?.message || err}`); }
+
+    try{
+      for(let i=0;i<localStorage.length;i++){
+        const key = localStorage.key(i);
+        if(!key || key === RECORD_MIGRATION_SHADOW || key === DELETED_RECORDS_SHADOW) continue;
+        const raw = localStorage.getItem(key);
+        if(!raw || raw.length < 10) continue;
+        try{ collectLegacyRecords(JSON.parse(raw),recovered); }catch{}
+      }
+    }catch(err){ notes.push(`本机备份扫描失败：${err?.message || err}`); }
+
+    merged = mergeRecordLists(merged,recovered);
+    await writeLocalRecords(merged);
+    status = saveMigrationStatus({...status,localDone:true,localRecovered:recovered.length});
+    notes.push(`本机旧数据：发现 ${recovered.length} 条`);
+  }
+
+  if(!status.cloudDone && db && ref && navigator.onLine){
+    report("正在导入旧云端账单…");
+    const cloudFound = [];
+    let recordsCollectionSucceeded = false;
+    try{
+      const snap = await withTimeout(getDocs(collection(db,"records")),12000,"云端 records 读取");
+      cloudFound.push(...snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.id!=="init"));
+      notes.push(`云端 records：${snap.size} 条`);
+      recordsCollectionSucceeded = true;
+    }catch(err){ notes.push(`云端 records 暂未完成：${err?.message || err}`); }
+
+    let legacyMainSucceeded = false;
+    try{
+      const snap = await withTimeout(getDoc(ref),12000,"旧 shop/main 读取");
+      if(snap.exists() && Array.isArray(snap.data()?.records)){
+        collectLegacyRecords(snap.data().records,cloudFound);
+        notes.push(`旧 shop/main.records：${snap.data().records.length} 条`);
+      }
+      legacyMainSucceeded = true;
+    }catch(err){ notes.push(`旧 shop/main.records 暂未完成：${err?.message || err}`); }
+
+    // 两个旧云端来源都完成读取后，才永久标记云端迁移完成，避免弱网时漏账。
+    if(recordsCollectionSucceeded && legacyMainSucceeded){
+      const beforeIds = new Set(merged.map(r=>String(r.id)));
+      merged = mergeRecordLists(merged,cloudFound);
+      await writeLocalRecords(merged);
+      const newlyAdded = merged.filter(r=>!beforeIds.has(String(r.id)));
+      if(newlyAdded.length) await queueMigratedRecords(newlyAdded).catch(err=>notes.push(`云端备份排队失败：${err?.message || err}`));
+      status = saveMigrationStatus({...status,cloudDone:true,cloudRecovered:cloudFound.length,completedAt:Date.now()});
+    }
+  }
+
+  const done = Boolean(status.localDone && status.cloudDone);
+  report(done ? "历史账单升级完成" : (navigator.onLine ? "本机迁移完成，云端稍后重试" : "本机迁移完成，联网后自动补全云端旧账单"));
+  return {records:clone(merged),done,status,notes};
+}
+
+export function resetRecordMigration(){
+  try{ localStorage.removeItem(RECORD_MIGRATION_SHADOW); }catch{}
+  return idbDelete("kv",RECORD_MIGRATION_KEY).catch(()=>{});
 }
 
 function changedKeys(local, base){
