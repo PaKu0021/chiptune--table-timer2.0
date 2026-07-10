@@ -359,6 +359,70 @@ export async function saveRecordSafely({db,ref,record}){
   return next;
 }
 
+
+export function getLocalRecordSync(recordId){
+  if(!recordId) return null;
+  const list = readShadow(RECORDS_SHADOW);
+  if(!Array.isArray(list)) return null;
+  return clone(list.find(r=>String(r.id)===String(recordId)) || null);
+}
+
+export function emergencySaveRecord({db,ref,record}){
+  const next = clone(record);
+  next.localUpdatedAt = Date.now();
+  const current = readShadow(RECORDS_SHADOW);
+  const merged = mergeRecordLists(Array.isArray(current) ? current : [], [next]);
+  // localStorage is synchronous: once this returns, the emergency bill has a durable local shadow.
+  writeShadow(RECORDS_SHADOW, merged);
+
+  // IndexedDB and cloud queue run in background and must never block the UI.
+  Promise.resolve().then(async()=>{
+    try{
+      await writeLocalRecords(merged);
+      await idbPut("recordQueue",{id:`record_${next.id}`,record:next,createdAt:Date.now()});
+      if(navigator.onLine){
+        clearTimeout(flushTimer);
+        flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
+          console.warn("紧急账单云端同步失败，将自动重试",err);
+          setSyncStatus("pending","● 账单已保存本机 · 云端同步失败，将重试");
+        }),150);
+      }
+    }catch(err){
+      console.warn("紧急账单 IndexedDB 保存失败，已保留 localStorage 备份",err);
+      setSyncStatus("pending","● 紧急账单已保存在本机备份");
+    }
+  });
+  return next;
+}
+
+export function emergencySaveState({db,ref,state,action="emergency_state_update"}){
+  const local = clone(state);
+  const base = clone(baseline || local);
+  // Synchronous shadow first, so closing the modal/page cannot lose this state.
+  writeShadow(STATE_SHADOW,{state:local,cloudBaseline:base,savedAt:Date.now(),deviceId:getDeviceId()});
+  setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? "● 已紧急保存本机 · 等待上传" : "● 已紧急保存本机 · 当前离线");
+
+  Promise.resolve().then(async()=>{
+    try{
+      await writeLocalState(local,base);
+      await enqueue(local,base,action);
+      const count = await pendingCount();
+      setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? `● 已保存本机 · ${count} 项等待上传` : `● 已保存本机 · 离线 · ${count} 项待上传`);
+      if(navigator.onLine){
+        clearTimeout(flushTimer);
+        flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
+          console.warn("紧急状态云端同步失败，将自动重试",err);
+          setSyncStatus("pending","● 已保存本机 · 云端同步失败，将重试");
+        }),150);
+      }
+    }catch(err){
+      console.warn("紧急状态 IndexedDB 保存失败，已保留 localStorage 备份",err);
+      setSyncStatus("pending","● 状态已保存在本机紧急备份");
+    }
+  });
+  return local;
+}
+
 export async function atomicAdjustTableExtra({db,ref,tableIndex,deltaMs,action,getState}){
   const currentState = clone(getState ? getState() : (await loadLocalState()));
   if(!currentState?.tables?.[tableIndex]) throw new Error("找不到该桌位");

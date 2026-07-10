@@ -1,7 +1,7 @@
 /*alert("app.js 已加载");*/
 import { db } from "./firebase.js";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, saveRecordSafely } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js";
 /*import { formatTime } from "./common.js";*/
 import { resetTable, formatTime } from "./common.js";
 const ref = doc(db, "shop", "main");
@@ -1309,19 +1309,56 @@ async function confirmForceEnd(){
   forceEndSubmitting = true;
   if(button){
     button.disabled = true;
-    button.textContent = "正在保存到本机…";
+    button.textContent = "正在紧急保存…";
   }
 
   try{
     stopAlertLoop(i);
 
-    const record = await createOrUpdateRecord(t);
-    record.payments = normalizePayments(record);
-
+    const p = getPackage(t);
     const originalJPY = getOriginalJPY(t);
-    const paymentTotalJPY = sumPaymentsJPY(record.payments);
     const now = Date.now();
 
+    // Emergency mode deliberately avoids awaiting IndexedDB or Firestore.
+    // Read the synchronous local shadow when available, otherwise create a record now.
+    let record = getLocalRecordSync(t.recordId);
+    if(!record){
+      const id = t.recordId || ("rec_" + now + "_" + Math.random().toString(36).slice(2,8));
+      t.recordId = id;
+      record = {
+        id,
+        timestamp: now,
+        businessDate: getDateText(now),
+        time: new Date(now).toLocaleString(),
+        tableName: t.name,
+        receiptImage:"",
+        receiptFileName:""
+      };
+    }
+
+    record.tableName = t.name;
+    record.customerName = t.customer?.name || "";
+    record.phoneLast4 = t.customer?.phoneLast4 || "";
+    record.customerType = t.type || "walkin";
+    record.packageName = p.name;
+    record.packageMinutes = p.unlimited ? "不限时" : p.minutes;
+    record.packagePrice = Number(p.price || 0);
+    record.extraMinutes = Math.floor(Number(t.extra || 0) / 60000);
+    record.extensionAmount = Math.max(0, originalJPY - Number(p.price || 0));
+    record.payments = normalizePayments(record);
+
+    // Preserve prepaid amount even when the previous async bill creation never finished.
+    if(record.payments.length === 0 && Number(t.paidJPY || 0) > 0){
+      record.payments.push(makePaymentLine({
+        type:"收入",
+        reason:"套餐费",
+        pay:t.pay || "未记录",
+        amountJPY:Number(t.paidJPY || 0),
+        note:"强制结束时从桌位恢复"
+      }));
+    }
+
+    const paymentTotalJPY = sumPaymentsJPY(record.payments);
     record.originalJPY = originalJPY;
     record.totalJPY = paymentTotalJPY;
     record.totalRMB = getRMB(paymentTotalJPY);
@@ -1329,16 +1366,19 @@ async function confirmForceEnd(){
     record.dueJPY = Math.max(0, originalJPY - paymentTotalJPY);
     record.pay = getPaymentSummary(record.payments);
     record.currency = t.currency || "日元";
+    record.payTiming = t.payTiming || "prepaid";
     record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
-    record.checkoutMethod = "本机强制结束";
+    record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
+    record.checkoutMethod = "本机紧急强制结束";
     record.roundRule = record.roundRule || "不抹零";
+    record.closed = true;
     record.closedAt = now;
     record.closedTime = new Date(now).toLocaleString();
     record.businessDate = record.businessDate || getDateText(record.timestamp || now);
     record.forceClosed = true;
     record.forceClosedAt = now;
 
-    await updateRecordOnly(record);
+    emergencySaveRecord({db,ref,record});
 
     const visit = createOrUpdateCustomerVisit(t);
     if(visit){
@@ -1354,10 +1394,7 @@ async function confirmForceEnd(){
       const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
       if(b){
         if(!Array.isArray(b.finishedTableIndexes)) b.finishedTableIndexes = [];
-        b.finishedTableIndexes = Array.from(new Set([
-          ...b.finishedTableIndexes.map(Number),
-          i
-        ]));
+        b.finishedTableIndexes = Array.from(new Set([...b.finishedTableIndexes.map(Number),i]));
         if(Array.isArray(b.checkedInTableIndexes)){
           b.checkedInTableIndexes = b.checkedInTableIndexes.map(Number).filter(x=>x !== i);
         }
@@ -1366,21 +1403,24 @@ async function confirmForceEnd(){
 
     const tableName = t.name;
     state.tables[i] = resetTable(tableName);
-    await save("force_end_table");
+    emergencySaveState({db,ref,state,action:"emergency_force_end_table"});
 
-    document.getElementById("forceEndModalBg").style.display = "none";
+    const modal = document.getElementById("forceEndModalBg");
+    if(modal) modal.style.display = "none";
     forceEndIndex = null;
+    forceEndSubmitting = false;
     render();
-    alert("桌位已强制结束，账单已保存到本机");
+
+    // Non-blocking visual notice; avoid alert/confirm in iPad standalone mode.
+    setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? "● 桌位已结束 · 本机已保存 · 等待上传" : "● 桌位已结束 · 已保存本机 · 当前离线");
   }catch(err){
-    console.error("强制结束失败",err);
-    alert("强制结束失败：\n" + (err?.message || err));
-  }finally{
+    console.error("紧急强制结束失败",err);
     forceEndSubmitting = false;
     if(button){
       button.disabled = false;
       button.textContent = "确认强制结束";
     }
+    alert("强制结束失败：\n" + (err?.message || err));
   }
 }
 
