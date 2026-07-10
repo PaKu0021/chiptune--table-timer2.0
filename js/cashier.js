@@ -100,7 +100,7 @@ let records = [];
 installConnectionGuard();
 loadLocalRecords().then(localRecords=>{
   records = mergeRecordLists(records, localRecords);
-  if(state) renderCashier();
+  renderCashier();
 }).catch(err=>console.warn("读取本机收银记录失败",err));
 window.addEventListener("chiptune-online-change",e=>{
   if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
@@ -314,8 +314,6 @@ function setQuickRange(type){
 }
 
 function getFilteredRecords(){
-  if(!state) return [];
-
   const start = document.getElementById("startDate").value;
   const end = document.getElementById("endDate").value;
   const pay = document.getElementById("payFilter").value;
@@ -596,11 +594,11 @@ onSnapshot(recordsQuery,snap=>{
 
   loadLocalRecords().then(localRecords=>{
     records = mergeRecordLists(cloudRecords, localRecords);
-    if(state) renderCashier();
+    renderCashier();
   }).catch(err=>{
     console.warn("合并本机收银记录失败",err);
     records = cloudRecords;
-    if(state) renderCashier();
+    renderCashier();
   });
 });
 

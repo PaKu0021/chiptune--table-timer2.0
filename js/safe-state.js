@@ -4,7 +4,8 @@ import {
   addDoc,
   serverTimestamp,
   doc,
-  setDoc
+  setDoc,
+  deleteDoc
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const DB_NAME = "chiptune_local_first_v1";
@@ -13,6 +14,7 @@ const STATE_KEY = "shop_main";
 const RECORDS_KEY = "records";
 const STATE_SHADOW = "chiptune_state_shadow_v2";
 const RECORDS_SHADOW = "chiptune_records_shadow_v2";
+const DELETED_RECORDS_SHADOW = "chiptune_deleted_record_ids_v1";
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -91,6 +93,15 @@ function readShadow(key){
   try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; }catch{ return null; }
 }
 
+function getDeletedRecordIds(){
+  const list = readShadow(DELETED_RECORDS_SHADOW);
+  return new Set(Array.isArray(list) ? list.map(String) : []);
+}
+
+function saveDeletedRecordIds(set){
+  writeShadow(DELETED_RECORDS_SHADOW, [...set]);
+}
+
 function ensureBadge(){
   if(badge) return badge;
   badge = document.createElement("div");
@@ -158,10 +169,14 @@ async function writeLocalState(state, cloudBaseline=baseline){
 
 export async function loadLocalRecords(){
   const shadow = readShadow(RECORDS_SHADOW);
-  if(Array.isArray(shadow)) return clone(shadow);
+  if(Array.isArray(shadow)){
+    const deleted = getDeletedRecordIds();
+    return clone(shadow.filter(r=>!deleted.has(String(r.id))));
+  }
   try{
     const value = await idbGet("kv",RECORDS_KEY);
-    const list = Array.isArray(value) ? value : [];
+    const deleted = getDeletedRecordIds();
+    const list = (Array.isArray(value) ? value : []).filter(r=>!deleted.has(String(r.id)));
     writeShadow(RECORDS_SHADOW,list);
     return clone(list);
   }catch(err){ console.warn("读取本机账单失败",err); return []; }
@@ -180,10 +195,14 @@ export async function getLocalRecord(recordId){
 }
 
 export function mergeRecordLists(cloudRecords=[], localRecords=[]){
+  const deleted = getDeletedRecordIds();
   const map = new Map();
-  for(const r of cloudRecords || []) map.set(String(r.id),clone(r));
+  for(const r of cloudRecords || []){
+    if(!deleted.has(String(r.id))) map.set(String(r.id),clone(r));
+  }
   for(const r of localRecords || []){
     const key = String(r.id);
+    if(deleted.has(key)) continue;
     const cloud = map.get(key);
     if(!cloud || Number(r.localUpdatedAt || r.updatedAt || r.timestamp || 0) >= Number(cloud.localUpdatedAt || cloud.updatedAt || cloud.timestamp || 0)) map.set(key,clone(r));
   }
@@ -276,7 +295,11 @@ async function flushOne({db,ref}, item){
 }
 
 async function flushRecordOne({db}, item){
-  await setDoc(doc(db,"records",String(item.record.id)), item.record);
+  if(item.type === "delete"){
+    await deleteDoc(doc(db,"records",String(item.recordId)));
+  }else{
+    await setDoc(doc(db,"records",String(item.record.id)), item.record);
+  }
   await idbDelete("recordQueue",item.id);
 }
 
@@ -359,6 +382,44 @@ export async function saveRecordSafely({db,ref,record}){
   return next;
 }
 
+
+export async function deleteRecordSafely({db,ref,recordId}){
+  const id = String(recordId || "");
+  if(!id) throw new Error("缺少账单ID");
+
+  // Tombstone first: this is synchronous and prevents cloud snapshots from reviving the record.
+  const deleted = getDeletedRecordIds();
+  deleted.add(id);
+  saveDeletedRecordIds(deleted);
+
+  const currentShadow = readShadow(RECORDS_SHADOW);
+  const shadowList = (Array.isArray(currentShadow) ? currentShadow : []).filter(r=>String(r.id)!==id);
+  writeShadow(RECORDS_SHADOW, shadowList);
+
+  try{
+    const current = await loadLocalRecords();
+    const next = current.filter(r=>String(r.id)!==id);
+    await writeLocalRecords(next);
+    await idbPut("recordQueue",{id:`delete_record_${id}`,type:"delete",recordId:id,createdAt:Date.now()});
+  }catch(err){
+    console.warn("账单本地删除队列写入失败，已保留删除标记",err);
+  }
+
+  if(navigator.onLine){
+    clearTimeout(flushTimer);
+    flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
+      console.warn("账单删除同步失败，将自动重试",err);
+      setSyncStatus("pending","● 已从本机删除 · 云端删除等待重试");
+    }),50);
+  }
+  return id;
+}
+
+export function clearRecordDeletionMark(recordId){
+  const deleted = getDeletedRecordIds();
+  deleted.delete(String(recordId));
+  saveDeletedRecordIds(deleted);
+}
 
 export function getLocalRecordSync(recordId){
   if(!recordId) return null;

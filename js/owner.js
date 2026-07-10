@@ -1,7 +1,7 @@
 import { db } from "./firebase.js";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely } from "./safe-state.js";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -817,32 +817,82 @@ const r = records.find(x=>x.id === recordId);
   alert("续费已确认");
 }
 
-async function deleteOwnerRecord(recordId){
-  const r = records.find(x=>x.id === recordId);
+let pendingDeleteRecordId = null;
 
+function deleteOwnerRecord(recordId){
+  const r = records.find(x=>String(x.id) === String(recordId));
   if(!r){
-    alert("找不到这条记录");
+    showOwnerMessage("找不到这条记录，请重新加载页面。");
     return;
   }
 
-  const ok = confirm(
-    "确定删除这条收银记录吗？\n\n" +
-    "此操作不可恢复。\n" +
-    "如果这条记录有收款截图，也会一起删除。"
-  );
+  pendingDeleteRecordId = String(recordId);
+  let bg = document.getElementById("ownerDeleteRecordBg");
+  if(!bg){
+    bg = document.createElement("div");
+    bg.id = "ownerDeleteRecordBg";
+    bg.className = "modal-bg";
+    bg.innerHTML = `
+      <div class="modal" style="max-width:560px;">
+        <h2>删除收银记录</h2>
+        <div id="ownerDeleteRecordSummary" style="line-height:1.8;margin:12px 0 18px;"></div>
+        <div style="background:#fff0f0;color:#a32121;padding:12px;border-radius:12px;font-weight:800;margin-bottom:14px;">
+          删除后会立即从本机列表移除，并在联网后删除云端记录。
+        </div>
+        <button id="ownerDeleteRecordConfirmBtn" class="btn-danger full" onclick="confirmDeleteOwnerRecord()">确认删除</button>
+        <button class="btn-ghost full" style="margin-top:10px;" onclick="closeDeleteOwnerRecord()">取消</button>
+      </div>`;
+    document.body.appendChild(bg);
+  }
 
-  if(!ok) return;
+  document.getElementById("ownerDeleteRecordSummary").innerHTML = `
+    <b>${r.tableName || "未知桌位"}</b><br>
+    ${r.closedTime || r.time || ""}<br>
+    ${r.packageName || ""}｜实收 ¥${Number(sumPaymentsJPY(r) || 0).toLocaleString()}`;
+  const btn = document.getElementById("ownerDeleteRecordConfirmBtn");
+  btn.disabled = false;
+  btn.textContent = "确认删除";
+  bg.style.display = "flex";
+}
+
+function closeDeleteOwnerRecord(){
+  const bg = document.getElementById("ownerDeleteRecordBg");
+  if(bg) bg.style.display = "none";
+  pendingDeleteRecordId = null;
+}
+
+async function confirmDeleteOwnerRecord(){
+  const id = pendingDeleteRecordId;
+  if(!id) return;
+  const btn = document.getElementById("ownerDeleteRecordConfirmBtn");
+  if(btn){ btn.disabled = true; btn.textContent = "正在删除…"; }
 
   try{
-
-    await deleteDoc(doc(db, "records", recordId));
-
-    alert("记录已删除");
+    await deleteRecordSafely({db,ref,recordId:id});
+    records = records.filter(r=>String(r.id)!==id);
+    closeDeleteOwnerRecord();
+    render();
+    showOwnerMessage("记录已从本机删除；如暂时离线，恢复网络后会自动删除云端记录。");
   }catch(err){
     console.error(err);
-    alert("删除失败：" + err.message);
+    if(btn){ btn.disabled = false; btn.textContent = "确认删除"; }
+    showOwnerMessage("删除失败：" + (err?.message || err));
   }
 }
+
+function showOwnerMessage(text){
+  let bg = document.getElementById("ownerMessageBg");
+  if(!bg){
+    bg = document.createElement("div");
+    bg.id = "ownerMessageBg";
+    bg.className = "modal-bg";
+    bg.innerHTML = `<div class="modal" style="max-width:520px;"><h2>提示</h2><div id="ownerMessageText" style="line-height:1.7;margin:16px 0;"></div><button class="btn-main full" onclick="closeOwnerMessage()">知道了</button></div>`;
+    document.body.appendChild(bg);
+  }
+  document.getElementById("ownerMessageText").textContent = text;
+  bg.style.display = "flex";
+}
+function closeOwnerMessage(){ const bg=document.getElementById("ownerMessageBg"); if(bg) bg.style.display="none"; }
 
 function collectPackagesFromInputs(){
   state.packages = state.packages.map((p,i)=>({
@@ -1095,5 +1145,8 @@ window.confirmExtension = confirmExtension;
 window.toggleCustomerPanel = toggleCustomerPanel;
 window.setCustomerSearch = setCustomerSearch;
 window.deleteOwnerRecord = deleteOwnerRecord;
+window.confirmDeleteOwnerRecord = confirmDeleteOwnerRecord;
+window.closeDeleteOwnerRecord = closeDeleteOwnerRecord;
+window.closeOwnerMessage = closeOwnerMessage;
 window.viewReceipt = viewReceipt;
 window.closeReceiptPreview = closeReceiptPreview;
