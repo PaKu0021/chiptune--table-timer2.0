@@ -23,6 +23,8 @@ window.addEventListener("chiptune-online-change",e=>{
 
 let checkoutIndex = null;
 let checkoutSubmitting = false;
+let forceEndIndex = null;
+let forceEndSubmitting = false;
 let useRound = false;
 let alertLoops = {};
 let remindLocks = {};
@@ -692,6 +694,11 @@ ${t.start ? `
 ` : ""}
 
 <button class="btn-success full" onclick="openCheckout(${i})">结账</button>
+${t.start ? `
+<button class="btn-danger full" onclick="openForceEnd(${i})">
+  强制结束桌位
+</button>
+` : ""}
 
     `;
 
@@ -1238,6 +1245,143 @@ alert("结账完成");
   }
 }
 
+}
+
+
+function openForceEnd(i){
+  const t = state?.tables?.[i];
+  if(!t?.start){
+    alert("这张桌位当前没有开始计时");
+    return;
+  }
+
+  forceEndIndex = i;
+  forceEndSubmitting = false;
+
+  const p = getPackage(t);
+  const originalJPY = getOriginalJPY(t);
+  const paidJPY = Number(t.paidJPY || 0);
+  const dueJPY = Math.max(0, originalJPY - paidJPY);
+
+  const info = document.getElementById("forceEndInfo");
+  if(info){
+    info.innerHTML = `
+      <div style="font-weight:900;font-size:20px;margin-bottom:10px;">${t.name}｜${p.name}</div>
+      <div>当前应收：¥${originalJPY.toLocaleString()}</div>
+      <div>已收金额：¥${paidJPY.toLocaleString()}</div>
+      <div>尚未收款：¥${dueJPY.toLocaleString()}</div>
+      <div style="margin-top:14px;padding:12px;border-radius:12px;background:#fff2f2;color:#9b1c1c;font-weight:800;line-height:1.6;">
+        强制结束会先把账单保存到本机，再清空该桌位。<br>
+        不会新增收款；如有未收金额，账单会保留为“未结清”。
+      </div>
+    `;
+  }
+
+  const button = document.getElementById("forceEndConfirmButton");
+  if(button){
+    button.disabled = false;
+    button.textContent = "确认强制结束";
+  }
+
+  document.getElementById("forceEndModalBg").style.display = "block";
+}
+
+function closeForceEnd(){
+  if(forceEndSubmitting) return;
+  const modal = document.getElementById("forceEndModalBg");
+  if(modal) modal.style.display = "none";
+  forceEndIndex = null;
+}
+
+async function confirmForceEnd(){
+  if(forceEndSubmitting) return;
+
+  const i = Number(forceEndIndex);
+  const t = state?.tables?.[i];
+  if(!Number.isInteger(i) || !t?.start){
+    alert("找不到需要结束的桌位，页面将重新显示当前状态");
+    closeForceEnd();
+    render();
+    return;
+  }
+
+  const button = document.getElementById("forceEndConfirmButton");
+  forceEndSubmitting = true;
+  if(button){
+    button.disabled = true;
+    button.textContent = "正在保存到本机…";
+  }
+
+  try{
+    stopAlertLoop(i);
+
+    const record = await createOrUpdateRecord(t);
+    record.payments = normalizePayments(record);
+
+    const originalJPY = getOriginalJPY(t);
+    const paymentTotalJPY = sumPaymentsJPY(record.payments);
+    const now = Date.now();
+
+    record.originalJPY = originalJPY;
+    record.totalJPY = paymentTotalJPY;
+    record.totalRMB = getRMB(paymentTotalJPY);
+    record.paidJPY = paymentTotalJPY;
+    record.dueJPY = Math.max(0, originalJPY - paymentTotalJPY);
+    record.pay = getPaymentSummary(record.payments);
+    record.currency = t.currency || "日元";
+    record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+    record.checkoutMethod = "本机强制结束";
+    record.roundRule = record.roundRule || "不抹零";
+    record.closedAt = now;
+    record.closedTime = new Date(now).toLocaleString();
+    record.businessDate = record.businessDate || getDateText(record.timestamp || now);
+    record.forceClosed = true;
+    record.forceClosedAt = now;
+
+    await updateRecordOnly(record);
+
+    const visit = createOrUpdateCustomerVisit(t);
+    if(visit){
+      visit.endAt = now;
+      visit.range = getVisitRangeText(t);
+      visit.closed = true;
+      visit.finalJPY = paymentTotalJPY;
+      visit.closedTime = new Date(now).toLocaleString();
+      visit.forceClosed = true;
+    }
+
+    if(t.bookingId){
+      const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
+      if(b){
+        if(!Array.isArray(b.finishedTableIndexes)) b.finishedTableIndexes = [];
+        b.finishedTableIndexes = Array.from(new Set([
+          ...b.finishedTableIndexes.map(Number),
+          i
+        ]));
+        if(Array.isArray(b.checkedInTableIndexes)){
+          b.checkedInTableIndexes = b.checkedInTableIndexes.map(Number).filter(x=>x !== i);
+        }
+      }
+    }
+
+    const tableName = t.name;
+    state.tables[i] = resetTable(tableName);
+    await save("force_end_table");
+
+    document.getElementById("forceEndModalBg").style.display = "none";
+    forceEndIndex = null;
+    render();
+    alert("桌位已强制结束，账单已保存到本机");
+  }catch(err){
+    console.error("强制结束失败",err);
+    alert("强制结束失败：\n" + (err?.message || err));
+  }finally{
+    forceEndSubmitting = false;
+    if(button){
+      button.disabled = false;
+      button.textContent = "确认强制结束";
+    }
+  }
 }
 
 async function autoCloseOldTables(){
@@ -2154,6 +2298,9 @@ window.setCurrency = setCurrency;
 window.openCheckout = openCheckout;
 window.toggleRound = toggleRound;
 window.confirmCheckout = confirmCheckout;
+window.openForceEnd = openForceEnd;
+window.closeForceEnd = closeForceEnd;
+window.confirmForceEnd = confirmForceEnd;
 window.closeCheckout = closeCheckout;
 window.initPush = initPush;
 window.updateCustomer = updateCustomer;
