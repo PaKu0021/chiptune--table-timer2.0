@@ -22,6 +22,7 @@ window.addEventListener("chiptune-online-change",e=>{
 });
 
 let checkoutIndex = null;
+let checkoutSubmitting = false;
 let useRound = false;
 let alertLoops = {};
 let remindLocks = {};
@@ -1102,6 +1103,12 @@ document.getElementById("checkoutAmount").innerHTML = `
 }
 
 async function confirmCheckout(){
+  if(checkoutSubmitting) return;
+
+  const confirmButton = document.querySelector(
+    '#checkoutModalBg button.btn-success, #checkoutModalBg .btn-success'
+  );
+
   try{
   const t = state.tables[checkoutIndex];
 
@@ -1113,8 +1120,12 @@ async function confirmCheckout(){
     return;
   }
 
-  if(!confirm("确认结账？")){
-    return;
+  // 绿色“确认结账”按钮本身就是最终确认。
+  // iPad 添加到桌面的网页中，原生 confirm() 偶尔会卡住，因此不再弹第二次系统确认。
+  checkoutSubmitting = true;
+  if(confirmButton){
+    confirmButton.disabled = true;
+    confirmButton.textContent = "正在结账…";
   }
 
   stopAlertLoop(checkoutIndex);
@@ -1219,6 +1230,12 @@ alert("结账完成");
     e.message
   );
   console.error(e);
+}finally{
+  checkoutSubmitting = false;
+  if(confirmButton){
+    confirmButton.disabled = false;
+    confirmButton.textContent = "确认结账";
+  }
 }
 
 }
