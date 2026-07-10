@@ -173,6 +173,15 @@
   renderNav("app");
   import "./js/app.js";
 </script>
+<div id="forceEndModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>强制结束桌位</h2>
+    <div id="forceEndInfo"></div>
+    <button id="forceEndConfirmButton" class="btn-danger full" onclick="confirmForceEnd()">确认强制结束</button>
+    <button class="btn-ghost full" onclick="closeForceEnd()">取消</button>
+  </div>
+</div>
+
 <div id="moveRunningModalBg" class="modal-bg">
   <div class="modal">
     <h2>移动桌位</h2>
