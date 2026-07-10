@@ -84,7 +84,7 @@ onSnapshot(ref, { includeMetadataChanges:true }, snap=>{
   if(t.visitRange === undefined) t.visitRange = "";
   if(t.bookingId === undefined) t.bookingId = null;
   if(t.activeColor === undefined) t.activeColor = "";
-  if(!t.customPackage) t.customPackage = { enabled:false, name:"自定义套餐", minutes:60, price:0, extensionPrice:0 };
+  if(t.customPackage?.enabled) t.customPackage.enabled = false; // 旧版临时套餐不再参与计费
 });
 
     /*alert("准备render");*/
@@ -104,17 +104,6 @@ async function save(action="state_update"){
 
 
 function getPackage(t){
-  if(t.customPackage?.enabled){
-    return {
-      name: String(t.customPackage.name || "自定义套餐"),
-      minutes: Math.max(1, Number(t.customPackage.minutes || 60)),
-      price: Math.max(0, Number(t.customPackage.price || 0)),
-      extensionPrice: Math.max(0, Number(t.customPackage.extensionPrice || 0)),
-      unlimited:false,
-      custom:true
-    };
-  }
-
   const idx = Number(t.packageIndex ?? 0);
   return state.packages[idx] || state.packages[0] || {
     name:"1小时",
@@ -176,8 +165,8 @@ function getOriginalJPY(t){
 
   const extraHours = Math.floor(Number(t.extra || 0) / 3600000);
 
-  // 临时自定义套餐完全独立于固定套餐的阶梯价格。
-  if(p.custom){
+  // 老板模式新增的独立金额套餐，按套餐金额＋每小时续时金额计算。
+  if(p.customPricing){
     return Number(p.price || 0) + extraHours * Number(p.extensionPrice || 0);
   }
 
@@ -598,7 +587,7 @@ filteredTables.forEach(({t,i})=>{
     div.innerHTML = `
       <h3>${t.name}</h3>
 
-    <select onchange="setPackage(${i},this.value)" ${t.start || t.customPackage?.enabled ? "disabled" : ""}>
+    <select onchange="setPackage(${i},this.value)" ${t.start ? "disabled" : ""}>
   ${state.packages.map((pkg,idx)=>`
     <option value="${idx}" ${idx===t.packageIndex ? "selected" : ""}>
       ${pkg.name} | ${pkg.unlimited ? "不限时" : pkg.minutes + "分钟"} | ¥${pkg.price}
@@ -606,28 +595,6 @@ filteredTables.forEach(({t,i})=>{
   `).join("")}
 </select>
 
-${!t.start ? `
-  <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-weight:800;">
-    <input type="checkbox" style="width:auto;" ${t.customPackage?.enabled ? "checked" : ""}
-      onchange="setCustomPackageEnabled(${i},this.checked)">
-    使用临时自定义套餐
-  </label>
-
-  ${t.customPackage?.enabled ? `
-    <div class="custom-package-box" style="padding:10px;border:1px solid #ddd;border-radius:10px;margin-bottom:10px;">
-      <input value="${t.customPackage.name || "自定义套餐"}" placeholder="套餐名"
-        onchange="updateCustomPackage(${i},'name',this.value)">
-      <div class="row">
-        <input type="number" min="1" value="${Number(t.customPackage.minutes || 60)}" placeholder="套餐分钟"
-          onchange="updateCustomPackage(${i},'minutes',this.value)">
-        <input type="number" min="0" value="${Number(t.customPackage.price || 0)}" placeholder="套餐金额"
-          onchange="updateCustomPackage(${i},'price',this.value)">
-      </div>
-      <input type="number" min="0" value="${Number(t.customPackage.extensionPrice || 0)}" placeholder="每续1小时金额"
-        onchange="updateCustomPackage(${i},'extensionPrice',this.value)">
-    </div>
-  ` : ""}
-` : ""}
 
 <div class="timer" style="color:${status==="overtime" ? "#e85d5d" : status==="warning" ? "#ff9800" : "#333"};">
   ${timeText}
@@ -670,7 +637,7 @@ ${t.start ? `
       ${p.unlimited ? "" : `
         <div class="action-row">
           <button class="${status==="warning" ? "btn-warn" : "btn-main"}" onclick="addHour(${i})">
-            +1小时 → ¥${(p.custom
+            +1小时 → ¥${(p.customPricing
               ? getOriginalJPY({...t, extra:Number(t.extra || 0) + 3600000})
               : calcPriceByTotalMinutes((Number(p.minutes || 0) + Math.floor(Number(t.extra || 0) / 60000) + 60))
             ).toLocaleString()}
@@ -1004,35 +971,6 @@ async function undoHour(i){
   }
 }
 
-function setCustomPackageEnabled(i, enabled){
-  const t = state.tables[i];
-  if(t.start) return;
-
-  if(!t.customPackage){
-    t.customPackage = { enabled:false, name:"自定义套餐", minutes:60, price:0, extensionPrice:0 };
-  }
-
-  t.customPackage.enabled = Boolean(enabled);
-  render();
-  save();
-}
-
-function updateCustomPackage(i, field, value){
-  const t = state.tables[i];
-  if(t.start) return;
-
-  if(!t.customPackage){
-    t.customPackage = { enabled:true, name:"自定义套餐", minutes:60, price:0, extensionPrice:0 };
-  }
-
-  if(field === "name"){
-    t.customPackage.name = String(value || "自定义套餐");
-  }else{
-    t.customPackage[field] = Math.max(field === "minutes" ? 1 : 0, Number(value || 0));
-  }
-
-  save();
-}
 
 function setPayTiming(i,v){
   state.tables[i].payTiming = v;
@@ -2175,8 +2113,6 @@ window.pause = pause;
 window.resume = resume;
 window.addHour = addHour;
 window.undoHour = undoHour;
-window.setCustomPackageEnabled = setCustomPackageEnabled;
-window.updateCustomPackage = updateCustomPackage;
 window.setPay = setPay;
 window.setCurrency = setCurrency;
 window.openCheckout = openCheckout;

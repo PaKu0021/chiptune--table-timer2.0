@@ -463,33 +463,31 @@ function renderPackages(){
 
   state.packages.forEach((p,i)=>{
     const row = document.createElement("div");
-    row.className = "grid";
-    row.style.gridTemplateColumns = "1fr 1fr 1fr 1fr auto";
-    row.style.gap = "8px";
-    row.style.marginBottom = "8px";
+    row.className = "package-setting-row";
 
     row.innerHTML = `
-      <div>
-        <small>套餐名</small>
-        <input data-pkg-name="${i}" value="${p.name || ""}">
-      </div>
+      <label class="package-field">
+        <span class="package-field-label">套餐名称${p.customPricing ? "（独立金额套餐）" : ""}</span>
+        <input data-pkg-name="${i}" value="${p.name || ""}" placeholder="例如：2小时活动套餐">
+      </label>
 
-      <div>
-        <small>分钟 0=不限时</small>
-        <input type="number" data-pkg-minutes="${i}" value="${p.minutes || 0}">
-      </div>
+      <label class="package-field">
+        <span class="package-field-label">套餐时长（分钟）</span>
+        <span class="package-field-hint">填写 0 代表不限时</span>
+        <input type="number" min="0" step="1" data-pkg-minutes="${i}" value="${p.minutes || 0}" placeholder="例如：120">
+      </label>
 
-      <div>
-        <small>套餐金额</small>
-        <input type="number" data-pkg-price="${i}" value="${p.price || 0}">
-      </div>
+      <label class="package-field">
+        <span class="package-field-label">套餐金额（日元）</span>
+        <input type="number" min="0" step="1" data-pkg-price="${i}" value="${p.price || 0}" placeholder="例如：2800">
+      </label>
 
-      <div>
-        <small>续费1小时金额</small>
-        <input type="number" data-pkg-extension="${i}" value="${p.extensionPrice || 0}">
-      </div>
+      <label class="package-field">
+        <span class="package-field-label">续时金额（每1小时／日元）</span>
+        <input type="number" min="0" step="1" data-pkg-extension="${i}" value="${p.extensionPrice || 0}" placeholder="例如：900">
+      </label>
 
-      <button class="btn-danger" onclick="removePackage(${i})">删除</button>
+      <button class="btn-danger package-delete-btn" type="button" onclick="removePackage(${i})">删除套餐</button>
     `;
 
     box.appendChild(row);
@@ -834,7 +832,8 @@ function collectPackagesFromInputs(){
     minutes: Number(document.querySelector(`[data-pkg-minutes="${i}"]`)?.value || 0),
     price: Number(document.querySelector(`[data-pkg-price="${i}"]`)?.value || 0),
     extensionPrice: Number(document.querySelector(`[data-pkg-extension="${i}"]`)?.value || 0),
-    unlimited: Number(document.querySelector(`[data-pkg-minutes="${i}"]`)?.value || 0) === 0
+    unlimited: Number(document.querySelector(`[data-pkg-minutes="${i}"]`)?.value || 0) === 0,
+    customPricing: Boolean(p.customPricing)
   }));
 }
 
@@ -842,11 +841,12 @@ function addPackage(){
   collectPackagesFromInputs();
 
   state.packages.push({
-    name:"新套餐",
+    name:"自定义套餐",
     minutes:60,
     price:0,
     extensionPrice:0,
-    unlimited:false
+    unlimited:false,
+    customPricing:true
   });
 
   render();
@@ -863,15 +863,18 @@ function removePackage(i){
   state.packages.splice(i,1);
 
   state.tables.forEach(t=>{
-    if(t.packageIndex >= state.packages.length){
+    const current = Number(t.packageIndex || 0);
+    if(current === i){
       t.packageIndex = 0;
+    }else if(current > i){
+      t.packageIndex = current - 1;
     }
   });
 
   render();
 }
 
-function savePackages(){
+async function savePackages(){
   collectPackagesFromInputs();
   state.packages = state.packages.map((p,i)=>{
     const name = document.querySelector(`[data-pkg-name="${i}"]`).value || "未命名套餐";
@@ -884,12 +887,19 @@ function savePackages(){
       minutes,
       price,
       extensionPrice,
-      unlimited: minutes === 0
+      unlimited: minutes === 0,
+      customPricing: Boolean(p.customPricing)
     };
   });
 
-  save();
-  alert("套餐设置已保存");
+  const invalid = state.packages.find(p => !p.name.trim() || p.minutes < 0 || p.price < 0 || p.extensionPrice < 0);
+  if(invalid){
+    alert("请确认套餐名称已填写，时长和金额均不能为负数");
+    return;
+  }
+
+  await save("package_settings_update");
+  alert("套餐设置已保存，计时器页面会自动更新套餐列表");
 }
 
 function saveTableCount(){
