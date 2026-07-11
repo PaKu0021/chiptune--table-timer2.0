@@ -9,7 +9,14 @@ import {
   getDocs,
   getDocsFromServer,
   onSnapshot,
-  getDoc
+  getDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+  startAfter,
+  documentId,
+  getCountFromServer
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const DB_NAME = "chiptune_local_first_v1";
@@ -21,6 +28,7 @@ const RECORDS_SHADOW = "chiptune_records_shadow_v2";
 const DELETED_RECORDS_SHADOW = "chiptune_deleted_record_ids_v1";
 const RECORD_MIGRATION_KEY = "records_migration_v3";
 const RECORD_MIGRATION_SHADOW = "chiptune_records_migration_v3";
+const RECORD_HISTORY_SYNC_META = "chiptune_records_history_sync_v1";
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -185,24 +193,32 @@ async function writeLocalState(state, cloudBaseline=baseline){
 }
 
 export async function loadLocalRecords(){
-  const shadow = readShadow(RECORDS_SHADOW);
-  if(Array.isArray(shadow)){
-    const deleted = getDeletedRecordIds();
-    return clone(shadow.filter(r=>!deleted.has(String(r.id))));
-  }
+  const deleted = getDeletedRecordIds();
   try{
     const value = await idbGet("kv",RECORDS_KEY);
-    const deleted = getDeletedRecordIds();
-    const list = (Array.isArray(value) ? value : []).filter(r=>!deleted.has(String(r.id)));
-    writeShadow(RECORDS_SHADOW,list);
-    return clone(list);
-  }catch(err){ console.warn("读取本机账单失败",err); return []; }
+    if(Array.isArray(value)){
+      return clone(value.filter(r=>!deleted.has(String(r.id))));
+    }
+  }catch(err){ console.warn("IndexedDB账单读取失败，尝试轻量备份",err); }
+
+  const shadow = readShadow(RECORDS_SHADOW);
+  if(Array.isArray(shadow)){
+    return clone(shadow.filter(r=>!deleted.has(String(r.id))));
+  }
+  return [];
 }
 
 async function writeLocalRecords(records){
   const list = clone(records || []);
-  writeShadow(RECORDS_SHADOW,list);
+  // 完整账单（包括收款截图）只存 IndexedDB，避免 localStorage 容量不足。
   await idbPut("kv",list,RECORDS_KEY);
+  // localStorage 只保留不含大图片的轻量应急副本。
+  const light = list.map(r=>{
+    const x={...r};
+    if(x.receiptImage) x.receiptImage="";
+    return x;
+  });
+  writeShadow(RECORDS_SHADOW,light);
 }
 
 
@@ -712,54 +728,264 @@ export async function atomicAdjustTableExtra({db,ref,tableIndex,deltaMs,action,g
 
 /**
  * 统一读取全部收银记录。
- * 先显示 Firestore 实时缓存，再主动从服务器读取完整 records 集合，
- * 并始终合并本机尚未上传的账单。
+ *
+ * 设计原则：
+ * 1. Firestore records 集合是正式历史账单来源；
+ * 2. 本机未上传账单始终合并显示；
+ * 3. 云端历史记录按文档 ID 分批读取，避免包含收款截图的大文档一次性下载时卡死；
+ * 4. 每读取一批就立刻更新页面，直到完整读完 records 集合。
  */
 export function subscribeAllRecords({db,onChange,onStatus}={}){
   const recordsRef = collection(db,"records");
+  const BATCH_SIZE = 10;
+
   let cloudRecords = [];
   let stopped = false;
   let retryTimer = null;
+  let loadingAll = false;
+  let incrementalUnsubscribe = null;
+
+  const readMeta = ()=>{
+    try{ return JSON.parse(localStorage.getItem(RECORD_HISTORY_SYNC_META) || "null") || {}; }
+    catch{ return {}; }
+  };
+  const writeMeta = meta=>{
+    try{ localStorage.setItem(RECORD_HISTORY_SYNC_META,JSON.stringify(meta)); }catch{}
+  };
+  const recordTime = r=>Number(r?.timestamp || r?.closedAt || r?.paidAt || 0);
+  const mergeCloud = list=>{ cloudRecords = mergeRecordLists(cloudRecords,list || []); };
+
+  const emit = async({persist=false}={})=>{
+    const local = await loadLocalRecords().catch(()=>[]);
+    const merged = mergeRecordLists(cloudRecords,local);
+    if(persist) await replaceLocalRecords(merged).catch(err=>console.warn("保存完整历史账单到本机失败",err));
+    if(!stopped) onChange?.(merged);
+    return merged;
+  };
+
+  const startIncrementalListener = async()=>{
+    if(stopped || incrementalUnsubscribe) return;
+    const local = await loadLocalRecords().catch(()=>[]);
+    const meta = readMeta();
+    const lastTimestamp = Number(meta.lastTimestamp || Math.max(0,...local.map(recordTime)) || 0);
+    // 留出1分钟重叠区，避免设备时间差或同秒写入造成漏单，合并时会按ID去重。
+    const since = Math.max(0,lastTimestamp - 60000);
+    const q = query(recordsRef,where("timestamp",">=",since),orderBy("timestamp","asc"));
+    incrementalUnsubscribe = onSnapshot(q,{includeMetadataChanges:true},async snap=>{
+      const list=snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.id!=="init");
+      mergeCloud(list);
+      const merged=await emit({persist:!snap.metadata.fromCache});
+      if(!snap.metadata.fromCache){
+        const newest=Math.max(lastTimestamp,...merged.map(recordTime));
+        writeMeta({...readMeta(),complete:true,lastTimestamp:newest,lastSyncAt:Date.now(),count:merged.length});
+        onStatus?.(`本机历史账单 ${merged.length} 条｜新记录已同步`);
+      }
+    },err=>{
+      console.warn("新账单实时监听失败",err);
+      onStatus?.(`本机历史账单已载入｜新记录将在联网后同步`);
+    });
+  };
+
+  const scheduleRetry=()=>{
+    clearTimeout(retryTimer);
+    if(!stopped) retryTimer=setTimeout(loadAllFromServer,5000);
+  };
+
+  async function loadAllFromServer(){
+    if(stopped || loadingAll) return;
+    if(!navigator.onLine){
+      const local=await loadLocalRecords().catch(()=>[]);
+      onStatus?.(`已从本机载入 ${local.length} 条｜等待联网继续读取历史账单`);
+      scheduleRetry();
+      return;
+    }
+
+    loadingAll=true;
+    let total=null;
+    try{
+      try{
+        const countSnap=await withTimeout(getCountFromServer(recordsRef),15000,"历史账单数量读取");
+        total=Math.max(0,Number(countSnap.data().count || 0)-1); // 排除 init
+      }catch(err){ console.warn("无法读取历史账单总数，将仅显示已读取数量",err); }
+
+      let cursor=null;
+      let loaded=0;
+      cloudRecords=[];
+      onStatus?.(total!=null ? `正在读取全部历史账单｜0 / ${total}` : `正在读取全部历史账单｜已读取 0 条`);
+
+      while(!stopped){
+        const pageQuery=cursor
+          ? query(recordsRef,orderBy(documentId()),startAfter(cursor),limit(BATCH_SIZE))
+          : query(recordsRef,orderBy(documentId()),limit(BATCH_SIZE));
+        const snap=await withTimeout(getDocsFromServer(pageQuery),30000,"历史账单分批读取");
+        if(stopped) return;
+
+        const docs=snap.docs;
+        const list=docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.id!=="init");
+        mergeCloud(list);
+        loaded+=list.length;
+        const merged=await emit({persist:true});
+        const percent=total ? Math.min(100,Math.round(loaded/total*100)) : null;
+        onStatus?.(total!=null
+          ? `正在读取全部历史账单｜${Math.min(loaded,total)} / ${total}（${percent}%）`
+          : `正在读取全部历史账单｜已读取 ${loaded} 条`);
+
+        if(docs.length < BATCH_SIZE){
+          const newest=Math.max(0,...merged.map(recordTime));
+          writeMeta({complete:true,count:merged.length,lastTimestamp:newest,lastSyncAt:Date.now()});
+          onStatus?.(`全部历史账单已保存到本机｜共 ${merged.length} 条`);
+          await startIncrementalListener();
+          return;
+        }
+        cursor=docs[docs.length-1];
+      }
+    }catch(err){
+      console.warn("完整历史账单读取失败",err);
+      const local=await loadLocalRecords().catch(()=>[]);
+      onStatus?.(`已保存 ${local.length} 条到本机｜5秒后从中断处重新读取`);
+      scheduleRetry();
+    }finally{
+      loadingAll=false;
+    }
+  }
+
+  // 启动时先读本机。完整历史已经下载过，就不再全量下载，只监听新增记录。
+  loadLocalRecords().then(async local=>{
+    if(stopped) return;
+    cloudRecords=mergeRecordLists(cloudRecords,local);
+    onChange?.(cloudRecords);
+    const meta=readMeta();
+    if(meta.complete && local.length>0){
+      onStatus?.(`已从本机载入全部历史账单｜${local.length} 条`);
+      await startIncrementalListener();
+    }else{
+      loadAllFromServer();
+    }
+  });
+
+  const onlineHandler=()=>{
+    const meta=readMeta();
+    if(meta.complete) startIncrementalListener();
+    else loadAllFromServer();
+  };
+  window.addEventListener("online",onlineHandler);
+
+  return ()=>{
+    stopped=true;
+    clearTimeout(retryTimer);
+    incrementalUnsubscribe?.();
+    window.removeEventListener("online",onlineHandler);
+  };
+}={}){
+  const recordsRef = collection(db,"records");
+  const BATCH_SIZE = 10;
+
+  let cloudRecords = [];
+  let stopped = false;
+  let retryTimer = null;
+  let loadingAll = false;
+  let allLoaded = false;
+
+  const mergeCloud = list=>{
+    cloudRecords = mergeRecordLists(cloudRecords,list || []);
+  };
 
   const emit = async()=>{
     const local = await loadLocalRecords().catch(()=>[]);
     if(!stopped) onChange?.(mergeRecordLists(cloudRecords,local));
   };
 
+  // 实时监听新建、修改和删除。监听返回缓存也没关系，完整历史数据由下面的分页服务器读取补齐。
   const unsubscribe = onSnapshot(recordsRef,{includeMetadataChanges:true},snap=>{
-    cloudRecords = snap.docs
+    const list = snap.docs
       .map(d=>({id:d.id,...d.data()}))
       .filter(r=>r.id!=="init");
+
+    mergeCloud(list);
     emit();
-    if(!snap.metadata.fromCache){
-      onStatus?.(`云端历史账单已载入｜${cloudRecords.length} 条`);
+
+    if(allLoaded && !snap.metadata.fromCache){
+      onStatus?.(`云端全部历史账单已载入｜${cloudRecords.length} 条`);
     }
   },err=>{
     console.warn("收银记录实时监听失败",err);
-    onStatus?.("实时账单监听失败，正在重试");
+    onStatus?.(`当前显示 ${cloudRecords.length} 条｜实时同步将在后台重试`);
   });
 
-  const loadServer = async()=>{
-    if(stopped || !navigator.onLine) return;
-    onStatus?.("正在从云端读取全部历史账单…");
-    try{
-      const snap = await getDocsFromServer(recordsRef);
-      cloudRecords = snap.docs
-        .map(d=>({id:d.id,...d.data()}))
-        .filter(r=>r.id!=="init");
-      await emit();
-      onStatus?.(`云端历史账单已载入｜${cloudRecords.length} 条`);
-    }catch(err){
-      console.warn("完整历史账单读取失败",err);
-      onStatus?.("完整历史账单读取失败，5秒后自动重试");
-      clearTimeout(retryTimer);
-      retryTimer=setTimeout(loadServer,5000);
-    }
+  const scheduleRetry = ()=>{
+    clearTimeout(retryTimer);
+    if(!stopped) retryTimer = setTimeout(loadAllFromServer,5000);
   };
 
-  loadLocalRecords().then(local=>onChange?.(mergeRecordLists(cloudRecords,local)));
-  loadServer();
-  const onlineHandler=()=>loadServer();
+  async function loadAllFromServer(){
+    if(stopped || loadingAll || allLoaded) return;
+    if(!navigator.onLine){
+      onStatus?.(`当前显示 ${cloudRecords.length} 条｜等待联网读取全部历史账单`);
+      scheduleRetry();
+      return;
+    }
+
+    loadingAll = true;
+    onStatus?.(`正在从云端读取全部历史账单｜已读取 ${cloudRecords.length} 条…`);
+
+    try{
+      let cursor = null;
+      let loadedFromServer = 0;
+
+      while(!stopped){
+        const pageQuery = cursor
+          ? query(recordsRef,orderBy(documentId()),startAfter(cursor),limit(BATCH_SIZE))
+          : query(recordsRef,orderBy(documentId()),limit(BATCH_SIZE));
+
+        // 分批从服务器读取。单批超时只重试当前次完整加载，不会清空已经显示的数据。
+        const snap = await withTimeout(
+          getDocsFromServer(pageQuery),
+          20000,
+          "历史账单分批读取"
+        );
+
+        if(stopped) return;
+
+        const docs = snap.docs;
+        const list = docs
+          .map(d=>({id:d.id,...d.data()}))
+          .filter(r=>r.id!=="init");
+
+        mergeCloud(list);
+        loadedFromServer += list.length;
+        await emit();
+        onStatus?.(`正在从云端读取全部历史账单｜已读取 ${cloudRecords.length} 条…`);
+
+        if(docs.length < BATCH_SIZE){
+          allLoaded = true;
+          break;
+        }
+
+        cursor = docs[docs.length-1];
+      }
+
+      if(!stopped && allLoaded){
+        onStatus?.(`云端全部历史账单已载入｜${cloudRecords.length} 条`);
+      }
+    }catch(err){
+      console.warn("完整历史账单分批读取失败",err);
+      onStatus?.(`当前显示 ${cloudRecords.length} 条｜云端历史账单将在5秒后继续读取`);
+      scheduleRetry();
+    }finally{
+      loadingAll = false;
+    }
+  }
+
+  loadLocalRecords().then(local=>{
+    if(!stopped) onChange?.(mergeRecordLists(cloudRecords,local));
+  });
+
+  loadAllFromServer();
+
+  const onlineHandler=()=>{
+    allLoaded = false;
+    loadAllFromServer();
+  };
   window.addEventListener("online",onlineHandler);
 
   return ()=>{

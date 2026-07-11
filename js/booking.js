@@ -1,7 +1,7 @@
-import { db } from "./firebase.js?v=2.5.2";
+import { db } from "./firebase.js?v=2.5.5";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js?v=2.5.2";
-import { resetTable } from "./common.js?v=2.5.2";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js?v=2.5.5";
+import { resetTable } from "./common.js?v=2.5.5";
 
 
 const ref = doc(db, "shop", "main");
@@ -1496,6 +1496,13 @@ function fillModalPackages(){
   async function confirmGridBooking(){
   if(!selection) return;
 
+  const confirmBtn = document.getElementById("modalConfirmBtn");
+  if(confirmBtn?.disabled) return;
+  if(confirmBtn){
+    confirmBtn.disabled = true;
+    confirmBtn.innerText = "正在保存预约…";
+  }
+
   const type = document.getElementById("modalType")?.value || "booking";
   const name = document.getElementById("modalName").value.trim();
   const phone = document.getElementById("modalPhone").value.trim();
@@ -1601,11 +1608,16 @@ renderList();
 
   state.bookings.push(booking);
 
-await save();
-
-closeBookingModal();
-renderBookingGrid();
-renderList();
+  // 预约先写入本机并立即关闭窗口，不等待弱网下的云端事务。
+  // saveStateSafely 会把操作加入待同步队列，联网后自动补传。
+  const savePromise = save("create_booking");
+  closeBookingModal();
+  renderBookingGrid();
+  renderList();
+  savePromise.catch(err=>{
+    console.error("预约保存失败",err);
+    alert("预约已保留在当前页面，但本机保存失败，请不要关闭页面并立即重试。\n" + (err?.message || err));
+  });
   
 }
 
@@ -1629,7 +1641,10 @@ const packageBox = document.getElementById("modalPackageBox");
 if(packageBox) packageBox.style.display = "none";
 
 const btn = document.getElementById("modalConfirmBtn");
-if(btn) btn.innerText = "确认预约";
+if(btn){
+  btn.disabled = false;
+  btn.innerText = "确认预约";
+}
 }
 
 function openDatePicker(){

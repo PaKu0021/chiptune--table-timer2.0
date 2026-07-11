@@ -1,6 +1,6 @@
-import { db } from "./firebase.js?v=2.5.2";
+import { db } from "./firebase.js?v=2.5.5";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.5.2";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.5.5";
 
 
 import {
@@ -582,7 +582,7 @@ onSnapshot(ref, snap=>{
 
   if(!initialized){
     initialized = true;
-    setQuickRange("today");
+    setQuickRange("month");
   }
 });
 
