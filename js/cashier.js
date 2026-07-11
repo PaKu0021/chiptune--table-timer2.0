@@ -1,6 +1,6 @@
-import { db } from "./firebase.js?v=2.5.5";
+import { db } from "./firebase.js?v=2.5.6";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.5.5";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.5.6";
 
 
 import {
@@ -588,6 +588,7 @@ onSnapshot(ref, snap=>{
 
 subscribeAllRecords({
   db,
+  fullHistory:true,
   onChange:list=>{ records=list; renderCashier(); },
   onStatus:text=>{
     const el=document.getElementById("recordMigrationStatus");

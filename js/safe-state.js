@@ -735,9 +735,15 @@ export async function atomicAdjustTableExtra({db,ref,tableIndex,deltaMs,action,g
  * 3. 云端历史记录按文档 ID 分批读取，避免包含收款截图的大文档一次性下载时卡死；
  * 4. 每读取一批就立刻更新页面，直到完整读完 records 集合。
  */
-export function subscribeAllRecords({db,onChange,onStatus}={}){
+export function subscribeAllRecords({
+  db,
+  onChange,
+  onStatus,
+  fullHistory = false
+}={}){
   const recordsRef = collection(db,"records");
   const BATCH_SIZE = 10;
+  const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
   let cloudRecords = [];
   let stopped = false;
@@ -746,201 +752,147 @@ export function subscribeAllRecords({db,onChange,onStatus}={}){
   let incrementalUnsubscribe = null;
 
   const readMeta = ()=>{
-    try{ return JSON.parse(localStorage.getItem(RECORD_HISTORY_SYNC_META) || "null") || {}; }
-    catch{ return {}; }
+    try{
+      return JSON.parse(localStorage.getItem(RECORD_HISTORY_SYNC_META) || "null") || {};
+    }catch{
+      return {};
+    }
   };
+
   const writeMeta = meta=>{
-    try{ localStorage.setItem(RECORD_HISTORY_SYNC_META,JSON.stringify(meta)); }catch{}
+    try{
+      localStorage.setItem(RECORD_HISTORY_SYNC_META,JSON.stringify(meta));
+    }catch(err){
+      console.warn("历史账单同步进度保存失败",err);
+    }
   };
+
   const recordTime = r=>Number(r?.timestamp || r?.closedAt || r?.paidAt || 0);
-  const mergeCloud = list=>{ cloudRecords = mergeRecordLists(cloudRecords,list || []); };
+  const mergeCloud = list=>{
+    cloudRecords = mergeRecordLists(cloudRecords,list || []);
+  };
 
   const emit = async({persist=false}={})=>{
     const local = await loadLocalRecords().catch(()=>[]);
     const merged = mergeRecordLists(cloudRecords,local);
-    if(persist) await replaceLocalRecords(merged).catch(err=>console.warn("保存完整历史账单到本机失败",err));
+
+    if(persist){
+      await replaceLocalRecords(merged).catch(err=>{
+        console.warn("保存历史账单到本机失败",err);
+      });
+    }
+
     if(!stopped) onChange?.(merged);
     return merged;
   };
 
   const startIncrementalListener = async()=>{
     if(stopped || incrementalUnsubscribe) return;
+
     const local = await loadLocalRecords().catch(()=>[]);
     const meta = readMeta();
-    const lastTimestamp = Number(meta.lastTimestamp || Math.max(0,...local.map(recordTime)) || 0);
-    // 留出1分钟重叠区，避免设备时间差或同秒写入造成漏单，合并时会按ID去重。
-    const since = Math.max(0,lastTimestamp - 60000);
-    const q = query(recordsRef,where("timestamp",">=",since),orderBy("timestamp","asc"));
-    incrementalUnsubscribe = onSnapshot(q,{includeMetadataChanges:true},async snap=>{
-      const list=snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.id!=="init");
-      mergeCloud(list);
-      const merged=await emit({persist:!snap.metadata.fromCache});
-      if(!snap.metadata.fromCache){
-        const newest=Math.max(lastTimestamp,...merged.map(recordTime));
-        writeMeta({...readMeta(),complete:true,lastTimestamp:newest,lastSyncAt:Date.now(),count:merged.length});
-        onStatus?.(`本机历史账单 ${merged.length} 条｜新记录已同步`);
+    const localNewest = Math.max(0,...local.map(recordTime));
+    const lastTimestamp = Number(meta.lastTimestamp || localNewest || 0);
+
+    // 已有完整历史时，只监听最后时间附近的新记录；从未完整下载过时，
+    // 非收银页面只监听最近7天，避免首页启动时下载全部历史和大图。
+    const since = lastTimestamp > 0
+      ? Math.max(0,lastTimestamp - 60000)
+      : Math.max(0,Date.now() - RECENT_WINDOW_MS);
+
+    const q = query(
+      recordsRef,
+      where("timestamp",">=",since),
+      orderBy("timestamp","asc")
+    );
+
+    incrementalUnsubscribe = onSnapshot(
+      q,
+      {includeMetadataChanges:true},
+      async snap=>{
+        const list = snap.docs
+          .map(d=>({id:d.id,...d.data()}))
+          .filter(r=>r.id!=="init");
+
+        mergeCloud(list);
+        const merged = await emit({persist:!snap.metadata.fromCache});
+
+        if(!snap.metadata.fromCache){
+          const newest = Math.max(lastTimestamp,...merged.map(recordTime));
+          writeMeta({
+            ...readMeta(),
+            lastTimestamp:newest,
+            lastSyncAt:Date.now(),
+            count:merged.length
+          });
+          onStatus?.(`已从本机载入 ${merged.length} 条｜新记录已同步`);
+        }
+      },
+      err=>{
+        console.warn("新账单实时监听失败",err);
+        onStatus?.("本机账单已载入｜新记录将在联网后同步");
       }
-    },err=>{
-      console.warn("新账单实时监听失败",err);
-      onStatus?.(`本机历史账单已载入｜新记录将在联网后同步`);
-    });
+    );
   };
 
-  const scheduleRetry=()=>{
+  const scheduleRetry = ()=>{
     clearTimeout(retryTimer);
-    if(!stopped) retryTimer=setTimeout(loadAllFromServer,5000);
+    if(!stopped){
+      retryTimer = setTimeout(loadAllFromServer,5000);
+    }
   };
 
   async function loadAllFromServer(){
-    if(stopped || loadingAll) return;
+    if(stopped || loadingAll || !fullHistory) return;
+
     if(!navigator.onLine){
-      const local=await loadLocalRecords().catch(()=>[]);
+      const local = await loadLocalRecords().catch(()=>[]);
       onStatus?.(`已从本机载入 ${local.length} 条｜等待联网继续读取历史账单`);
       scheduleRetry();
       return;
     }
 
-    loadingAll=true;
-    let total=null;
+    loadingAll = true;
+    const savedMeta = readMeta();
+    let total = null;
+
     try{
       try{
-        const countSnap=await withTimeout(getCountFromServer(recordsRef),15000,"历史账单数量读取");
-        total=Math.max(0,Number(countSnap.data().count || 0)-1); // 排除 init
-      }catch(err){ console.warn("无法读取历史账单总数，将仅显示已读取数量",err); }
-
-      let cursor=null;
-      let loaded=0;
-      cloudRecords=[];
-      onStatus?.(total!=null ? `正在读取全部历史账单｜0 / ${total}` : `正在读取全部历史账单｜已读取 0 条`);
-
-      while(!stopped){
-        const pageQuery=cursor
-          ? query(recordsRef,orderBy(documentId()),startAfter(cursor),limit(BATCH_SIZE))
-          : query(recordsRef,orderBy(documentId()),limit(BATCH_SIZE));
-        const snap=await withTimeout(getDocsFromServer(pageQuery),30000,"历史账单分批读取");
-        if(stopped) return;
-
-        const docs=snap.docs;
-        const list=docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.id!=="init");
-        mergeCloud(list);
-        loaded+=list.length;
-        const merged=await emit({persist:true});
-        const percent=total ? Math.min(100,Math.round(loaded/total*100)) : null;
-        onStatus?.(total!=null
-          ? `正在读取全部历史账单｜${Math.min(loaded,total)} / ${total}（${percent}%）`
-          : `正在读取全部历史账单｜已读取 ${loaded} 条`);
-
-        if(docs.length < BATCH_SIZE){
-          const newest=Math.max(0,...merged.map(recordTime));
-          writeMeta({complete:true,count:merged.length,lastTimestamp:newest,lastSyncAt:Date.now()});
-          onStatus?.(`全部历史账单已保存到本机｜共 ${merged.length} 条`);
-          await startIncrementalListener();
-          return;
-        }
-        cursor=docs[docs.length-1];
+        const countSnap = await withTimeout(
+          getCountFromServer(recordsRef),
+          15000,
+          "历史账单数量读取"
+        );
+        total = Math.max(0,Number(countSnap.data().count || 0)-1);
+      }catch(err){
+        console.warn("无法读取历史账单总数，将仅显示已读取数量",err);
       }
-    }catch(err){
-      console.warn("完整历史账单读取失败",err);
-      const local=await loadLocalRecords().catch(()=>[]);
-      onStatus?.(`已保存 ${local.length} 条到本机｜5秒后从中断处重新读取`);
-      scheduleRetry();
-    }finally{
-      loadingAll=false;
-    }
-  }
 
-  // 启动时先读本机。完整历史已经下载过，就不再全量下载，只监听新增记录。
-  loadLocalRecords().then(async local=>{
-    if(stopped) return;
-    cloudRecords=mergeRecordLists(cloudRecords,local);
-    onChange?.(cloudRecords);
-    const meta=readMeta();
-    if(meta.complete && local.length>0){
-      onStatus?.(`已从本机载入全部历史账单｜${local.length} 条`);
-      await startIncrementalListener();
-    }else{
-      loadAllFromServer();
-    }
-  });
+      // 支持中断续传。cursorId 是上次成功保存到本机的最后一个文档ID。
+      let cursorId = savedMeta.complete ? null : (savedMeta.cursorId || null);
+      let loaded = savedMeta.complete ? Number(savedMeta.count || 0) : Number(savedMeta.loaded || 0);
 
-  const onlineHandler=()=>{
-    const meta=readMeta();
-    if(meta.complete) startIncrementalListener();
-    else loadAllFromServer();
-  };
-  window.addEventListener("online",onlineHandler);
+      if(savedMeta.complete){
+        const local = await loadLocalRecords().catch(()=>[]);
+        onStatus?.(`已从本机载入全部历史账单｜${local.length} 条`);
+        await startIncrementalListener();
+        return;
+      }
 
-  return ()=>{
-    stopped=true;
-    clearTimeout(retryTimer);
-    incrementalUnsubscribe?.();
-    window.removeEventListener("online",onlineHandler);
-  };
-}={}){
-  const recordsRef = collection(db,"records");
-  const BATCH_SIZE = 10;
-
-  let cloudRecords = [];
-  let stopped = false;
-  let retryTimer = null;
-  let loadingAll = false;
-  let allLoaded = false;
-
-  const mergeCloud = list=>{
-    cloudRecords = mergeRecordLists(cloudRecords,list || []);
-  };
-
-  const emit = async()=>{
-    const local = await loadLocalRecords().catch(()=>[]);
-    if(!stopped) onChange?.(mergeRecordLists(cloudRecords,local));
-  };
-
-  // 实时监听新建、修改和删除。监听返回缓存也没关系，完整历史数据由下面的分页服务器读取补齐。
-  const unsubscribe = onSnapshot(recordsRef,{includeMetadataChanges:true},snap=>{
-    const list = snap.docs
-      .map(d=>({id:d.id,...d.data()}))
-      .filter(r=>r.id!=="init");
-
-    mergeCloud(list);
-    emit();
-
-    if(allLoaded && !snap.metadata.fromCache){
-      onStatus?.(`云端全部历史账单已载入｜${cloudRecords.length} 条`);
-    }
-  },err=>{
-    console.warn("收银记录实时监听失败",err);
-    onStatus?.(`当前显示 ${cloudRecords.length} 条｜实时同步将在后台重试`);
-  });
-
-  const scheduleRetry = ()=>{
-    clearTimeout(retryTimer);
-    if(!stopped) retryTimer = setTimeout(loadAllFromServer,5000);
-  };
-
-  async function loadAllFromServer(){
-    if(stopped || loadingAll || allLoaded) return;
-    if(!navigator.onLine){
-      onStatus?.(`当前显示 ${cloudRecords.length} 条｜等待联网读取全部历史账单`);
-      scheduleRetry();
-      return;
-    }
-
-    loadingAll = true;
-    onStatus?.(`正在从云端读取全部历史账单｜已读取 ${cloudRecords.length} 条…`);
-
-    try{
-      let cursor = null;
-      let loadedFromServer = 0;
+      onStatus?.(
+        total!=null
+          ? `正在读取全部历史账单｜${Math.min(loaded,total)} / ${total}（${total ? Math.min(100,Math.round(loaded/total*100)) : 0}%）`
+          : `正在读取全部历史账单｜已读取 ${loaded} 条`
+      );
 
       while(!stopped){
-        const pageQuery = cursor
-          ? query(recordsRef,orderBy(documentId()),startAfter(cursor),limit(BATCH_SIZE))
+        const pageQuery = cursorId
+          ? query(recordsRef,orderBy(documentId()),startAfter(cursorId),limit(BATCH_SIZE))
           : query(recordsRef,orderBy(documentId()),limit(BATCH_SIZE));
 
-        // 分批从服务器读取。单批超时只重试当前次完整加载，不会清空已经显示的数据。
         const snap = await withTimeout(
           getDocsFromServer(pageQuery),
-          20000,
+          30000,
           "历史账单分批读取"
         );
 
@@ -952,46 +904,92 @@ export function subscribeAllRecords({db,onChange,onStatus}={}){
           .filter(r=>r.id!=="init");
 
         mergeCloud(list);
-        loadedFromServer += list.length;
-        await emit();
-        onStatus?.(`正在从云端读取全部历史账单｜已读取 ${cloudRecords.length} 条…`);
+        const merged = await emit({persist:true});
+
+        loaded += list.length;
+        cursorId = docs.length ? docs[docs.length-1].id : cursorId;
+
+        const percent = total
+          ? Math.min(100,Math.round(Math.min(loaded,total)/total*100))
+          : null;
+
+        writeMeta({
+          complete:false,
+          cursorId,
+          loaded,
+          count:merged.length,
+          lastTimestamp:Math.max(0,...merged.map(recordTime)),
+          lastSyncAt:Date.now()
+        });
+
+        onStatus?.(
+          total!=null
+            ? `正在读取全部历史账单｜${Math.min(loaded,total)} / ${total}（${percent}%）`
+            : `正在读取全部历史账单｜已读取 ${loaded} 条`
+        );
 
         if(docs.length < BATCH_SIZE){
-          allLoaded = true;
-          break;
+          const newest = Math.max(0,...merged.map(recordTime));
+          writeMeta({
+            complete:true,
+            cursorId:null,
+            loaded:merged.length,
+            count:merged.length,
+            lastTimestamp:newest,
+            lastSyncAt:Date.now()
+          });
+          onStatus?.(`全部历史账单已保存到本机｜共 ${merged.length} 条`);
+          await startIncrementalListener();
+          return;
         }
-
-        cursor = docs[docs.length-1];
-      }
-
-      if(!stopped && allLoaded){
-        onStatus?.(`云端全部历史账单已载入｜${cloudRecords.length} 条`);
       }
     }catch(err){
-      console.warn("完整历史账单分批读取失败",err);
-      onStatus?.(`当前显示 ${cloudRecords.length} 条｜云端历史账单将在5秒后继续读取`);
+      console.warn("完整历史账单读取失败",err);
+      const local = await loadLocalRecords().catch(()=>[]);
+      onStatus?.(`已保存 ${local.length} 条到本机｜5秒后从当前进度继续`);
       scheduleRetry();
     }finally{
       loadingAll = false;
     }
   }
 
-  loadLocalRecords().then(local=>{
-    if(!stopped) onChange?.(mergeRecordLists(cloudRecords,local));
+  // 所有页面先立即使用本机数据。只有收银记录页面要求执行一次完整历史下载。
+  loadLocalRecords().then(async local=>{
+    if(stopped) return;
+
+    cloudRecords = mergeRecordLists(cloudRecords,local);
+    onChange?.(cloudRecords);
+
+    const meta = readMeta();
+    if(fullHistory && !meta.complete){
+      loadAllFromServer();
+      return;
+    }
+
+    if(meta.complete){
+      onStatus?.(`已从本机载入全部历史账单｜${local.length} 条`);
+    }else{
+      onStatus?.(`已从本机载入 ${local.length} 条`);
+    }
+    await startIncrementalListener();
+  }).catch(err=>{
+    console.warn("读取本机账单失败",err);
+    onStatus?.("本机账单读取失败｜正在尝试云端同步");
+    if(fullHistory) loadAllFromServer();
+    else startIncrementalListener();
   });
 
-  loadAllFromServer();
-
-  const onlineHandler=()=>{
-    allLoaded = false;
-    loadAllFromServer();
+  const onlineHandler = ()=>{
+    const meta = readMeta();
+    if(fullHistory && !meta.complete) loadAllFromServer();
+    else startIncrementalListener();
   };
   window.addEventListener("online",onlineHandler);
 
   return ()=>{
-    stopped=true;
+    stopped = true;
     clearTimeout(retryTimer);
-    unsubscribe();
+    incrementalUnsubscribe?.();
     window.removeEventListener("online",onlineHandler);
   };
 }

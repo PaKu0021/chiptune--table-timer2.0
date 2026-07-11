@@ -2,7 +2,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/fireba
 import {
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager
+  persistentMultipleTabManager,
+  getFirestore
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -16,6 +17,13 @@ const firebaseConfig = {
 };
 
 export const app = initializeApp(firebaseConfig);
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({tabManager:persistentMultipleTabManager()})
-});
+let firestoreDb;
+try{
+  firestoreDb = initializeFirestore(app, {
+    localCache: persistentLocalCache({tabManager:persistentMultipleTabManager()})
+  });
+}catch(err){
+  console.warn("Firestore 持久化缓存初始化失败，改用普通实时连接",err);
+  firestoreDb = getFirestore(app);
+}
+export const db = firestoreDb;
