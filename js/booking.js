@@ -1,7 +1,7 @@
-import { db } from "./firebase.js?v=2.5.7";
+import { db } from "./firebase.js?v=2.6.0";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js?v=2.5.7";
-import { resetTable } from "./common.js?v=2.5.7";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.6.0";
+import { resetTable } from "./common.js?v=2.6.0";
 
 
 const ref = doc(db, "shop", "main");
@@ -313,7 +313,7 @@ async function createOrUpdateTableRecord(t, {
   t.paidRMB = Math.floor(paidJPY * 0.044);
   t.paidAt = now;
 
-  await setDoc(doc(db, "records", record.id), record);
+  await saveRecordSafely({db,ref,record});
 
   return record;
 }
@@ -1277,7 +1277,7 @@ async function confirmMoveRunningTable(){
     if(snap.exists()){
       const r = snap.data();
       r.tableName = oldToName;
-      await setDoc(doc(db,"records",r.id),r);
+      await saveRecordSafely({db,ref,record:r});
     }
   }
 
@@ -2006,7 +2006,7 @@ if(t.recordId){
     r.pay = value;
     r.currency = t.currency || r.currency || "日元";
 
-    await setDoc(doc(db, "records", r.id), r);
+    await saveRecordSafely({db,ref,record:r});
   }
 }
   save();

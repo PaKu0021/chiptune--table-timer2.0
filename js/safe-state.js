@@ -28,7 +28,8 @@ const RECORDS_SHADOW = "chiptune_records_shadow_v2";
 const DELETED_RECORDS_SHADOW = "chiptune_deleted_record_ids_v1";
 const RECORD_MIGRATION_KEY = "records_migration_v3";
 const RECORD_MIGRATION_SHADOW = "chiptune_records_migration_v3";
-const RECORD_HISTORY_SYNC_META = "chiptune_records_history_sync_v1";
+const RECORD_HISTORY_SYNC_META = "chiptune_records_history_sync_v2";
+const RECORD_DELETES_COLLECTION = "recordDeletes";
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -441,6 +442,50 @@ export function setStateBaseline(nextState){
   if(shadow?.state) writeLocalState(shadow.state,nextState).catch(()=>{});
 }
 
+function itemId(item,index,prefix="item"){
+  if(item && typeof item === "object"){
+    return String(item.id ?? item.groupId ?? item.bookingId ?? item.key ?? `${prefix}_${index}`);
+  }
+  return `${prefix}_${index}`;
+}
+
+function mergeArrayChanges(latestValue, localValue, baseValue, prefix){
+  const latest = Array.isArray(latestValue) ? clone(latestValue) : [];
+  const local = Array.isArray(localValue) ? localValue : [];
+  const base = Array.isArray(baseValue) ? baseValue : [];
+
+  const latestMap = new Map(latest.map((v,i)=>[itemId(v,i,prefix),clone(v)]));
+  const localMap = new Map(local.map((v,i)=>[itemId(v,i,prefix),v]));
+  const baseMap = new Map(base.map((v,i)=>[itemId(v,i,prefix),v]));
+
+  // 本机相对基线删除的项目，也从服务器最新结果中删除。
+  for(const id of baseMap.keys()){
+    if(!localMap.has(id)) latestMap.delete(id);
+  }
+
+  // 只写入本机相对基线新增或修改的项目，保留其他设备新增的项目。
+  for(const [id,value] of localMap){
+    if(!baseMap.has(id) || !same(value,baseMap.get(id))){
+      latestMap.set(id,clone(value));
+    }
+  }
+
+  return [...latestMap.values()];
+}
+
+function mergeObjectChanges(latestValue, localValue, baseValue){
+  const latest = clone(latestValue || {});
+  const local = localValue || {};
+  const base = baseValue || {};
+  for(const key of Object.keys(base)){
+    if(!(key in local)) delete latest[key];
+  }
+  for(const key of Object.keys(local)){
+    if(!(key in base) || !same(local[key],base[key])) latest[key]=clone(local[key]);
+  }
+  return latest;
+}
+
 function mergeState(latest, local, base, keys){
   const merged = clone(latest || {});
   const changed = keys?.length ? keys : changedKeys(local,base);
@@ -454,6 +499,12 @@ function mergeState(latest, local, base, keys){
         if(!same(table,baseTables[index])) latestTables[index] = clone(table);
       });
       merged.tables = latestTables;
+    }else if(key === "bookings"){
+      merged.bookings = mergeArrayChanges(merged.bookings,localValue,baseValue,"booking");
+    }else if(key === "groups"){
+      merged.groups = mergeArrayChanges(merged.groups,localValue,baseValue,"group");
+    }else if(key === "customers"){
+      merged.customers = mergeObjectChanges(merged.customers,localValue,baseValue);
     }else{
       merged[key] = clone(localValue);
     }
@@ -497,7 +548,15 @@ async function flushOne({db,ref}, item){
 
 async function flushRecordOne({db}, item){
   if(item.type === "delete"){
-    await deleteDoc(doc(db,"records",String(item.recordId)));
+    const recordId = String(item.recordId);
+    // 先写共享删除标记，再删除正式账单。其他设备即使保留旧缓存，也会收到删除标记。
+    await setDoc(doc(db,RECORD_DELETES_COLLECTION,recordId),{
+      recordId,
+      deletedAt:serverTimestamp(),
+      clientDeletedAt:Number(item.createdAt || Date.now()),
+      deviceId:item.deviceId || getDeviceId()
+    });
+    await deleteDoc(doc(db,"records",recordId));
   }else{
     await setDoc(doc(db,"records",String(item.record.id)), item.record);
   }
@@ -625,7 +684,7 @@ export async function deleteRecordSafely({db,ref,recordId}){
     const current = await loadLocalRecords();
     const next = current.filter(r=>String(r.id)!==id);
     await writeLocalRecords(next);
-    await idbPut("recordQueue",{id:`delete_record_${id}`,type:"delete",recordId:id,createdAt:Date.now()});
+    await idbPut("recordQueue",{id:`delete_record_${id}`,type:"delete",recordId:id,createdAt:Date.now(),deviceId:getDeviceId()});
   }catch(err){
     console.warn("账单本地删除队列写入失败，已保留删除标记",err);
   }
@@ -746,10 +805,13 @@ export function subscribeAllRecords({
   const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
   let cloudRecords = [];
+  let fullServerRecords = [];
   let stopped = false;
   let retryTimer = null;
   let loadingAll = false;
   let incrementalUnsubscribe = null;
+  let deleteUnsubscribe = null;
+  let sharedDeletedIds = new Set();
 
   const readMeta = ()=>{
     try{
@@ -769,12 +831,34 @@ export function subscribeAllRecords({
 
   const recordTime = r=>Number(r?.timestamp || r?.closedAt || r?.paidAt || 0);
   const mergeCloud = list=>{
-    cloudRecords = mergeRecordLists(cloudRecords,list || []);
+    cloudRecords = mergeRecordLists(cloudRecords,(list || []).filter(r=>!sharedDeletedIds.has(String(r.id))));
+  };
+
+  const applySharedDeletes = async ids=>{
+    let changed=false;
+    for(const id of ids || []){
+      const key=String(id);
+      if(!sharedDeletedIds.has(key)) changed=true;
+      sharedDeletedIds.add(key);
+    }
+    if(!changed && !ids?.length) return;
+    cloudRecords = cloudRecords.filter(r=>!sharedDeletedIds.has(String(r.id)));
+    const local = await loadLocalRecords().catch(()=>[]);
+    const filtered = local.filter(r=>!sharedDeletedIds.has(String(r.id)));
+    if(filtered.length !== local.length) await writeLocalRecords(filtered).catch(()=>{});
+    if(!stopped) onChange?.(mergeRecordLists(cloudRecords,filtered));
+  };
+
+  const startDeleteListener = ()=>{
+    if(stopped || deleteUnsubscribe) return;
+    deleteUnsubscribe = onSnapshot(collection(db,RECORD_DELETES_COLLECTION),snap=>{
+      applySharedDeletes(snap.docs.map(d=>d.id)).catch(err=>console.warn("同步账单删除标记失败",err));
+    },err=>console.warn("账单删除标记监听失败",err));
   };
 
   const emit = async({persist=false}={})=>{
-    const local = await loadLocalRecords().catch(()=>[]);
-    const merged = mergeRecordLists(cloudRecords,local);
+    const local = (await loadLocalRecords().catch(()=>[])).filter(r=>!sharedDeletedIds.has(String(r.id)));
+    const merged = mergeRecordLists(cloudRecords,local).filter(r=>!sharedDeletedIds.has(String(r.id)));
 
     if(persist){
       await replaceLocalRecords(merged).catch(err=>{
@@ -896,25 +980,11 @@ export function subscribeAllRecords({
         });
       }
 
-      const activeMeta = cacheLooksComplete ? savedMeta : readMeta();
-      let cursorId = cacheLooksComplete ? null : (activeMeta.cursorId || null);
-      let loaded = cacheLooksComplete ? Number(activeMeta.count || localBefore.length) : Number(activeMeta.loaded || 0);
-
-      // 如果进度声称已读取很多条，但 IndexedDB 实际条数更少，说明上次保存中断。
-      // 为避免从错误游标继续而永久漏账，直接从头扫描；已有记录会按 ID 去重。
-      if(!cacheLooksComplete && loaded > localBefore.length + BATCH_SIZE){
-        cursorId = null;
-        loaded = 0;
-        writeMeta({
-          complete:false,
-          cursorId:null,
-          loaded:0,
-          count:localBefore.length,
-          lastTimestamp:Math.max(0,...localBefore.map(recordTime)),
-          resetAt:Date.now(),
-          resetReason:"cursor_cache_mismatch"
-        });
-      }
+      // 为了保证本机镜像能准确删除云端已经不存在的旧记录，
+      // 未完成的完整扫描每次都从头开始。已有页面数据仍从本机立即显示，扫描只在后台重建镜像。
+      let cursorId = null;
+      let loaded = 0;
+      fullServerRecords = [];
 
       if(cacheLooksComplete){
         onStatus?.(`已从本机载入全部历史账单｜${localBefore.length} 条`);
@@ -946,6 +1016,7 @@ export function subscribeAllRecords({
           .map(d=>({id:d.id,...d.data()}))
           .filter(r=>r.id!=="init");
 
+        fullServerRecords = mergeRecordLists(fullServerRecords,list);
         mergeCloud(list);
         const merged = await emit({persist:true});
 
@@ -972,16 +1043,28 @@ export function subscribeAllRecords({
         );
 
         if(docs.length < BATCH_SIZE){
-          const newest = Math.max(0,...merged.map(recordTime));
+          // 完整扫描结束后，以云端全集为基础重建本机镜像；仅保留尚未上传的新账单。
+          const pendingItems = await idbAll("recordQueue").catch(()=>[]);
+          const pendingRecords = pendingItems
+            .filter(x=>x.type !== "delete" && x.record)
+            .map(x=>x.record);
+          const exactMerged = mergeRecordLists(
+            fullServerRecords.filter(r=>!sharedDeletedIds.has(String(r.id))),
+            pendingRecords.filter(r=>!sharedDeletedIds.has(String(r.id)))
+          );
+          await writeLocalRecords(exactMerged);
+          cloudRecords = clone(exactMerged);
+          if(!stopped) onChange?.(clone(exactMerged));
+          const newest = Math.max(0,...exactMerged.map(recordTime));
           writeMeta({
             complete:true,
             cursorId:null,
-            loaded:merged.length,
-            count:merged.length,
+            loaded:exactMerged.length,
+            count:exactMerged.length,
             lastTimestamp:newest,
             lastSyncAt:Date.now()
           });
-          onStatus?.(`全部历史账单已保存到本机｜共 ${merged.length} 条`);
+          onStatus?.(`全部历史账单已保存到本机｜共 ${exactMerged.length} 条`);
           await startIncrementalListener();
           return;
         }
@@ -996,6 +1079,9 @@ export function subscribeAllRecords({
       loadingAll = false;
     }
   }
+
+  // 所有页面都监听共享删除标记，保证手机和 iPad 删除结果一致。
+  startDeleteListener();
 
   // 所有页面先立即使用本机数据。只有收银记录页面要求执行一次完整历史下载。
   loadLocalRecords().then(async local=>{
@@ -1034,6 +1120,7 @@ export function subscribeAllRecords({
     stopped = true;
     clearTimeout(retryTimer);
     incrementalUnsubscribe?.();
+    deleteUnsubscribe?.();
     window.removeEventListener("online",onlineHandler);
   };
 }

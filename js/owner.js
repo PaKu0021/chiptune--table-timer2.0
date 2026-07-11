@@ -1,7 +1,7 @@
-import { db } from "./firebase.js?v=2.5.7";
+import { db } from "./firebase.js?v=2.6.0";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.5.7";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.6.0";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -736,7 +736,7 @@ async function handleOwnerReceiptFileChange(e){
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
 
-    await setDoc(doc(db, "records", r.id), r);
+    await saveRecordSafely({db,ref,record:r});
 
     uploadingRecordId = null;
     alert("收款截图已保存");
@@ -804,7 +804,10 @@ const r = records.find(x=>x.id === recordId);
   r.extensionConfirmedAt = Date.now();
   r.extensionConfirmedTime = new Date().toLocaleString();
 
-  setDoc(doc(db, "records", r.id), r);
+  saveRecordSafely({db,ref,record:r}).catch(err=>{
+    console.error("续费确认同步失败",err);
+    showOwnerMessage("续费确认已保存在本机，云端将在联网后重试。");
+  });
   alert("续费已确认");
 }
 

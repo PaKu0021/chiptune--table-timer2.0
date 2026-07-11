@@ -1,6 +1,6 @@
-import { db } from "./firebase.js?v=2.5.7";
+import { db } from "./firebase.js?v=2.6.0";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.5.7";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.6.0";
 
 
 import {
@@ -32,11 +32,9 @@ async function uploadReceipt(recordId,file){
   record.receiptUploadedAt = Date.now();
   record.receiptUploadedTime = new Date().toLocaleString();
 
-  await setDoc(
-    doc(db,"records",record.id),
-    record
-  );
-
+  await saveRecordSafely({db,ref,record});
+  records = mergeRecordLists(records,[record]);
+  renderCashier();
   alert("截图已保存");
 }
 
@@ -622,7 +620,7 @@ async function cleanupOldReceipts(){
     delete r.receiptUploadedAt;
     delete r.receiptUploadedTime;
 
-    await setDoc(doc(db,"records",r.id),r);
+    await saveRecordSafely({db,ref,record:r});
     count++;
   }
 
