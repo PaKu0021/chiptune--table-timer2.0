@@ -7,6 +7,8 @@ import {
   setDoc,
   deleteDoc,
   getDocs,
+  getDocsFromServer,
+  onSnapshot,
   getDoc
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
@@ -394,12 +396,11 @@ export async function reconcileCloudState(cloud){
 
   const pending = await pendingKeys();
   const merged = clone(cloud || {});
-  const currentRole = role();
-  const alwaysLocal = (currentRole === "timer" || currentRole === "home") ? new Set(["tables"]) : new Set();
-
+  // 云端是多设备共享状态的基准。只有本机仍在待上传队列中的字段，
+  // 才暂时保留本机值；上传完成后所有设备立即以云端最新状态为准。
   for(const key of Object.keys(local)){
     if(key === "_sync") continue;
-    if(alwaysLocal.has(key) || pending.has(key)) merged[key] = clone(local[key]);
+    if(pending.has(key)) merged[key] = clone(local[key]);
   }
 
   baseline = clone(cloud);
@@ -494,6 +495,12 @@ export function installConnectionGuard(){
   window.addEventListener("online",update);
   window.addEventListener("offline",update);
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) update(); });
+  // 弱网环境下定时重试待上传操作；所有打开程序的设备都可参与实时操作。
+  setInterval(()=>{
+    if(navigator.onLine){
+      window.dispatchEvent(new CustomEvent("chiptune-sync-tick",{detail:{online:true}}));
+    }
+  },5000);
   update();
 }
 
@@ -511,11 +518,14 @@ export function saveStateSafely({db,ref,getState,action="state_update"}){
     const count = await pendingCount();
     setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? `● 已保存本机 · ${count} 项等待上传` : `● 已保存本机 · 离线 · ${count} 项待上传`);
     if(navigator.onLine){
-      clearTimeout(flushTimer);
-      flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
+      // 在线操作立即同步，不再等延迟计时器。这样手机、iPad 和二维码页面
+      // 都能在几乎同一时间收到桌位状态更新。
+      try{
+        await flushPending({db,ref});
+      }catch(err){
         console.warn("云端同步失败，将自动重试",err);
         setSyncStatus("pending","● 已保存本机 · 云端同步失败，将重试");
-      }),150);
+      }
     }
     return local;
   }).catch(err=>{
@@ -662,4 +672,65 @@ export async function atomicAdjustTableExtra({db,ref,tableIndex,deltaMs,action,g
   currentState.tables[tableIndex] = table;
   await saveStateSafely({db,ref,getState:()=>currentState,action:action || "adjust_extra"});
   return table;
+}
+
+
+/**
+ * 统一读取全部收银记录。
+ * 先显示 Firestore 实时缓存，再主动从服务器读取完整 records 集合，
+ * 并始终合并本机尚未上传的账单。
+ */
+export function subscribeAllRecords({db,onChange,onStatus}={}){
+  const recordsRef = collection(db,"records");
+  let cloudRecords = [];
+  let stopped = false;
+  let retryTimer = null;
+
+  const emit = async()=>{
+    const local = await loadLocalRecords().catch(()=>[]);
+    if(!stopped) onChange?.(mergeRecordLists(cloudRecords,local));
+  };
+
+  const unsubscribe = onSnapshot(recordsRef,{includeMetadataChanges:true},snap=>{
+    cloudRecords = snap.docs
+      .map(d=>({id:d.id,...d.data()}))
+      .filter(r=>r.id!=="init");
+    emit();
+    if(!snap.metadata.fromCache){
+      onStatus?.(`云端历史账单已载入｜${cloudRecords.length} 条`);
+    }
+  },err=>{
+    console.warn("收银记录实时监听失败",err);
+    onStatus?.("实时账单监听失败，正在重试");
+  });
+
+  const loadServer = async()=>{
+    if(stopped || !navigator.onLine) return;
+    onStatus?.("正在从云端读取全部历史账单…");
+    try{
+      const snap = await getDocsFromServer(recordsRef);
+      cloudRecords = snap.docs
+        .map(d=>({id:d.id,...d.data()}))
+        .filter(r=>r.id!=="init");
+      await emit();
+      onStatus?.(`云端历史账单已载入｜${cloudRecords.length} 条`);
+    }catch(err){
+      console.warn("完整历史账单读取失败",err);
+      onStatus?.("完整历史账单读取失败，5秒后自动重试");
+      clearTimeout(retryTimer);
+      retryTimer=setTimeout(loadServer,5000);
+    }
+  };
+
+  loadLocalRecords().then(local=>onChange?.(mergeRecordLists(cloudRecords,local)));
+  loadServer();
+  const onlineHandler=()=>loadServer();
+  window.addEventListener("online",onlineHandler);
+
+  return ()=>{
+    stopped=true;
+    clearTimeout(retryTimer);
+    unsubscribe();
+    window.removeEventListener("online",onlineHandler);
+  };
 }

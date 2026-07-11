@@ -1,5 +1,5 @@
 import { db } from "./firebase.js";
-import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { doc, onSnapshot, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const ref = doc(db,"shop","main");
 const params = new URLSearchParams(location.search);
@@ -56,10 +56,27 @@ function renderDisplay(){
   }
 }
 
-onSnapshot(ref,snap=>{
+onSnapshot(ref,{includeMetadataChanges:true},snap=>{
   if(!snap.exists()) return;
   state = snap.data();
   renderDisplay();
 });
 
+async function refreshFromServer(){
+  if(!navigator.onLine) return;
+  try{
+    const snap = await getDocFromServer(ref);
+    if(snap.exists()){
+      state = snap.data();
+      renderDisplay();
+    }
+  }catch(err){
+    console.warn("二维码页面刷新云端状态失败",err);
+  }
+}
+
 setInterval(renderDisplay,1000);
+setInterval(refreshFromServer,5000);
+window.addEventListener("online",refreshFromServer);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refreshFromServer(); });
+refreshFromServer();

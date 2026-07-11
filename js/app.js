@@ -20,6 +20,9 @@ loadLocalState().then(local=>{
 window.addEventListener("chiptune-online-change",e=>{
   if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
 });
+window.addEventListener("chiptune-sync-tick",()=>{
+  flushPending({db,ref}).catch(err=>console.warn("定时同步失败",err));
+});
 
 let checkoutIndex = null;
 let checkoutSubmitting = false;
@@ -571,6 +574,7 @@ filteredTables.forEach(({t,i})=>{
       if(!t.alerting){
         t.alerting = true;
         startAlertLoop(i);
+        notifyLocal("桌位已超时", t.name + " 已超时，请及时处理");
         save();
       }
     }else{
@@ -721,96 +725,46 @@ ${t.start ? `
 }
 
 async function initPush(){
-  try{
-    if(!("Notification" in window)){
-      alert("失败原因：这个浏览器不支持 Notification");
-      return;
-    }
+  if (!("Notification" in window)) {
+    alert("当前浏览器不支持系统通知");
+    return;
+  }
 
-    if(!("serviceWorker" in navigator)){
-      alert("失败原因：这个浏览器不支持 Service Worker");
-      return;
-    }
-
-    if(!VAPID_KEY || VAPID_KEY.includes("这里填")){
-      alert("失败原因：VAPID_KEY 还没有填");
-      return;
-    }
-
-    const permission = await Notification.requestPermission();
-
-    if(permission !== "granted"){
-      alert("失败原因：你没有允许通知权限");
-      return;
-    }
-
-  /*const { getMessaging, getToken, onMessage } = await import(
-  "https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging.js"
-);
-
-    const messaging = getMessaging(app);
-
-    onMessage(messaging,(payload)=>{
-      const title = payload.notification?.title || "Chiptune提醒";
-      const body = payload.notification?.body || "";
-      notifyLocal(title,body);
-    });
-
-    const swPath = location.pathname.includes("/chiptune--table-timer2.0/")
-      ? "/chiptune--table-timer2.0/firebase-messaging-sw.js"
-      : "./firebase-messaging-sw.js";
-
-    const registration = await navigator.serviceWorker.register(swPath);
-
-    const token = await getToken(messaging,{
-      vapidKey: VAPID_KEY,
-      serviceWorkerRegistration: registration
-    });
-
-    
-    if(!token){
-      alert("失败原因：Firebase 没有返回 token");
-      return;
-    }
-*/
-if (!("Notification" in window)) {
-  alert("失败原因：当前设备不支持通知提醒");
-  return;
-}
-
-
-localStorage.setItem("chiptuneNotifyEnabled", "1");
-alert("锁屏提醒已开启");
-    
-    /*await setDoc(doc(db,"devices",token),{
-      token,
-      userAgent:navigator.userAgent,
-      createdAt:Date.now(),
-      enabled:true
-    });
-
-    alert("锁屏提醒已开启 ✅");
-    alert("Token: " + token);
-*/
-  }catch(e){
-    console.error(e);
-    alert("推送失败原因：" + (e.code || e.name || "") + "\n" + (e.message || e));
+  const permission = await Notification.requestPermission();
+  if (permission === "granted") {
+    localStorage.setItem("chiptuneNotifyEnabled", "1");
+    updateNotifyButton();
+    notifyLocal("系统通知已开启", "桌位剩余10分钟或超时时会发送静默通知");
+  } else {
+    localStorage.removeItem("chiptuneNotifyEnabled");
+    updateNotifyButton();
+    alert("系统通知没有开启，请在 iPad 设置中允许此网页的通知");
   }
 }
 
-function notifyLocal(title,body){
-  try{
-    if("Notification" in window && Notification.permission === "granted"){
-      new Notification(title,{
-        body,
-        icon:"./icon.png"
-      });
-    }
+function updateNotifyButton(){
+  const btn = document.getElementById("notifyBtn");
+  if(!btn) return;
+  const enabled = localStorage.getItem("chiptuneNotifyEnabled") === "1" && Notification.permission === "granted";
+  btn.textContent = enabled ? "系统通知：已开启" : "开启系统通知";
+}
 
-    if(navigator.vibrate){
-      navigator.vibrate([300,100,300]);
-    }
-  }catch(e){}
+function notifyLocal(title, body){
+  if (!("Notification" in window)) return;
+  if (localStorage.getItem("chiptuneNotifyEnabled") !== "1") return;
+  if (Notification.permission !== "granted") return;
+
+  try{
+    new Notification(title, {
+      body,
+      icon:"./icon-192.png",
+      badge:"./icon-192.png",
+      silent:true,
+      tag:"chiptune-" + title + "-" + body
+    });
+  }catch(err){
+    console.warn("系统通知发送失败", err);
+  }
 }
 
 async function setPackage(i,v){
@@ -1778,55 +1732,15 @@ function generateQR(i){
 }
 
 function playBeep(){
-  try{
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-
-    o.frequency.value = 880;
-    g.gain.value = 0.2;
-
-    o.connect(g);
-    g.connect(ctx.destination);
-
-    o.start();
-    setTimeout(()=>{
-      o.stop();
-      ctx.close();
-    },500);
-  }catch(e){}
+  // 提示音永久关闭；系统通知使用 silent:true，不播放声音。
 }
 
-function startAlertLoop(i){
-  if(alertLoops[i]) return;
-  if(!state || !state.tables[i]) return;
-
-  playBeep();
-  notifyLocal("Chiptune 超时提醒", state.tables[i].name + " 已超时");
-
-  const soundLoop = setInterval(()=>{
-    playBeep();
-  },3000);
-
-  const notifyLoop = setInterval(()=>{
-    if(state && state.tables[i]){
-      notifyLocal("Chiptune 超时提醒", state.tables[i].name + " 已超时");
-    }
-  },30000);
-
-  alertLoops[i] = {
-    sound:soundLoop,
-    notify:notifyLoop
-  };
+function startAlertLoop(){
+  // 超时仅保留页面上的文字/颜色提示，不播放声音、不发通知、不震动。
 }
 
-function stopAlertLoop(i){
-  if(!alertLoops[i]) return;
-
-  clearInterval(alertLoops[i].sound);
-  clearInterval(alertLoops[i].notify);
-
-  delete alertLoops[i];
+function stopAlertLoop(){
+  // 无需停止声音循环。
 }
 
 function renderAlarmPanel(){
@@ -2354,3 +2268,4 @@ window.toggleGroupPayMode = toggleGroupPayMode;
 window.startRunningMoveDrag = startRunningMoveDrag;
 window.confirmMoveRunningLine = confirmMoveRunningLine;
 window.closeMoveRunningLineModal = closeMoveRunningLineModal;
+window.addEventListener("DOMContentLoaded", updateNotifyButton);

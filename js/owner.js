@@ -1,7 +1,7 @@
 import { db } from "./firebase.js";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, migrateLegacyRecordsOnce } from "./safe-state.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -18,8 +18,7 @@ loadLocalState().then(local=>{
 window.addEventListener("chiptune-online-change",e=>{
   if(e.detail?.online){
     flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
-    migrateLegacyRecordsOnce({db,ref}).then(result=>{ records = mergeRecordLists(records,result.records); if(state) render(); }).catch(()=>{});
-  }
+      }
 });
 
 let currentFilter = "today";
@@ -31,10 +30,7 @@ loadLocalRecords().then(localRecords=>{
   if(state) render();
 }).catch(err=>console.warn("读取本机收银记录失败",err));
 
-migrateLegacyRecordsOnce({db,ref}).then(result=>{
-  records = mergeRecordLists(records,result.records);
-  if(state) render();
-}).catch(err=>console.warn("历史账单一次性迁移暂未完成",err));
+
 let customerPanelOpen = false;
 let customerSearch = "";
 
@@ -79,22 +75,9 @@ renderBusinessHours();
 
 });
 
-onSnapshot(recordsRef, snap=>{
-  const cloudRecords = snap.docs
-    .map(d=>({
-      id: d.id,
-      ...d.data()
-    }))
-    .filter(r=>r.id !== "init");
-
-  loadLocalRecords().then(localRecords=>{
-    records = mergeRecordLists(cloudRecords, localRecords);
-    if(state) render();
-  }).catch(err=>{
-    console.warn("合并本机收银记录失败",err);
-    records = cloudRecords;
-    if(state) render();
-  });
+subscribeAllRecords({
+  db,
+  onChange:list=>{ records=list; if(state) render(); }
 });
 
 function save(action="owner_update"){

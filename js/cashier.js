@@ -1,6 +1,6 @@
 import { db } from "./firebase.js";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, migrateLegacyRecordsOnce } from "./safe-state.js";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js";
 
 
 import {
@@ -103,38 +103,10 @@ loadLocalRecords().then(localRecords=>{
   renderCashier();
 }).catch(err=>console.warn("读取本机收银记录失败",err));
 
-let migrationRunning = false;
-async function runOneTimeRecordMigration(){
-  if(migrationRunning) return;
-  migrationRunning = true;
-  const statusEl = document.getElementById("recordMigrationStatus");
-  try{
-    const result = await migrateLegacyRecordsOnce({
-      db,
-      ref,
-      onProgress:text=>{ if(statusEl) statusEl.textContent = text; }
-    });
-    records = mergeRecordLists(records,result.records);
-    renderCashier();
-    if(statusEl){
-      statusEl.textContent = result.done
-        ? `历史账单已完成一次性升级｜当前 ${records.length} 条`
-        : `本机历史账单已升级｜联网后自动补全云端旧记录`;
-      statusEl.dataset.done = result.done ? "1" : "0";
-    }
-  }catch(err){
-    console.warn("历史账单自动迁移失败",err);
-    if(statusEl) statusEl.textContent = "历史账单升级暂未完成，将自动重试";
-  }finally{
-    migrationRunning = false;
-  }
-}
 
-queueMicrotask(runOneTimeRecordMigration);
 window.addEventListener("chiptune-online-change",e=>{
   if(e.detail?.online){
     flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
-    runOneTimeRecordMigration();
   }
 });
 let quickRange = "today";
@@ -614,24 +586,13 @@ onSnapshot(ref, snap=>{
   }
 });
 
-const recordsQuery = collection(db,"records");
-
-onSnapshot(recordsQuery,snap=>{
-  const cloudRecords = snap.docs
-    .map(d=>({
-      id: d.id,
-      ...d.data()
-    }))
-    .filter(r=>r.id !== "init");
-
-  loadLocalRecords().then(localRecords=>{
-    records = mergeRecordLists(cloudRecords, localRecords);
-    renderCashier();
-  }).catch(err=>{
-    console.warn("合并本机收银记录失败",err);
-    records = cloudRecords;
-    renderCashier();
-  });
+subscribeAllRecords({
+  db,
+  onChange:list=>{ records=list; renderCashier(); },
+  onStatus:text=>{
+    const el=document.getElementById("recordMigrationStatus");
+    if(el) el.textContent=text;
+  }
 });
 
 
