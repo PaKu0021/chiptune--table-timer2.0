@@ -13,9 +13,12 @@
   <div class="app-header">
     <div class="app-title">
       <h1>桌位计时系统</h1>
-      <p>实时计时 / 收银 / 超时提醒</p>
+      <p>实时计时 / 收银 / 多设备同步</p>
     </div>
-    <div id="globalNav" class="header-actions"></div>
+    <div class="header-actions">
+      <button id="notifyBtn" class="btn-ghost" type="button" onclick="initPush()">开启系统通知</button>
+      <div id="globalNav"></div>
+    </div>
   </div>
 
   <div class="panel">

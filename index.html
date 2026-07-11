@@ -52,7 +52,7 @@
 <button id="cardApp" class="home-card" onclick="go('./app.html','cardApp')">
   <span class="emoji">⏱️</span>
     <strong>进入计时系统</strong>
-    <small>桌位计时 / 结账 / 二维码 / 超时提醒</small>
+    <small>桌位计时 / 结账 / 二维码 / 多设备同步</small>
   </button>
 
 <button id="cardBill" class="home-card" onclick="go('./today-bill.html','cardBill')">
@@ -74,7 +74,7 @@
  
 <script type="module">
 import { db } from "./js/firebase.js";
-import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending } from "./js/safe-state.js";
+import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending, subscribeAllRecords } from "./js/safe-state.js";
 import { doc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -130,19 +130,9 @@ onSnapshot(ref,async snap=>{
   updateHome();
 });
 
-onSnapshot(recordsRef,snap=>{
- 
-const cloudRecords = snap.docs
-  .map(d=>({
-    id: d.id,
-    ...d.data()
-  }))
-  .filter(r=>r.id !== "init");
-
-  loadLocalRecords().then(localRecords=>{
-    allRecords = mergeRecordLists(cloudRecords, localRecords);
-    updateHome();
-  });
+subscribeAllRecords({
+  db,
+  onChange:list=>{ allRecords=list; updateHome(); }
 });
 
 function updateHome(){
