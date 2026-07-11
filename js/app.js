@@ -1,9 +1,9 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.6.0";
+import { db } from "./firebase.js?v=2.6.1";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.0";
-/*import { formatTime } from "./common.js?v=2.6.0";*/
-import { resetTable, formatTime } from "./common.js?v=2.6.0";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.1";
+/*import { formatTime } from "./common.js?v=2.6.1";*/
+import { resetTable, formatTime } from "./common.js?v=2.6.1";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -1097,136 +1097,154 @@ async function confirmCheckout(){
     '#checkoutModalBg button.btn-success, #checkoutModalBg .btn-success'
   );
 
-  try{
-  const t = state.tables[checkoutIndex];
+  const originalIndex = checkoutIndex;
+  const t = state?.tables?.[originalIndex];
+  if(!t){
+    alert("找不到这张桌位，请关闭窗口后重试");
+    return;
+  }
 
   const pay = document.getElementById("checkoutPay")?.value || "";
   const currency = document.getElementById("checkoutCurrency")?.value || "日元";
-
   if(!pay){
     alert("请选择付款方式");
     return;
   }
 
-  // 绿色“确认结账”按钮本身就是最终确认。
-  // iPad 添加到桌面的网页中，原生 confirm() 偶尔会卡住，因此不再弹第二次系统确认。
   checkoutSubmitting = true;
   if(confirmButton){
     confirmButton.disabled = true;
-    confirmButton.textContent = "正在结账…";
+    confirmButton.textContent = "正在保存账单…";
   }
 
-  stopAlertLoop(checkoutIndex);
+  try{
+    stopAlertLoop(originalIndex);
+    t.pay = pay;
+    t.currency = currency;
 
-  t.pay = pay;
-  t.currency = currency;
+    const defaultOriginalJPY = getOriginalJPY(t);
+    const finalChargeJPY = Number(
+      document.getElementById("checkoutFinalCharge")?.value || defaultOriginalJPY
+    );
+    const note = document.getElementById("checkoutNote")?.value || "";
+    const rawDiffJPY = finalChargeJPY - Number(t.paidJPY || 0);
+    const finalJPY = useRound ? roundJPY(rawDiffJPY) : rawDiffJPY;
 
+    t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
+    t.paidRMB = getRMB(t.paidJPY);
+    t.paidAt = Date.now();
 
-const defaultOriginalJPY = getOriginalJPY(t);
-const finalChargeJPY = Number(
-  document.getElementById("checkoutFinalCharge")?.value || defaultOriginalJPY
-);
+    // 先尝试读取/构建完整账单，但最多等待2秒。
+    // iPad Safari 的 IndexedDB 偶尔会挂起，不能因此阻塞结账。
+    let record = null;
+    try{
+      record = await Promise.race([
+        createOrUpdateRecord(t),
+        new Promise((_,reject)=>setTimeout(()=>reject(new Error("本地账单读取超时")),2000))
+      ]);
+    }catch(err){
+      console.warn("结账时完整账单读取超时，改用紧急本地账单",err);
+      record = getLocalRecordSync(t.recordId) || {
+        id: t.recordId || ("rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8)),
+        timestamp: Date.now(),
+        businessDate: getDateText(Date.now()),
+        time: new Date().toLocaleString(),
+        tableName: t.name,
+        receiptImage:"",
+        receiptFileName:"",
+        payments:[]
+      };
+      t.recordId = record.id;
+    }
 
-const note = document.getElementById("checkoutNote")?.value || "";
+    record.payments = normalizePayments(record);
+    if(finalJPY !== 0){
+      record.payments.push(makePaymentLine({
+        type: finalJPY < 0 ? "退款" : "收入",
+        reason: finalJPY < 0 ? "退款/改套餐" : "结账补收",
+        pay,
+        amountJPY: finalJPY,
+        note
+      }));
+    }
 
-const rawDiffJPY = finalChargeJPY - Number(t.paidJPY || 0);
-const finalJPY = useRound ? roundJPY(rawDiffJPY) : rawDiffJPY;
+    const paymentTotalJPY = sumPaymentsJPY(record.payments);
+    const p = getPackage(t);
+    record.tableName = t.name;
+    record.customerName = t.customer?.name || "";
+    record.phoneLast4 = t.customer?.phoneLast4 || "";
+    record.customerType = t.type || "walkin";
+    record.packageName = p.name;
+    record.packageMinutes = p.unlimited ? "不限时" : p.minutes;
+    record.packagePrice = p.price;
+    record.extraMinutes = Math.floor(Number(t.extra || 0) / 60000);
+    record.extensionAmount = Math.max(0, finalChargeJPY - Number(p.price || 0));
+    record.originalJPY = finalChargeJPY;
+    record.totalJPY = paymentTotalJPY;
+    record.totalRMB = getRMB(paymentTotalJPY);
+    record.paidJPY = paymentTotalJPY;
+    record.dueJPY = Math.max(0, finalChargeJPY - paymentTotalJPY);
+    record.pay = getPaymentSummary(record.payments);
+    record.currency = t.currency || "日元";
+    record.roundRule = useRound ? "500抹零" : "不抹零";
+    record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+    record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
+    record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
+    record.closedAt = Date.now();
+    record.closedTime = new Date(record.closedAt).toLocaleString();
+    record.businessDate = record.businessDate || getDateText(record.timestamp || record.closedAt);
 
-  t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
-  t.paidRMB = getRMB(t.paidJPY);
-  t.paidAt = Date.now();
+    const visit = createOrUpdateCustomerVisit(t);
+    if(visit){
+      visit.endAt = Date.now();
+      visit.range = getVisitRangeText(t);
+      visit.closed = true;
+      visit.finalJPY = t.paidJPY;
+      visit.closedTime = new Date().toLocaleString();
+    }
 
-  const record = await createOrUpdateRecord(t);
-
-  record.payments = normalizePayments(record);
-
-if(finalJPY !== 0){
-  record.payments.push(
-    makePaymentLine({
-      type: finalJPY < 0 ? "退款" : "收入",
-      reason: finalJPY < 0 ? "退款/改套餐" : "结账补收",
-      pay,
-      amountJPY: finalJPY,
-      note
-    })
-  );
-}
-
-const paymentTotalJPY = sumPaymentsJPY(record.payments);
-
-record.originalJPY = finalChargeJPY;
-record.totalJPY = paymentTotalJPY;
-record.totalRMB = getRMB(paymentTotalJPY);
-record.paidJPY = paymentTotalJPY;
-record.dueJPY = Math.max(0, finalChargeJPY - paymentTotalJPY);
-record.pay = getPaymentSummary(record.payments);  
-  record.currency = t.currency || "日元";
-  record.roundRule = useRound ? "500抹零" : "不抹零";
-  record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
-  record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
-  record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
-  const now = Date.now();
-
-  record.closedAt = now;
-  record.closedTime = new Date(now).toLocaleString();
-
-  record.businessDate =
-    record.businessDate ||
-    getDateText(record.timestamp || now);
-
-  await updateRecordOnly(record);
-
-  const visit = createOrUpdateCustomerVisit(t);
-  if(visit){
-    visit.endAt = Date.now();
-    visit.range = getVisitRangeText(t);
-    visit.closed = true;
-    visit.finalJPY = t.paidJPY;
-    visit.closedTime = new Date().toLocaleString();
-  }
-
-  if(t.bookingId){
-    const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
-
-    if(b){
-      if(!Array.isArray(b.finishedTableIndexes)){
-        b.finishedTableIndexes = [];
-      }
-
-      b.finishedTableIndexes = Array.from(new Set([
-        ...b.finishedTableIndexes.map(Number),
-        checkoutIndex
-      ]));
-
-      if(Array.isArray(b.checkedInTableIndexes)){
-        b.checkedInTableIndexes = b.checkedInTableIndexes
-          .map(Number)
-          .filter(i=>i !== checkoutIndex);
+    if(t.bookingId){
+      const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
+      if(b){
+        if(!Array.isArray(b.finishedTableIndexes)) b.finishedTableIndexes = [];
+        b.finishedTableIndexes = Array.from(new Set([
+          ...b.finishedTableIndexes.map(Number), originalIndex
+        ]));
+        if(Array.isArray(b.checkedInTableIndexes)){
+          b.checkedInTableIndexes = b.checkedInTableIndexes
+            .map(Number)
+            .filter(i=>i !== originalIndex);
+        }
       }
     }
-  }
 
-  state.tables[checkoutIndex] = resetTable(t.name);
+    // 核心：先同步写入 localStorage 紧急备份，再立即清空桌位并关闭窗口。
+    // IndexedDB 和 Firestore 都放到后台，不再让用户卡在“正在结账”。
+    emergencySaveRecord({db,ref,record});
+    state.tables[originalIndex] = resetTable(t.name);
+    emergencySaveState({db,ref,state,action:"checkout_complete"});
 
-await save();
-closeCheckout();
-render();
-alert("结账完成");
-}catch(e){
-  alert(
-    "结账错误：\n" +
-    e.message
-  );
-  console.error(e);
-}finally{
-  checkoutSubmitting = false;
-  if(confirmButton){
-    confirmButton.disabled = false;
-    confirmButton.textContent = "确认结账";
+    closeCheckout();
+    render();
+    setSyncStatus(navigator.onLine ? "pending" : "offline",
+      navigator.onLine ? "● 结账已保存本机 · 正在后台同步" : "● 结账已保存本机 · 当前离线");
+
+    // 后台补写完整IndexedDB账单；失败不会影响已经完成的结账。
+    Promise.resolve().then(()=>saveRecordSafely({db,ref,record})).catch(err=>{
+      console.warn("结账账单后台保存失败，已保留紧急备份",err);
+    });
+  }catch(e){
+    console.error(e);
+    alert("结账错误：\n" + (e?.message || e));
+  }finally{
+    checkoutSubmitting = false;
+    if(confirmButton){
+      confirmButton.disabled = false;
+      confirmButton.textContent = "确认结账";
+    }
   }
 }
 
-}
 
 
 function openForceEnd(i){
