@@ -1,8 +1,8 @@
-import { doc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.6.0";
+import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.6.3";
 
 
-import { db } from "./firebase.js?v=2.6.0";
+import { db } from "./firebase.js?v=2.6.3";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -34,6 +34,7 @@ let uploadingPaymentRecordId = null;
 let uploadingPaymentIndex = null;
 let uploadingGroupId = null;
 let uploadingGroupPaymentIndex = null;
+let editingGroupId = null;
 
 
 onSnapshot(ref, { includeMetadataChanges:true }, async snap => {
@@ -336,30 +337,26 @@ function renderTodayBill(){
         <td colspan="15">
           👥 ${group?.name || rows[0]?.groupName || "未命名组"}
           （${rows.map(r=>r.tableName).join("、")}）
+          <button class="btn-ghost" style="margin-left:12px;" onclick="openEditGroup('${groupId}')">修改组 / 加桌</button>
         </td>
       </tr>
     `;
 
     if(group?.payments?.length){
+      const nonCashGroupPayment = group.payments.find(p=>p.pay && p.pay !== "现金");
+      const legacyReceiptPayment = group.payments.find(p=>p.receiptImage);
+      const groupHasReceipt = !!(group.receiptImage || legacyReceiptPayment?.receiptImage);
       html += `
         <tr>
           <td colspan="15" style="background:#fffaf0;font-weight:800;">
-            整组付款：${group.payments.map(p=>`
-
-              ${p.reason || "整组收款"}｜
-              ${p.pay || "未记录"}｜
-              ¥${Number(p.amountJPY || 0).toLocaleString()}｜
-              付款人：${p.payer || "-"}
-              ${p.pay && p.pay !== "现金"
-  ? (
-      p.receiptImage
-        ? `<br><button class="btn-ghost" onclick="viewGroupPaymentReceipt('${group.id}',${group.payments.indexOf(p)})">查看整组截图</button>`
-        : `<br><button class="btn-main" onclick="uploadGroupPaymentReceipt('${group.id}',${group.payments.indexOf(p)})">上传整组截图</button>`
-    )
-  : `<br><small style="color:#8a8174;">现金无需截图</small>`
-}
-
+            ${group.payments.map(p=>`
+              整组付款：${p.reason || "整组收款"}｜${p.pay || "未记录"}｜¥${Number(p.amountJPY || 0).toLocaleString()}｜付款人：${p.payer || "-"}
             `).join("<br>")}
+            ${nonCashGroupPayment
+              ? (groupHasReceipt
+                  ? `<br><button class="btn-ghost" onclick="viewGroupPaymentReceipt('${group.id}')">查看整组付款截图</button>`
+                  : `<br><button class="btn-main" onclick="uploadGroupPaymentReceipt('${group.id}')">上传整组付款截图（只需一次）</button>`)
+              : `<br><small style="color:#8a8174;">整组均为现金，无需截图</small>`}
           </td>
         </tr>
       `;
@@ -458,20 +455,16 @@ function uploadPaymentReceipt(recordId, paymentIndex){
   input.click();
 }
 
-function uploadGroupPaymentReceipt(groupId, paymentIndex){
+function uploadGroupPaymentReceipt(groupId){
   const input = document.getElementById("receiptInput");
-
   if(!input){
     alert("找不到 receiptInput");
     return;
   }
-
   uploadingGroupId = groupId;
-  uploadingGroupPaymentIndex = Number(paymentIndex);
-
+  uploadingGroupPaymentIndex = -1;
   uploadingPaymentRecordId = null;
   uploadingPaymentIndex = null;
-
   input.value = "";
   input.dataset.recordId = "";
   input.click();
@@ -599,35 +592,29 @@ async function handlePaymentReceiptFile(file){
 
 async function handleGroupPaymentReceiptFile(file){
   const group = (state.groups || []).find(g=>String(g.id) === String(uploadingGroupId));
-
   if(!group){
     alert("找不到整组记录");
     return;
   }
-
-  const payment = group.payments?.[uploadingGroupPaymentIndex];
-
-  if(!payment){
-    alert("找不到整组付款记录");
-    return;
-  }
-
   try{
     const compressed = await compressImage(file,800,0.6);
     const base64 = await fileToBase64(compressed);
-
-    payment.receiptImage = base64;
-    payment.receiptFileName = file.name;
-    payment.receiptUploadedAt = Date.now();
-    payment.receiptUploadedTime = new Date().toLocaleString();
-
-    await saveStateSafely({db, ref, getState:()=>state, action:"today_bill_update"});
-
+    group.receiptImage = base64;
+    group.receiptFileName = file.name;
+    group.receiptUploadedAt = Date.now();
+    group.receiptUploadedTime = new Date().toLocaleString();
+    const target = group.payments?.find(p=>p.pay && p.pay !== "现金") || group.payments?.[0];
+    if(target){
+      target.receiptImage = base64;
+      target.receiptFileName = file.name;
+      target.receiptUploadedAt = group.receiptUploadedAt;
+      target.receiptUploadedTime = group.receiptUploadedTime;
+    }
+    await saveStateSafely({db, ref, getState:()=>state, action:"group_receipt_upload"});
     uploadingGroupId = null;
     uploadingGroupPaymentIndex = null;
-
-    alert("整组付款截图已保存");
-
+    alert("整组付款截图已保存（整组只需上传一次）");
+    renderTodayBill();
   }catch(err){
     console.error(err);
     alert(err.message);
@@ -696,11 +683,12 @@ function viewPaymentReceipt(recordId, paymentIndex){
   bg.style.display = "block";
 }
 
-function viewGroupPaymentReceipt(groupId, paymentIndex){
+function viewGroupPaymentReceipt(groupId){
   const group = (state.groups || []).find(g=>String(g.id) === String(groupId));
-  const p = group?.payments?.[paymentIndex];
+  const legacy = group?.payments?.find(p=>p.receiptImage);
+  const receiptImage = group?.receiptImage || legacy?.receiptImage;
 
-  if(!p || !p.receiptImage){
+  if(!receiptImage){
     alert("没有截图");
     return;
   }
@@ -721,7 +709,7 @@ function viewGroupPaymentReceipt(groupId, paymentIndex){
     document.body.appendChild(bg);
   }
 
-  document.getElementById("receiptPreviewImg").src = p.receiptImage;
+  document.getElementById("receiptPreviewImg").src = receiptImage;
   bg.style.display = "block";
 }
 
@@ -751,6 +739,69 @@ if(!hasReceipt){
 
   await saveRecordSafely({db, ref, record:r});
   alert("续费已确认");
+}
+
+
+function openEditGroup(groupId){
+  const group = (state?.groups || []).find(g=>String(g.id) === String(groupId));
+  if(!group){ alert("找不到这个组"); return; }
+  editingGroupId = String(groupId);
+  const today = getTodayRecords();
+  const currentIds = new Set(today.filter(r=>String(r.groupId || "") === editingGroupId).map(r=>String(r.id)));
+  document.getElementById("editGroupInfo").innerHTML = `
+    <b>${group.name || "未命名组"}</b><br>
+    当前桌位：${today.filter(r=>currentIds.has(String(r.id))).map(r=>r.tableName).filter(Boolean).join("、") || "-"}
+  `;
+  document.getElementById("editGroupRecordList").innerHTML = today
+    .filter(r=>r.id && r.tableName)
+    .sort((a,b)=>String(a.tableName).localeCompare(String(b.tableName),"zh-CN",{numeric:true}))
+    .map(r=>{
+      const checked = currentIds.has(String(r.id));
+      const otherGroup = r.groupId && String(r.groupId)!==editingGroupId;
+      return `<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #eadfce;border-radius:12px;margin:6px 0;">
+        <input type="checkbox" class="edit-group-record-check" value="${r.id}" ${checked ? "checked" : ""}>
+        <span><b>${r.tableName}</b>｜${r.customerName || "-"}｜${r.packageName || "-"}${otherGroup ? "｜当前属于其他组，勾选后将移入本组" : ""}</span>
+      </label>`;
+    }).join("") || "今天暂无可加入的桌位账单";
+  document.getElementById("editGroupModalBg").style.display = "block";
+}
+
+function closeEditGroup(){
+  editingGroupId = null;
+  document.getElementById("editGroupModalBg").style.display = "none";
+}
+
+async function saveEditedGroup(){
+  const group = (state?.groups || []).find(g=>String(g.id) === String(editingGroupId));
+  if(!group){ alert("找不到这个组"); return; }
+  const selectedIds = [...document.querySelectorAll(".edit-group-record-check:checked")].map(el=>String(el.value));
+  if(!selectedIds.length){ alert("请至少选择一张桌"); return; }
+  const selected = records.filter(r=>selectedIds.includes(String(r.id)));
+  const tableIndexes = [];
+  for(const r of selected){
+    r.groupId = group.id;
+    r.groupName = group.name || r.groupName || "未命名组";
+    r.groupColor = group.color || r.groupColor || "#eef8ff";
+    r.editedAt = Date.now();
+    const idx = (state.tables || []).findIndex(t=>String(t?.name || "") === String(r.tableName || ""));
+    if(idx >= 0){
+      tableIndexes.push(idx);
+      const t = state.tables[idx];
+      if(t){
+        t.groupId = group.id;
+        t.groupName = group.name;
+        t.groupColor = group.color;
+        t.activeColor = group.color || t.activeColor;
+      }
+    }
+    await saveRecordSafely({db,ref,record:r});
+  }
+  group.tableIndexes = Array.from(new Set([...(group.tableIndexes || []).map(Number),...tableIndexes]));
+  group.updatedAt = Date.now();
+  await saveStateSafely({db,ref,getState:()=>state,action:"today_bill_add_group_tables"});
+  closeEditGroup();
+  renderTodayBill();
+  alert("组桌位已更新");
 }
 
 function openEditRecord(recordId){
@@ -863,3 +914,6 @@ window.uploadPaymentReceipt = uploadPaymentReceipt;
 window.viewPaymentReceipt = viewPaymentReceipt;
 window.uploadGroupPaymentReceipt = uploadGroupPaymentReceipt;
 window.viewGroupPaymentReceipt = viewGroupPaymentReceipt;
+window.openEditGroup = openEditGroup;
+window.closeEditGroup = closeEditGroup;
+window.saveEditedGroup = saveEditedGroup;
