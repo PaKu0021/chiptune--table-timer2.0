@@ -92,6 +92,17 @@ async function idbAll(store){
   });
 }
 
+async function idbClear(store){
+  const db = await openLocalDb();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,"readwrite");
+    tx.objectStore(store).clear();
+    tx.oncomplete = ()=>resolve();
+    tx.onerror = ()=>reject(tx.error);
+    tx.onabort = ()=>reject(tx.error || new Error("本地队列清理失败"));
+  });
+}
+
 function writeShadow(key,value){
   try{ localStorage.setItem(key, JSON.stringify(value)); }catch(err){ console.warn("本地同步备份写入失败",err); }
 }
@@ -438,6 +449,11 @@ function mergeState(latest, local, base, keys){
 async function enqueue(local,base,action){
   const changed = changedKeys(local,base);
   const item = {id:`${getDeviceId()}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,state:clone(local),base:clone(base),changed,action,createdAt:Date.now(),deviceId:getDeviceId()};
+
+  // 桌位状态使用“最新快照队列”，而不是累积几十个旧快照。
+  // 旧快照在弱网恢复后依次重放，会把刚刚开始的桌位重新覆盖成未开始。
+  // 当前 state 已包含本机此前所有尚未同步的修改，所以只保留最新一项即可。
+  await idbClear("queue");
   await idbPut("queue",item);
   return item;
 }
@@ -452,8 +468,12 @@ async function flushOne({db,ref}, item){
   });
   await idbDelete("queue",item.id);
   baseline = clone(result.merged);
-  const box = readShadow(STATE_SHADOW) || await idbGet("kv",STATE_KEY);
-  if(box?.state) await writeLocalState(box.state,result.merged);
+
+  // 上传成功后，本机也必须改成服务器最终合并后的状态。
+  // 不能继续保存上传前的旧 state，否则其他终端的修改会在本机重新出现并再次覆盖云端。
+  await writeLocalState(result.merged,result.merged);
+  writeShadow(STATE_SHADOW,{state:clone(result.merged),cloudBaseline:clone(result.merged),savedAt:Date.now(),deviceId:getDeviceId()});
+  window.dispatchEvent(new CustomEvent("chiptune-cloud-state-saved",{detail:{state:clone(result.merged)}}));
   try{
     await addDoc(collection(db,"operationLogs"),{action:item.action,changed:item.changed,deviceId:item.deviceId,createdAt:serverTimestamp(),clientTime:item.createdAt});
   }catch(err){ console.warn("操作日志写入失败",err); }
@@ -470,13 +490,28 @@ async function flushRecordOne({db}, item){
 
 export async function flushPending({db,ref}){
   if(!navigator.onLine) return;
-  const items = (await idbAll("queue")).sort((a,b)=>a.createdAt-b.createdAt);
+  let items = (await idbAll("queue")).sort((a,b)=>a.createdAt-b.createdAt);
+
+  // 兼容旧版本已经积累的多个桌位快照：只上传最后一份，禁止旧快照依次重放。
+  if(items.length > 1){
+    const latestItem = items[items.length - 1];
+    await idbClear("queue");
+    await idbPut("queue",latestItem);
+    items = [latestItem];
+  }
+
   const recordItems = (await idbAll("recordQueue")).sort((a,b)=>a.createdAt-b.createdAt);
   const total = items.length + recordItems.length;
   if(!total){ setSyncStatus("synced"); return; }
   setSyncStatus("syncing",`● 本机已保存 · 正在上传 ${total} 项`);
-  for(const item of items){ if(!navigator.onLine) break; await flushOne({db,ref},item); }
-  for(const item of recordItems){ if(!navigator.onLine) break; await flushRecordOne({db},item); }
+  for(const item of items){
+    if(!navigator.onLine) break;
+    await withTimeout(flushOne({db,ref},item),12000,"桌位状态同步");
+  }
+  for(const item of recordItems){
+    if(!navigator.onLine) break;
+    await withTimeout(flushRecordOne({db},item),12000,"收银记录同步");
+  }
   const left = (await idbAll("queue")).length + (await idbAll("recordQueue")).length;
   setSyncStatus(left ? "pending" : "synced", left ? `● 已保存本机 · ${left} 项等待上传` : undefined);
 }

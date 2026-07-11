@@ -1,4 +1,4 @@
-import { db } from "./firebase.js";
+import { db } from "./firebase.js?v=2.5.2";
 import { doc, onSnapshot, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const ref = doc(db,"shop","main");
@@ -60,6 +60,12 @@ onSnapshot(ref,{includeMetadataChanges:true},snap=>{
   if(!snap.exists()) return;
   state = snap.data();
   renderDisplay();
+
+  // 缓存快照可能还是“未开始”，收到缓存后立即再向服务器核对。
+  if(snap.metadata.fromCache && navigator.onLine) refreshFromServer();
+},err=>{
+  console.warn("二维码页面实时监听失败",err);
+  if(navigator.onLine) refreshFromServer();
 });
 
 async function refreshFromServer(){
@@ -76,7 +82,7 @@ async function refreshFromServer(){
 }
 
 setInterval(renderDisplay,1000);
-setInterval(refreshFromServer,5000);
+setInterval(refreshFromServer,2000);
 window.addEventListener("online",refreshFromServer);
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refreshFromServer(); });
 refreshFromServer();

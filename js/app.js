@@ -1,9 +1,9 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js";
-import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js";
-/*import { formatTime } from "./common.js";*/
-import { resetTable, formatTime } from "./common.js";
+import { db } from "./firebase.js?v=2.5.2";
+import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.5.2";
+/*import { formatTime } from "./common.js?v=2.5.2";*/
+import { resetTable, formatTime } from "./common.js?v=2.5.2";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -23,6 +23,33 @@ window.addEventListener("chiptune-online-change",e=>{
 window.addEventListener("chiptune-sync-tick",()=>{
   flushPending({db,ref}).catch(err=>console.warn("定时同步失败",err));
 });
+
+// 本机事务写入云端成功后，立即采用服务器最终合并状态。
+window.addEventListener("chiptune-cloud-state-saved",e=>{
+  if(!e.detail?.state) return;
+  state = e.detail.state;
+  try{ render(); }catch(err){ console.warn("同步后刷新页面失败",err); }
+});
+
+// iPad 桌面网页偶尔会只停留在 Firestore 缓存。每 5 秒主动向服务器核对一次，
+// 确保手机、iPad 和其他终端都能看到同一份最新桌位状态。
+async function refreshSharedStateFromServer(){
+  if(!navigator.onLine) return;
+  try{
+    const snap = await getDocFromServer(ref);
+    if(!snap.exists()) return;
+    state = await reconcileCloudState(snap.data());
+    if(!state.packages) state.packages = defaultState.packages;
+    if(!state.bookings) state.bookings = [];
+    if(!state.customers) state.customers = {};
+    render();
+  }catch(err){
+    console.warn("主动刷新共享桌位状态失败",err);
+  }
+}
+setInterval(refreshSharedStateFromServer,5000);
+window.addEventListener("online",refreshSharedStateFromServer);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refreshSharedStateFromServer(); });
 
 let checkoutIndex = null;
 let checkoutSubmitting = false;
