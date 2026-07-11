@@ -1,0 +1,8 @@
+2.6.1 结账不阻塞修复
+
+- 结账不再等待 IndexedDB 或 Firestore 完成。
+- 最多等待2秒读取完整账单，超时自动改用紧急本地账单。
+- 账单先同步写入 localStorage 紧急备份。
+- 桌位立即清空、结账窗口立即关闭。
+- IndexedDB 与 Firestore 在后台继续保存和同步。
+- 避免 iPad Safari 卡在“正在结账”。
