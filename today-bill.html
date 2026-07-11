@@ -104,6 +104,20 @@
   </div>
 </div>
 
+
+<div class="modal-bg" id="editGroupModalBg">
+  <div class="modal">
+    <h2>修改组 / 添加桌位</h2>
+    <div id="editGroupInfo" style="font-weight:800;line-height:1.7;margin-bottom:12px;"></div>
+    <p style="color:#8a8174;font-weight:700;">勾选需要加入本组的桌位账单。已有桌位保持勾选，也可以把其他桌加入本组。</p>
+    <div id="editGroupRecordList" style="max-height:50vh;overflow:auto;"></div>
+    <div class="action-row">
+      <button class="btn-main" onclick="saveEditedGroup()">保存组桌位</button>
+      <button class="btn-ghost" onclick="closeEditGroup()">取消</button>
+    </div>
+  </div>
+</div>
+
 <input
   id="receiptInput"
   type="file"
@@ -116,7 +130,7 @@
 import { renderNav } from "./js/nav.js";
 
 renderNav("bill");
-import("./js/today-bill.js?v=2.6.2");
+import("./js/today-bill.js?v=2.6.3");
 </script>
 
 
