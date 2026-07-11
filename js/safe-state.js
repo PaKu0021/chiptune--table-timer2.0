@@ -742,7 +742,7 @@ export function subscribeAllRecords({
   fullHistory = false
 }={}){
   const recordsRef = collection(db,"records");
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = 5;
   const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
   let cloudRecords = [];
@@ -869,12 +869,55 @@ export function subscribeAllRecords({
       }
 
       // 支持中断续传。cursorId 是上次成功保存到本机的最后一个文档ID。
-      let cursorId = savedMeta.complete ? null : (savedMeta.cursorId || null);
-      let loaded = savedMeta.complete ? Number(savedMeta.count || 0) : Number(savedMeta.loaded || 0);
+      // 旧版本可能错误地把 complete 写成 true，但本机实际上只有 0 条或少量记录。
+      // 因此必须用本机实际条数和云端总数校验，不能只相信 complete 标志。
+      const localBefore = await loadLocalRecords().catch(()=>[]);
+      const expectedCount = total == null ? Number(savedMeta.count || 0) : total;
+      const cacheLooksComplete = Boolean(
+        savedMeta.complete &&
+        localBefore.length > 0 &&
+        (expectedCount <= 0 || localBefore.length >= expectedCount)
+      );
 
-      if(savedMeta.complete){
-        const local = await loadLocalRecords().catch(()=>[]);
-        onStatus?.(`已从本机载入全部历史账单｜${local.length} 条`);
+      if(savedMeta.complete && !cacheLooksComplete){
+        console.warn("历史账单完成标志与本机缓存不一致，自动重新扫描",{
+          localCount:localBefore.length,
+          expectedCount,
+          savedMeta
+        });
+        writeMeta({
+          complete:false,
+          cursorId:null,
+          loaded:0,
+          count:localBefore.length,
+          lastTimestamp:Math.max(0,...localBefore.map(recordTime)),
+          resetAt:Date.now(),
+          resetReason:"stale_complete_flag"
+        });
+      }
+
+      const activeMeta = cacheLooksComplete ? savedMeta : readMeta();
+      let cursorId = cacheLooksComplete ? null : (activeMeta.cursorId || null);
+      let loaded = cacheLooksComplete ? Number(activeMeta.count || localBefore.length) : Number(activeMeta.loaded || 0);
+
+      // 如果进度声称已读取很多条，但 IndexedDB 实际条数更少，说明上次保存中断。
+      // 为避免从错误游标继续而永久漏账，直接从头扫描；已有记录会按 ID 去重。
+      if(!cacheLooksComplete && loaded > localBefore.length + BATCH_SIZE){
+        cursorId = null;
+        loaded = 0;
+        writeMeta({
+          complete:false,
+          cursorId:null,
+          loaded:0,
+          count:localBefore.length,
+          lastTimestamp:Math.max(0,...localBefore.map(recordTime)),
+          resetAt:Date.now(),
+          resetReason:"cursor_cache_mismatch"
+        });
+      }
+
+      if(cacheLooksComplete){
+        onStatus?.(`已从本机载入全部历史账单｜${localBefore.length} 条`);
         await startIncrementalListener();
         return;
       }
@@ -892,7 +935,7 @@ export function subscribeAllRecords({
 
         const snap = await withTimeout(
           getDocsFromServer(pageQuery),
-          30000,
+          90000,
           "历史账单分批读取"
         );
 
@@ -946,7 +989,8 @@ export function subscribeAllRecords({
     }catch(err){
       console.warn("完整历史账单读取失败",err);
       const local = await loadLocalRecords().catch(()=>[]);
-      onStatus?.(`已保存 ${local.length} 条到本机｜5秒后从当前进度继续`);
+      const reason = String(err?.message || err || "未知错误");
+      onStatus?.(`已保存 ${local.length} 条到本机｜读取中断：${reason}｜5秒后继续`);
       scheduleRetry();
     }finally{
       loadingAll = false;

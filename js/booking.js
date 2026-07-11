@@ -1,7 +1,7 @@
-import { db } from "./firebase.js?v=2.5.6";
+import { db } from "./firebase.js?v=2.5.7";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js?v=2.5.6";
-import { resetTable } from "./common.js?v=2.5.6";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending } from "./safe-state.js?v=2.5.7";
+import { resetTable } from "./common.js?v=2.5.7";
 
 
 const ref = doc(db, "shop", "main");
