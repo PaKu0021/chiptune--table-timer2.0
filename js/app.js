@@ -1,9 +1,9 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.6.1";
+import { db } from "./firebase.js?v=2.6.2";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.1";
-/*import { formatTime } from "./common.js?v=2.6.1";*/
-import { resetTable, formatTime } from "./common.js?v=2.6.1";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.2";
+/*import { formatTime } from "./common.js?v=2.6.2";*/
+import { resetTable, formatTime } from "./common.js?v=2.6.2";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -408,7 +408,7 @@ function createOrUpdateCustomerVisit(t){
   return visit;
 }
 
-async function createOrUpdateRecord(t){
+async function createOrUpdateRecord(t, options = {}){
 
   const p = getPackage(t);
 const originalJPY = getOriginalJPY(t);
@@ -417,7 +417,19 @@ let paidJPY = Number(t.paidJPY || 0);
 
 const dueJPY = Math.max(0, originalJPY - paidJPY);
 
-  let record = await getTableRecord(t);
+  // 优先使用同步本机影子，避免 iPad 的 IndexedDB/网络卡住时，
+  // “开始计时”不能立刻生成账单。
+  let record = getLocalRecordSync(t.recordId);
+  if(!record && t.recordId){
+    try{
+      record = await Promise.race([
+        getTableRecord(t),
+        new Promise(resolve=>setTimeout(()=>resolve(null),1200))
+      ]);
+    }catch(_err){
+      record = null;
+    }
+  }
 
   let isNewRecord = false;
 
@@ -442,6 +454,12 @@ record = {
   receiptFileName:"",
 };
   }
+
+  // 入座开始即生成正式账单；结账时只更新同一个 recordId。
+  record.startAt = Number(t.start || record.startAt || Date.now());
+  record.startedTime = record.startedTime || new Date(record.startAt).toLocaleString();
+  record.closed = false;
+  record.status = "进行中";
 
   record.businessDate =
     record.businessDate ||
@@ -484,6 +502,25 @@ if(packageLine && packageLine.pay === "未记录" && t.pay){
   packageLine.pay = t.pay;
 }
 
+// 先付款模式下，续时/撤回续时直接修改同一条账单，
+// 并把本次差额作为续时收费或退款记录追加进去。
+const adjustmentJPY = Number(options.adjustmentJPY || 0);
+if(adjustmentJPY !== 0){
+  const actionKey = String(options.actionKey || "");
+  const alreadyAdded = actionKey && record.payments.some(p=>p.actionKey === actionKey);
+  if(!alreadyAdded){
+    const line = makePaymentLine({
+      type: adjustmentJPY > 0 ? "收入" : "退款",
+      reason: adjustmentJPY > 0 ? "续时费" : "撤回续时",
+      pay: t.pay || "未记录",
+      amountJPY: adjustmentJPY,
+      note: options.note || (adjustmentJPY > 0 ? "续时1小时" : "撤回续时1小时")
+    });
+    if(actionKey) line.actionKey = actionKey;
+    record.payments.push(line);
+  }
+}
+
 const paymentsTotalJPY = sumPaymentsJPY(record.payments);
 
 record.paidJPY = paymentsTotalJPY;
@@ -513,7 +550,8 @@ if(visit){
   record.visitRange = visit.range;
 }
 
-await saveRecordSafely({db, ref, record});
+// 同步写入本机影子，今日账单会立即出现；IndexedDB 与 Firestore 后台同步。
+emergencySaveRecord({db, ref, record});
   return record;
 }
 
@@ -869,58 +907,53 @@ function updateCustomer(i){
 }
 
 async function start(i){
-  const pre = Number(document.getElementById("pre-"+i).value || 0);
+  const pre = Number(document.getElementById("pre-"+i)?.value || 0);
   const t = state.tables[i];
   const startTime = Date.now() - pre * 60000;
 
   stopAlertLoop(i);
 
   t.start = startTime;
-  const p = getPackage(t);
-
-t.payTiming = t.payTiming || "prepaid";
-
-if(t.payTiming === "prepaid"){
-  t.paidJPY = Number(p.price || 0);
-  t.paidRMB = getRMB(t.paidJPY);
-  t.paidAt = Date.now();
-}else{
-
-t.paidJPY = 0;
-  t.paidRMB = 0;
-  t.paidAt = null;
-}
-
-await createOrUpdateRecord(t);
-
   t.pausedAt = null;
   t.alerted = false;
   t.alerting = false;
   t.lastAction = "start";
 
-  // 如果这桌是预约客人，自动把预约标记为已入桌
-  if(t.type === "booking" && Array.isArray(state.bookings)){
-  const booking = state.bookings.find(b=>{
-    const raw = Array.isArray(b.tableIndexes)
-      ? b.tableIndexes
-      : [b.tableIndex];
+  const p = getPackage(t);
+  t.payTiming = t.payTiming || "prepaid";
 
-    const tableIndexes = raw
-      .filter(v => v !== undefined && v !== null && v !== "")
-      .map(v => Number(v));
-
-    return tableIndexes.includes(i) &&
-           !b.checkedIn &&
-           (!b.name || b.name === t.customer.name);
-  });
-
-  if(booking){
-    booking.checkedIn = true;
-    booking.checkInTime = startTime;
-    booking.checkInTimeText = new Date(startTime).toLocaleString();
+  if(t.payTiming === "prepaid"){
+    t.paidJPY = Number(p.price || 0);
+    t.paidRMB = getRMB(t.paidJPY);
+    t.paidAt = Date.now();
+  }else{
+    t.paidJPY = 0;
+    t.paidRMB = 0;
+    t.paidAt = null;
   }
-}
-  await save("start_table");
+
+  // 如果这桌是预约客人，自动把预约标记为已入桌。
+  if(t.type === "booking" && Array.isArray(state.bookings)){
+    const booking = state.bookings.find(b=>{
+      const raw = Array.isArray(b.tableIndexes) ? b.tableIndexes : [b.tableIndex];
+      const tableIndexes = raw
+        .filter(v => v !== undefined && v !== null && v !== "")
+        .map(v => Number(v));
+      return tableIndexes.includes(i) && !b.checkedIn && (!b.name || b.name === t.customer.name);
+    });
+    if(booking){
+      booking.checkedIn = true;
+      booking.checkInTime = startTime;
+      booking.checkInTimeText = new Date(startTime).toLocaleString();
+    }
+  }
+
+  // 先同步保存桌位状态，确保点击开始后立即生效。
+  emergencySaveState({db,ref,state,action:"start_table"});
+  render();
+
+  // 先付款：入座开始时立即建立账单；以后续时和结账都更新这一个 recordId。
+  await createOrUpdateRecord(t);
 }
 
 function pause(i){
@@ -953,12 +986,19 @@ function resume(i){
 
 async function addHour(i){
   stopAlertLoop(i);
+  const beforeJPY = getOriginalJPY(state.tables[i]);
   try{
     const updated = await atomicAdjustTableExtra({
       db, ref, tableIndex:i, deltaMs:60 * 60 * 1000, action:"extend_one_hour", getState:()=>state
     });
     state.tables[i] = {...state.tables[i], ...updated};
-    await createOrUpdateRecord(state.tables[i]);
+    const afterJPY = getOriginalJPY(state.tables[i]);
+    const deltaJPY = Math.max(0, afterJPY - beforeJPY);
+    await createOrUpdateRecord(state.tables[i],{
+      adjustmentJPY: state.tables[i].payTiming === "prepaid" ? deltaJPY : 0,
+      actionKey:`extend_${Number(state.tables[i].extra || 0)}`,
+      note:"续时1小时，开始时已收款"
+    });
     render();
   }catch(err){
     alert(err.message || "续时保存失败");
@@ -967,12 +1007,21 @@ async function addHour(i){
 
 async function undoHour(i){
   stopAlertLoop(i);
+  const beforeJPY = getOriginalJPY(state.tables[i]);
   try{
     const updated = await atomicAdjustTableExtra({
       db, ref, tableIndex:i, deltaMs:-60 * 60 * 1000, action:"undo_one_hour", getState:()=>state
     });
     state.tables[i] = {...state.tables[i], ...updated};
-    if(state.tables[i].start) await createOrUpdateRecord(state.tables[i]);
+    const afterJPY = getOriginalJPY(state.tables[i]);
+    const refundJPY = Math.min(0, afterJPY - beforeJPY);
+    if(state.tables[i].start){
+      await createOrUpdateRecord(state.tables[i],{
+        adjustmentJPY: state.tables[i].payTiming === "prepaid" ? refundJPY : 0,
+        actionKey:`undo_${Date.now()}_${Number(state.tables[i].extra || 0)}`,
+        note:"撤回续时1小时，记录退款差额"
+      });
+    }
     render();
   }catch(err){
     alert(err.message || "撤回续时失败");
