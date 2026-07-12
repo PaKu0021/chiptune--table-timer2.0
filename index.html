@@ -72,9 +72,30 @@
       
 </div>
  
+<script>
+// 首页导航必须独立于 Firebase。即使同步模块加载失败，入口按钮仍然可用。
+window.go = function(page, cardId){
+  try{ localStorage.setItem("home_active", cardId); }catch(_){}
+  window.location.href = page;
+};
+
+window.goOwner = function(){
+  const pw = window.prompt("请输入老板密码");
+  if(pw !== "prompt"){
+    window.alert("密码错误");
+    return;
+  }
+  try{
+    localStorage.setItem("home_active","cardOwner");
+    sessionStorage.setItem("owner_auth","1");
+  }catch(_){}
+  window.location.href = "./owner.html";
+};
+</script>
+
 <script type="module">
 import { db } from "./js/firebase.js";
-import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending, subscribeAllRecords } from "./js/safe-state.js?v=2.6.5";
+import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending, subscribeAllRecords } from "./js/safe-state.js?v=2.6.6";
 import { doc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -130,10 +151,14 @@ onSnapshot(ref,async snap=>{
   updateHome();
 });
 
-subscribeAllRecords({
-  db,
-  onChange:list=>{ allRecords=list; updateHome(); }
-});
+try{
+  subscribeAllRecords({
+    db,
+    onChange:list=>{ allRecords=list; updateHome(); }
+  });
+}catch(err){
+  console.warn("首页账单监听启动失败，不影响导航",err);
+}
 
 function updateHome(){
   if(!homeState) return;
@@ -166,27 +191,6 @@ function updateHome(){
   document.getElementById("homeBookingCount").innerText = `${todayBookingCount}组`;
   document.getElementById("homeRevenue").innerText = `¥${todayRevenue.toLocaleString()}`;
 }
-
-window.go = function(page, cardId){
-  localStorage.setItem("home_active", cardId);
-  location.href = page;
-};
-
-
-window.goOwner = function(){
-
-  const pw = prompt("请输入老板密码");
-
-  if(pw !== "prompt"){
-    alert("密码错误");
-    return;
-  }
-
-  localStorage.setItem("home_active","cardOwner");
-  sessionStorage.setItem("owner_auth","1");
-
-  location.href="./owner.html";
-};
 
 const activeCard = localStorage.getItem("home_active");
 
