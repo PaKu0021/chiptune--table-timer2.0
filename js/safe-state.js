@@ -322,12 +322,6 @@ function collectLegacyRecords(value,out,depth=0){
   if(value.state && typeof value.state === "object") collectLegacyRecords(value.state,out,depth+1);
 }
 
-function withTimeout(promise,ms,label){
-  return Promise.race([
-    promise,
-    new Promise((_,reject)=>setTimeout(()=>reject(new Error(`${label || "操作"}超时`)),ms))
-  ]);
-}
 
 async function queueMigratedRecords(records){
   const db = await openLocalDb();
