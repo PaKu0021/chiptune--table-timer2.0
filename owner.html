@@ -8,6 +8,23 @@
 </head>
 
 <body>
+<script>
+(function(){
+  try{
+    if(sessionStorage.getItem("owner_auth") === "1") return;
+    const pw = window.prompt("请输入老板密码");
+    if(pw !== "prompt"){
+      window.alert("密码错误");
+      window.location.replace("./index.html");
+      return;
+    }
+    sessionStorage.setItem("owner_auth","1");
+    sessionStorage.setItem("owner_auth_time",String(Date.now()));
+  }catch(err){
+    window.location.replace("./index.html");
+  }
+})();
+</script>
 
 <div class="page-shell">
 
@@ -223,7 +240,7 @@
 
   window.addEventListener("DOMContentLoaded", async ()=>{
     renderNav("owner");
-    import("./js/owner.js?v=2.6.5").catch(e=>{
+    import("./js/owner.js?v=2.6.7").catch(e=>{
   console.error(e);
   alert(
     e.message +
