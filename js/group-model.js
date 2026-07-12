@@ -42,22 +42,27 @@ export function nextLocalGroupId(groups = [], timestamp = Date.now()){
 export async function allocateGroupId(db, groups = [], timestamp = Date.now()){
   const dateKey = groupDateKey(timestamp);
   const counterId = dateKey.replaceAll("/","-");
-  try{
-    return await runTransaction(db, async transaction=>{
-      const counterRef = doc(db,"groupCounters",counterId);
-      const snap = await transaction.get(counterRef);
-      const cloudNext = Number(snap.data()?.lastSequence || 0) + 1;
-      const localNext = (Array.isArray(groups) ? groups : []).reduce((value,g)=>{
-        return Math.max(value, parseGroupSequence(g?.id || g?.groupId,dateKey));
-      },0) + 1;
-      const sequence = Math.max(cloudNext,localNext);
-      transaction.set(counterRef,{dateKey,lastSequence:sequence,updatedAt:Date.now()},{merge:true});
-      return `${dateKey}_${counterToken(sequence)}`;
-    });
-  }catch(error){
+  const localId = nextLocalGroupId(groups,timestamp);
+
+  // 某些现有 Firebase 规则只允许访问 shop/main，访问新集合时可能长时间重试。
+  // 最多等待 3 秒，之后立即使用本机顺序编号，避免“保存组”按钮看起来没有反应。
+  const timeout = new Promise(resolve=>setTimeout(()=>resolve(localId),3000));
+  const cloudAllocation = runTransaction(db, async transaction=>{
+    const counterRef = doc(db,"groupCounters",counterId);
+    const snap = await transaction.get(counterRef);
+    const cloudNext = Number(snap.data()?.lastSequence || 0) + 1;
+    const localNext = (Array.isArray(groups) ? groups : []).reduce((value,g)=>{
+      return Math.max(value, parseGroupSequence(g?.id || g?.groupId,dateKey));
+    },0) + 1;
+    const sequence = Math.max(cloudNext,localNext);
+    transaction.set(counterRef,{dateKey,lastSequence:sequence,updatedAt:Date.now()},{merge:true});
+    return `${dateKey}_${counterToken(sequence)}`;
+  }).catch(error=>{
     console.warn("组编号云端分配失败，使用本机顺序编号",error);
-    return nextLocalGroupId(groups,timestamp);
-  }
+    return localId;
+  });
+
+  return Promise.race([cloudAllocation,timeout]);
 }
 
 export function normalizePayment(payment = {}){

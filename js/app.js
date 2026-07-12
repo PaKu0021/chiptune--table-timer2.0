@@ -1,10 +1,10 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.7.0";
+import { db } from "./firebase.js?v=2.7.1";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.0";
-/*import { formatTime } from "./common.js?v=2.7.0";*/
-import { resetTable, formatTime } from "./common.js?v=2.7.0";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.0";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.1";
+/*import { formatTime } from "./common.js?v=2.7.1";*/
+import { resetTable, formatTime } from "./common.js?v=2.7.1";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.1";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -996,7 +996,7 @@ filteredTables.forEach(({t,i})=>{
     div.className = "card " + status;
 
     div.innerHTML = `
-      <h3>${t.name}</h3>
+      <h3 class="table-title-row"><span>${t.name}</span>${t.groupId ? `<span class="table-group-id">${t.groupId}</span>` : ""}</h3>
 
     <select onchange="setPackage(${i},this.value)" ${t.start ? "disabled" : ""}>
   ${state.packages.map((pkg,idx)=>`
@@ -2724,31 +2724,46 @@ function closeGroupManager(){
 }
 
 async function saveGroupManager(){
-  const indexes = [...document.querySelectorAll(".group-manager-table:checked")].map(el=>Number(el.value));
-  if(indexes.length < 1){ alert("请至少选择一张桌"); return; }
-  const id = editingGroupId || await allocateGroupId(db,state.groups || []);
-  // 从其他组移除被重新分配的桌位，实现拆组与重组。
-  ensureGroups(state).forEach(g=>{
-    if(g.id === id) return;
-    g.tableIndexes = (g.tableIndexes || []).map(Number).filter(i=>!indexes.includes(i));
-    g.updatedAt = Date.now();
-    syncGroupReferences(state,g);
-  });
-  const existing = getGroup(state,id);
-  const group = upsertGroup(state,{
-    ...(existing || {}),
-    id,
-    name:document.getElementById("groupManagerName").value.trim() || "未命名组",
-    peopleCount:Number(document.getElementById("groupManagerPeople").value || indexes.length || 1),
-    paymentMode:document.getElementById("groupManagerPaymentMode").value || "split",
-    color:existing?.color || "#B7E4C7",
-    tableIndexes:indexes,
-    updatedAt:Date.now()
-  });
-  syncGroupReferences(state,group);
-  await save("manage_group");
-  closeGroupManager();
-  render();
+  const button = document.getElementById("groupManagerSave");
+  const originalText = button?.innerText || "保存组";
+  try{
+    const indexes = [...document.querySelectorAll(".group-manager-table:checked")].map(el=>Number(el.value));
+    if(indexes.length < 1){ alert("请至少选择一张桌"); return; }
+    if(button){ button.disabled = true; button.innerText = "正在保存…"; }
+
+    const id = editingGroupId || await allocateGroupId(db,state.groups || []);
+    if(!id) throw new Error("无法生成组 ID");
+
+    // 从其他组移除被重新分配的桌位，实现拆组与重组。
+    ensureGroups(state).forEach(g=>{
+      if(g.id === id) return;
+      g.tableIndexes = (g.tableIndexes || []).map(Number).filter(i=>!indexes.includes(i));
+      g.updatedAt = Date.now();
+      syncGroupReferences(state,g);
+    });
+    const existing = getGroup(state,id);
+    const group = upsertGroup(state,{
+      ...(existing || {}),
+      id,
+      name:document.getElementById("groupManagerName").value.trim() || "未命名组",
+      peopleCount:Number(document.getElementById("groupManagerPeople").value || indexes.length || 1),
+      paymentMode:document.getElementById("groupManagerPaymentMode").value || "split",
+      color:existing?.color || "#B7E4C7",
+      tableIndexes:indexes,
+      updatedAt:Date.now()
+    });
+    syncGroupReferences(state,group);
+
+    // 本地优先保存；即使云端暂时不可用，也会进入安全同步队列。
+    await save("manage_group");
+    closeGroupManager();
+    render();
+  }catch(error){
+    console.error("保存组失败",error);
+    alert(`保存组失败：${error?.message || error}`);
+  }finally{
+    if(button){ button.disabled = false; button.innerText = originalText; }
+  }
 }
 
 async function dissolveCurrentGroup(){
