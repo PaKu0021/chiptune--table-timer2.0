@@ -1357,3 +1357,8 @@ button.selected-pop{
 .group-section-header span{font-size:13px;color:#6f777d;font-family:monospace;}
 .group-payment-line{display:grid;grid-template-columns:1.1fr 1fr 1fr .8fr auto;gap:6px;margin:8px 0;align-items:center;}
 @media(max-width:700px){.group-payment-line{grid-template-columns:1fr 1fr;}.group-payment-line button{grid-column:1/-1;}}
+
+/* v2.7.1：桌号旁显示统一组 ID */
+.table-title-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.table-group-id{display:inline-flex;align-items:center;max-width:100%;padding:3px 8px;border-radius:999px;background:#fff3bf;border:1px solid #e7bd32;font-size:12px;font-weight:800;line-height:1.25;color:#6b5310;overflow-wrap:anywhere;}
+#groupManagerSave:disabled{opacity:.65;cursor:wait;}
