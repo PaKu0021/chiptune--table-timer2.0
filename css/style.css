@@ -321,6 +321,11 @@ button:active{
 }
 
 .home-card{
+  text-decoration:none;
+  color:inherit;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
   min-height:190px;
   text-align:left;
   padding:24px;
