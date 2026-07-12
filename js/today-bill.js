@@ -1,8 +1,9 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.6.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.0";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.0";
 
 
-import { db } from "./firebase.js?v=2.6.5";
+import { db } from "./firebase.js?v=2.7.0";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -40,7 +41,7 @@ let groupReceiptMap = {};
 // 整组截图独立存放，避免把 Base64 图片塞进 shop/main。
 onSnapshot(collection(db,"groupReceipts"), snap=>{
   const next = {};
-  snap.docs.forEach(d=>{ next[String(d.id)] = {id:d.id,...d.data()}; });
+  snap.docs.forEach(d=>{ const data=d.data(); next[String(data.groupId || d.id)] = {id:d.id,...data}; });
   groupReceiptMap = next;
   try{ renderTodayBill(); }catch(err){ console.warn("整组截图刷新失败",err); }
 }, err=>console.warn("整组截图监听失败",err));
@@ -53,9 +54,7 @@ onSnapshot(ref, { includeMetadataChanges:true }, async snap => {
   if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
   if(snap.metadata.fromCache) setSyncStatus("cache");
 
-if(!Array.isArray(state.groups)){
-  state.groups = [];
-}
+ensureGroups(state);
 
 renderTodayBill();
   
@@ -618,7 +617,7 @@ async function handleGroupPaymentReceiptFile(file){
       updatedAt:Date.now()
     };
     // 独立文档保存。shop/main 中不再写入图片。
-    await setDoc(doc(db,"groupReceipts",String(group.id)), receiptDoc, {merge:true});
+    await setDoc(doc(db,"groupReceipts",encodeGroupDocumentId(group.id)), receiptDoc, {merge:true});
     groupReceiptMap[String(group.id)] = receiptDoc;
     // 清理旧版可能残留在主状态和付款明细中的重复图片。
     delete group.receiptImage;

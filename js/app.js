@@ -1,9 +1,10 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.6.9";
+import { db } from "./firebase.js?v=2.7.0";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.9";
-/*import { formatTime } from "./common.js?v=2.6.5";*/
-import { resetTable, formatTime } from "./common.js?v=2.6.9";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.0";
+/*import { formatTime } from "./common.js?v=2.7.0";*/
+import { resetTable, formatTime } from "./common.js?v=2.7.0";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.0";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -144,6 +145,8 @@ let typeFilter = "";
 let payFilter = "";
 let sortDirection = "asc";
 let filterPanelOpen = true;
+let groupViewMode = false;
+let editingGroupId = "";
 let autoClosingOldTables = false;
 let movingRunningFromIndex = null;
 let movingRunningToIndex = null;
@@ -271,9 +274,7 @@ function normalizeAppState(nextState){
     next.bookings = [];
   }
 
-  if(!Array.isArray(next.groups)){
-    next.groups = [];
-  }
+  ensureGroups(next);
 
   next.customers =
     normalizeAppCustomers(next.customers);
@@ -316,6 +317,23 @@ function normalizeAppState(nextState){
     }
   });
 
+  const legacyById = new Map();
+  next.tables.forEach((t,index)=>{
+    if(!t.groupId) return;
+    if(!legacyById.has(String(t.groupId))) legacyById.set(String(t.groupId),[]);
+    legacyById.get(String(t.groupId)).push(index);
+  });
+  legacyById.forEach((indexes,id)=>{
+    const first = next.tables[indexes[0]] || {};
+    upsertGroup(next,{
+      ...(getGroup(next,id) || {}),
+      id,
+      name:first.groupName || getGroup(next,id)?.name || "未命名组",
+      color:first.groupColor || getGroup(next,id)?.color || "#B7E4C7",
+      tableIndexes:indexes,
+      peopleCount:getGroup(next,id)?.peopleCount || Math.max(1,indexes.length)
+    });
+  });
   return next;
 }
 
@@ -906,12 +924,31 @@ const filteredTables = state.tables
     vb = getOriginalJPY(b.t);
   }
 
+  if(groupViewMode){
+    const ga = String(a.t.groupId || "~~~~未分组");
+    const gb = String(b.t.groupId || "~~~~未分组");
+    if(ga !== gb) return ga.localeCompare(gb,"zh-CN");
+  }
   return sortDirection === "desc" ? vb - va : va - vb;
 });
   
 
 
+let lastRenderedGroupId = null;
 filteredTables.forEach(({t,i})=>{
+    if(groupViewMode){
+      const currentGroupId = String(t.groupId || "");
+      if(currentGroupId !== lastRenderedGroupId){
+        const group = getGroup(state,currentGroupId);
+        const header = document.createElement("div");
+        header.className = "group-section-header";
+        header.innerHTML = currentGroupId
+          ? `<div><b>👥 ${group?.name || t.groupName || "未命名组"}</b><span>${currentGroupId}</span></div><button class="btn-ghost" onclick="openGroupManager('${currentGroupId.replaceAll("'","\'")}')">管理组</button>`
+          : `<div><b>未分组桌位</b><span>可选择后创建新组</span></div><button class="btn-main" onclick="openGroupManager('')">创建组</button>`;
+        box.appendChild(header);
+        lastRenderedGroupId = currentGroupId;
+      }
+    }
     const p = getPackage(t);
     const elapsed = getElapsedMs(t);
     const remain = getLimitMs(t) - elapsed;
@@ -1229,6 +1266,19 @@ async function start(i){
       booking.checkInTime = startTime;
       booking.checkInTimeText = new Date(startTime).toLocaleString();
     }
+  }
+
+  if(!t.groupId){
+    const groupId = await allocateGroupId(db,state.groups || []);
+    const group = upsertGroup(state,{
+      id:groupId,
+      name:t.customer?.name ? `${t.customer.name}一组` : `${t.name}一组`,
+      color:t.activeColor || "#B7E4C7",
+      tableIndexes:[i],
+      peopleCount:1,
+      paymentMode:"split"
+    });
+    syncGroupReferences(state,group);
   }
 
   // 先同步保存桌位状态，确保点击开始后立即生效。
@@ -2241,6 +2291,19 @@ async function confirmBatchStart(){
     return;
   }
 
+const groupId = await allocateGroupId(db,state.groups || []);
+const groupName = document.getElementById("batchGroupName")?.value.trim() || `现场客人一组`;
+const paymentMode = document.getElementById("batchGroupPaymentMode")?.value || "split";
+const group = upsertGroup(state,{
+  id:groupId,
+  name:groupName,
+  color:"#B7E4C7",
+  tableIndexes:indexes,
+  peopleCount:Number(document.getElementById("batchGroupPeopleCount")?.value || indexes.length || 1),
+  paymentMode
+});
+syncGroupReferences(state,group);
+
 for(const i of indexes){
   const t = state.tables[i];
   if(!t || t.start) continue;
@@ -2356,8 +2419,34 @@ function toggleGroupPayMode(){
   if(box){
     box.style.display = checked ? "block" : "none";
   }
+  if(checked && document.getElementById("groupPaymentLines") && !document.getElementById("groupPaymentLines").children.length){
+    addGroupPaymentLine();
+  }
 }
 
+
+function addGroupPaymentLine(){
+  const box = document.getElementById("groupPaymentLines");
+  if(!box) return;
+  const row = document.createElement("div");
+  row.className = "group-payment-line";
+  row.innerHTML = `
+    <input class="group-line-payer" placeholder="付款人">
+    <select class="group-line-method"><option value="">付款方式</option><option>现金</option><option>PayPay</option><option>微信</option><option>支付宝</option></select>
+    <input class="group-line-amount" type="number" min="0" placeholder="金额">
+    <input class="group-line-people" type="number" min="1" placeholder="代付人数">
+    <button type="button" class="btn-danger" onclick="this.parentElement.remove()">删除</button>`;
+  box.appendChild(row);
+}
+
+function readGroupPaymentLines(){
+  return [...document.querySelectorAll(".group-payment-line")].map(row=>({
+    payerName:row.querySelector(".group-line-payer")?.value.trim() || "",
+    method:row.querySelector(".group-line-method")?.value || "",
+    amountJPY:Number(row.querySelector(".group-line-amount")?.value || 0),
+    coveredPeople:Number(row.querySelector(".group-line-people")?.value || 0)
+  })).filter(line=>line.amountJPY > 0 || line.payerName || line.method || line.coveredPeople);
+}
 
 function closeBatchCheckout(){
   document.getElementById("batchCheckoutModalBg").style.display = "none";
@@ -2380,8 +2469,13 @@ async function confirmBatchCheckout(){
     const groupPayerName = document.getElementById("groupPayerName")?.value.trim() || "";
     const groupPayNote = document.getElementById("groupPayNote")?.value.trim() || "";
     const manualTotal = Number(document.getElementById("groupPayTotal")?.value || 0);
+    const paymentLines = readGroupPaymentLines();
 
-    if(!groupPayMethod){
+    if(paymentLines.length && paymentLines.some(line=>!line.method || line.amountJPY <= 0)){
+      alert("请完整填写每一笔付款明细的付款方式和金额");
+      return;
+    }
+    if(!paymentLines.length && !groupPayMethod){
       alert("请选择整组付款方式");
       return;
     }
@@ -2396,7 +2490,8 @@ async function confirmBatchCheckout(){
     });
 
     const defaultTotal = items.reduce((sum,item)=>sum + Number(item.dueJPY || 0),0);
-    const groupTotalJPY = manualTotal > 0 ? manualTotal : defaultTotal;
+    const lineTotal = paymentLines.reduce((sum,line)=>sum + line.amountJPY,0);
+    const groupTotalJPY = lineTotal > 0 ? lineTotal : (manualTotal > 0 ? manualTotal : defaultTotal);
 
     if(groupTotalJPY <= 0){
       alert("整组没有需要补收的金额");
@@ -2416,6 +2511,8 @@ async function confirmBatchCheckout(){
       .join("、");
 
     let remaining = groupTotalJPY;
+    const selectedGroupIds = Array.from(new Set(items.map(item=>String(item.t.groupId || "")).filter(Boolean)));
+    const unifiedGroup = selectedGroupIds.length === 1 ? getGroup(state,selectedGroupIds[0]) : null;
 
     for(let idx=0; idx<items.length; idx++){
       const {i,t,dueJPY} = items[idx];
@@ -2435,7 +2532,10 @@ async function confirmBatchCheckout(){
         paidThisTime = dueJPY;
       }
 
-      t.pay = groupPayMethod;
+      const effectiveMethod = paymentLines.length
+        ? Array.from(new Set(paymentLines.map(line=>line.method))).join("+")
+        : groupPayMethod;
+      t.pay = effectiveMethod;
       t.currency = "日元";
 
       const record = await createOrUpdateRecord(t);
@@ -2446,9 +2546,9 @@ async function confirmBatchCheckout(){
           makePaymentLine({
             type:paidThisTime < 0 ? "退款" : "收入",
             reason:"整组代付",
-            pay:groupPayMethod,
+            pay:effectiveMethod,
             amountJPY:paidThisTime,
-            note:groupPayNote || `${groupPayerName || "未填写付款人"} 代付：${tableNames}`
+            note:groupPayNote || `${groupPayerName || paymentLines.map(line=>line.payerName).filter(Boolean).join("、") || "未填写付款人"} 代付：${tableNames}`
           })
         );
       }
@@ -2471,7 +2571,8 @@ async function confirmBatchCheckout(){
       record.checkoutMethod = "整组代付";
       record.groupPaymentId = groupPaymentId;
       record.groupPayerName = groupPayerName;
-      record.groupPaymentMethod = groupPayMethod;
+      record.groupPaymentMethod = paymentLines.length ? paymentLines.map(line=>line.method).join("+") : groupPayMethod;
+      record.groupPaymentLines = paymentLines;
       record.groupPaymentTotalJPY = groupTotalJPY;
       record.groupPaymentTableNames = tableNames;
       record.groupPaymentNote = groupPayNote;
@@ -2490,11 +2591,31 @@ record.businessDate =
       state.tables[i] = resetTable(t.name);
     }
 
+    if(unifiedGroup){
+      const lines = paymentLines.length ? paymentLines : [{
+        payerName:groupPayerName,
+        method:groupPayMethod,
+        amountJPY:groupTotalJPY,
+        coveredPeople:unifiedGroup.peopleCount || indexes.length
+      }];
+      unifiedGroup.paymentMode = lines.length === 1 ? "unified" : "split";
+      unifiedGroup.payments = [...(unifiedGroup.payments || []),...lines.map(line=>({
+        id:`pay_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+        payerName:line.payerName,
+        method:line.method,
+        amountJPY:line.amountJPY,
+        coveredPeople:line.coveredPeople,
+        coveredTableIndexes:indexes,
+        note:groupPayNote,
+        createdAt:Date.now()
+      }))];
+      unifiedGroup.updatedAt = Date.now();
+    }
     await save();
     closeBatchCheckout();
     render();
 
-    alert("整组代付结账完成");
+    alert("整组付款结账完成");
     return;
   }
 
@@ -2576,6 +2697,74 @@ record.businessDate =
   render();
 }
 
+function setGroupViewMode(value){
+  groupViewMode = value === true || value === "group";
+  render();
+}
+
+function openGroupManager(groupId=""){
+  editingGroupId = String(groupId || "");
+  const group = editingGroupId ? getGroup(state,editingGroupId) : null;
+  document.getElementById("groupManagerTitle").innerText = group ? `管理组 ${group.id}` : "创建新组";
+  document.getElementById("groupManagerName").value = group?.name || "";
+  document.getElementById("groupManagerPeople").value = group?.peopleCount || 1;
+  document.getElementById("groupManagerPaymentMode").value = group?.paymentMode || "split";
+  const selected = new Set((group?.tableIndexes || []).map(Number));
+  document.getElementById("groupManagerTables").innerHTML = state.tables.map((t,i)=>{
+    const other = t.groupId && String(t.groupId)!==editingGroupId;
+    return `<label class="table-item"><input type="checkbox" class="group-manager-table" value="${i}" ${selected.has(i)?"checked":""}><span class="num">${i+1}</span><span class="sub">${other ? `当前：${t.groupId}` : (t.start?"使用中":"空闲")}</span></label>`;
+  }).join("");
+  document.getElementById("groupManagerDelete").style.display = group ? "block" : "none";
+  document.getElementById("groupManagerModalBg").style.display = "block";
+}
+
+function closeGroupManager(){
+  document.getElementById("groupManagerModalBg").style.display = "none";
+  editingGroupId = "";
+}
+
+async function saveGroupManager(){
+  const indexes = [...document.querySelectorAll(".group-manager-table:checked")].map(el=>Number(el.value));
+  if(indexes.length < 1){ alert("请至少选择一张桌"); return; }
+  const id = editingGroupId || await allocateGroupId(db,state.groups || []);
+  // 从其他组移除被重新分配的桌位，实现拆组与重组。
+  ensureGroups(state).forEach(g=>{
+    if(g.id === id) return;
+    g.tableIndexes = (g.tableIndexes || []).map(Number).filter(i=>!indexes.includes(i));
+    g.updatedAt = Date.now();
+    syncGroupReferences(state,g);
+  });
+  const existing = getGroup(state,id);
+  const group = upsertGroup(state,{
+    ...(existing || {}),
+    id,
+    name:document.getElementById("groupManagerName").value.trim() || "未命名组",
+    peopleCount:Number(document.getElementById("groupManagerPeople").value || indexes.length || 1),
+    paymentMode:document.getElementById("groupManagerPaymentMode").value || "split",
+    color:existing?.color || "#B7E4C7",
+    tableIndexes:indexes,
+    updatedAt:Date.now()
+  });
+  syncGroupReferences(state,group);
+  await save("manage_group");
+  closeGroupManager();
+  render();
+}
+
+async function dissolveCurrentGroup(){
+  const group = getGroup(state,editingGroupId);
+  if(!group || !confirm(`确认拆散 ${group.id}？桌位和账单不会被删除。`)) return;
+  (state.tables || []).forEach(t=>{
+    if(String(t.groupId || "") === group.id){ t.groupId="";t.groupName="";t.groupColor=""; }
+  });
+  group.status = "dissolved";
+  group.tableIndexes = [];
+  group.updatedAt = Date.now();
+  await save("dissolve_group");
+  closeGroupManager();
+  render();
+}
+
 function toggleSortDirection(){
   sortDirection = sortDirection === "asc" ? "desc" : "asc";
 
@@ -2604,6 +2793,11 @@ function toggleFilterPanel(){
 
 
 window.toggleSortDirection = toggleSortDirection;
+window.setGroupViewMode = setGroupViewMode;
+window.openGroupManager = openGroupManager;
+window.closeGroupManager = closeGroupManager;
+window.saveGroupManager = saveGroupManager;
+window.dissolveCurrentGroup = dissolveCurrentGroup;
 window.toggleFilterPanel = toggleFilterPanel;
 window.roundBatchAmount = roundBatchAmount;
 window.openBatchCheckout = openBatchCheckout;
@@ -2642,6 +2836,7 @@ window.setPayTiming = setPayTiming;
 window.moveRunningTable = moveRunningTable;
 window.refreshCheckoutDiff = refreshCheckoutDiff;
 window.toggleGroupPayMode = toggleGroupPayMode;
+window.addGroupPaymentLine = addGroupPaymentLine;
 window.startRunningMoveDrag = startRunningMoveDrag;
 window.confirmMoveRunningLine = confirmMoveRunningLine;
 window.closeMoveRunningLineModal = closeMoveRunningLineModal;

@@ -1,7 +1,8 @@
-import { db } from "./firebase.js?v=2.6.9";
+import { db } from "./firebase.js?v=2.7.0";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.6.9";
-import { resetTable } from "./common.js?v=2.6.9";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.7.0";
+import { resetTable } from "./common.js?v=2.7.0";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.7.0";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -73,20 +74,12 @@ function getNextBookingColor(){
   ];
 }
 
-function makeGroupId(){
-  return "group_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
+async function makeGroupId(){
+  return allocateGroupId(db, state?.groups || []);
 }
 
 function getGroupById(groupId){
-  if(!state) return null;
-
-  if(!Array.isArray(state.groups)){
-    state.groups = [];
-  }
-
-  return state.groups.find(
-    g=>String(g?.id) === String(groupId)
-  ) || null;
+  return getGroup(state, groupId);
 }
 
 function createOrUpdateGroup({
@@ -94,79 +87,22 @@ function createOrUpdateGroup({
   groupName,
   groupColor,
   tableIndexes = [],
-  bookingId = null
+  bookingId = null,
+  peopleCount = null,
+  paymentMode = null
 }){
-  if(!Array.isArray(state.groups)){
-    state.groups = [];
-  }
-
-  let group = getGroupById(groupId);
-
-  if(!group){
-    group = {
-      id: groupId,
-      name: groupName || "未命名组",
-      color: groupColor || getNextBookingColor(),
-      tableIndexes: [],
-      bookingIds: [],
-      payments: [],
-      createdAt: Date.now()
-    };
-
-    state.groups.push(group);
-  }
-
-  group.name =
-    groupName ||
-    group.name ||
-    "未命名组";
-
-  group.color =
-    groupColor ||
-    group.color ||
-    getNextBookingColor();
-
-  if(!Array.isArray(group.tableIndexes)){
-    group.tableIndexes = [];
-  }
-
-  if(!Array.isArray(group.bookingIds)){
-    group.bookingIds = [];
-  }
-
-  if(!Array.isArray(group.payments)){
-    group.payments = [];
-  }
-
-  group.tableIndexes = Array.from(
-    new Set([
-      ...group.tableIndexes
-        .map(Number)
-        .filter(Number.isFinite),
-
-      ...tableIndexes
-        .map(Number)
-        .filter(Number.isFinite)
-    ])
-  );
-
-  if(
-    bookingId !== null &&
-    bookingId !== undefined
-  ){
-    group.bookingIds = Array.from(
-      new Set([
-        ...group.bookingIds
-          .map(String)
-          .filter(Boolean),
-
-        String(bookingId)
-      ])
-    );
-  }
-
-  group.updatedAt = Date.now();
-
+  const existing = getGroupById(groupId);
+  const group = upsertGroup(state, {
+    ...(existing || {}),
+    id:groupId,
+    name:groupName || existing?.name || "未命名组",
+    color:groupColor || existing?.color || getNextBookingColor(),
+    tableIndexes:Array.from(new Set([...(existing?.tableIndexes || []),...tableIndexes].map(Number).filter(Number.isFinite))),
+    bookingIds:Array.from(new Set([...(existing?.bookingIds || []),...(bookingId === null || bookingId === undefined ? [] : [String(bookingId)])])),
+    peopleCount:peopleCount || existing?.peopleCount || Math.max(1,tableIndexes.length),
+    paymentMode:paymentMode || existing?.paymentMode || "split",
+    updatedAt:Date.now()
+  });
   return group;
 }
 
@@ -201,14 +137,20 @@ onSnapshot(ref, { includeMetadataChanges:true }, async snap=>{
 
   if(!state.bookings) state.bookings = [];
   if(!state.customers) state.customers = [];
-  if(!Array.isArray(state.groups)){
-  state.groups = [];
-}
+  ensureGroups(state);
   state.bookings.forEach(b=>{
-  if(!b.groupId) b.groupId = "group_" + b.id;
+  if(!b.groupId) b.groupId = `legacy_${b.id}`;
   if(!b.groupColor) b.groupColor = b.color || getNextBookingColor();
   if(!b.groupName) b.groupName = b.name ? `${b.name}一组` : "未命名组";
   if(!b.color) b.color = b.groupColor;
+  createOrUpdateGroup({
+    groupId:b.groupId,
+    groupName:b.groupName,
+    groupColor:b.groupColor,
+    tableIndexes:b.tableIndexes || [],
+    bookingId:b.id,
+    peopleCount:b.peopleCount || b.partySize || Math.max(1,(b.tableIndexes || []).length)
+  });
 });
   if(!Array.isArray(state.tables) || state.tables.length === 0){
     state.tables = Array.from({length:12},(_,i)=>({
@@ -1866,7 +1808,7 @@ async function confirmGridBooking(){
 const now = Date.now();
 const walkinColor = getNextBookingColor();
 
-const walkinGroupId = makeGroupId();
+const walkinGroupId = await makeGroupId();
 
 const walkinGroupName = name
   ? `${name}一组`
@@ -1930,7 +1872,7 @@ t.packageIndex = packageIndex;
     const packageIndex =
       findPackageIndexByDuration(startTime,endTime);
 
-    const groupId = makeGroupId();
+    const groupId = await makeGroupId();
     const groupColor = getNextBookingColor();
 
     const booking = {
