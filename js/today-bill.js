@@ -1,9 +1,9 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.2";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.2";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.3";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.3";
 
 
-import { db } from "./firebase.js?v=2.7.2";
+import { db } from "./firebase.js?v=2.7.3";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -346,6 +346,7 @@ function renderTodayBill(){
           👥 ${group?.name || rows[0]?.groupName || "未命名组"}
           （${rows.map(r=>r.tableName).join("、")}）
           <button class="btn-ghost" style="margin-left:12px;" onclick="openEditGroup('${groupId}')">修改组 / 加桌</button>
+          ${rows.length > 1 && rows.some(r=>getPaySummary(r)!=="现金") ? (rows.find(r=>r.receiptImage) ? `<button class="btn-ghost" style="margin-left:8px;" onclick="viewPaymentReceipt('${rows.find(r=>r.receiptImage).id}',0)">查看共用截图</button>` : `<button class="btn-main" style="margin-left:8px;" onclick="uploadSharedGroupReceipt('${groupId}')">上传共用截图（只需一次）</button>`) : ""}
         </td>
       </tr>
     `;
@@ -992,3 +993,12 @@ window.viewGroupPaymentReceipt = viewGroupPaymentReceipt;
 window.openEditGroup = openEditGroup;
 window.closeEditGroup = closeEditGroup;
 window.saveEditedGroup = saveEditedGroup;
+
+window.uploadSharedGroupReceipt = function(groupId){
+  const input=document.createElement("input"); input.type="file"; input.accept="image/*";
+  input.onchange=async()=>{ const file=input.files?.[0]; if(!file)return; const rows=records.filter(r=>String(r.groupId||"")===String(groupId)); if(!rows.length)return;
+    const compressedBlob=await compressImage(file); const base64=await fileToBase64(compressedBlob);
+    for(const r of rows){ r.receiptImage=base64; r.receiptFileName=file.name||""; r.receiptUploadedAt=Date.now(); r.receiptUploadedTime=new Date().toLocaleString(); await saveRecordSafely({db,ref,record:r}); }
+    records=mergeRecordLists(records,rows); render(); alert("整组收款截图已保存，组内账单共用此截图");
+  }; input.click();
+};

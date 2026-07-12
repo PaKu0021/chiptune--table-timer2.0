@@ -1,7 +1,7 @@
-import { db } from "./firebase.js?v=2.7.2";
+import { db } from "./firebase.js?v=2.7.3";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.2";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.3";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -518,7 +518,7 @@ function renderRecords(){
     const rmb = actualRMBIncome(r);
 
     return `
-      <tr>
+      <tr style="${getPaySummary(r)!=="现金" ? "height:120px;" : ""}">
         <td>${r.closedTime || r.time || ""}</td>
         <td>${table}</td>
         <td>${name}${phone ? "("+phone+")" : ""}</td>
@@ -736,7 +736,8 @@ async function handleOwnerReceiptFileChange(e){
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
 
-    await saveRecordSafely({db,ref,record:r});
+    const linked = r.groupId ? records.filter(x=>String(x.groupId||"")===String(r.groupId)) : [r];
+    for(const item of linked){ item.receiptImage=base64; item.receiptFileName=r.receiptFileName; item.receiptUploadedAt=r.receiptUploadedAt; item.receiptUploadedTime=r.receiptUploadedTime; await saveRecordSafely({db,ref,record:item}); }
 
     uploadingRecordId = null;
     alert("收款截图已保存");

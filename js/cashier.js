@@ -1,6 +1,6 @@
-import { db } from "./firebase.js?v=2.7.2";
+import { db } from "./firebase.js?v=2.7.3";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.2";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.3";
 
 
 import {
@@ -32,7 +32,8 @@ async function uploadReceipt(recordId,file){
   record.receiptUploadedAt = Date.now();
   record.receiptUploadedTime = new Date().toLocaleString();
 
-  await saveRecordSafely({db,ref,record});
+  const linked = record.groupId ? records.filter(x=>String(x.groupId||"")===String(record.groupId)) : [record];
+  for(const item of linked){ item.receiptImage=base64; item.receiptFileName=record.receiptFileName; item.receiptUploadedAt=record.receiptUploadedAt; item.receiptUploadedTime=record.receiptUploadedTime; await saveRecordSafely({db,ref,record:item}); }
   records = mergeRecordLists(records,[record]);
   renderCashier();
   alert("截图已保存");
