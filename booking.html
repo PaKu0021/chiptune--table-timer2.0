@@ -40,7 +40,11 @@
   当前为锁定状态，只能查看，不能创建/修改预约
 </div>
 
-<div id="bookingGrid" class="booking-grid-wrap locked-grid"></div>
+<div id="bookingGrid" class="booking-grid-wrap locked-grid">
+  <div style="padding:24px;text-align:center;color:#8a8174;font-weight:800;">
+    正在读取桌位与预约数据…
+  </div>
+</div>
 </div>
 
 <div class="panel">
@@ -82,10 +86,20 @@
   <option value="walkin">Walk-in 并开始计时</option>
 </select>
 
-<input id="modalName" placeholder="客人姓名">
-<input id="modalPhone" placeholder="手机号">
+<label for="modalType">操作类型</label>
+<label for="modalName">客人姓名</label>
+<input id="modalName" placeholder="请输入客人姓名">
+
+<label for="modalPhone">手机号</label>
+<input
+  id="modalPhone"
+  type="tel"
+  inputmode="numeric"
+  placeholder="请输入手机号"
+>
 
 <div id="modalPackageBox" style="display:none;">
+  <label for="modalPackage">计时套餐</label>
   <select id="modalPackage"></select>
 </div>
 
@@ -200,22 +214,6 @@
   </div>
 </div>
 
-
-
-
-
-
-<script type="module">
-  import { renderNav } from "./js/nav.js";
-
-  renderNav("booking");
-
-  import("./js/booking.js?v=2.6.8").catch(e=>{
-    alert("booking.js 加载失败：\n" + e.message);
-    console.error(e);
-  });
-</script>
-
 <div id="runningPayModalBg" class="modal-bg">
   <div class="modal">
     <h2>付款方式</h2>
@@ -329,6 +327,28 @@
 
 </div>
 
+<script type="module">
+  import { renderNav } from "./js/nav.js?v=2.6.8";
+
+  try {
+    renderNav("booking");
+  } catch (error) {
+    console.error("预约页面导航加载失败", error);
+  }
+
+  import("./js/booking.js?v=2.6.8")
+    .catch(error => {
+      console.error("booking.js 加载失败", error);
+
+      alert(
+        "预约系统加载失败：\n\n" +
+        (error?.name || "Error") +
+        "\n" +
+        (error?.message || String(error))
+      );
+    });
+</script>
 
 </body>
 </html>
+

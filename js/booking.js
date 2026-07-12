@@ -105,6 +105,18 @@ function createOrUpdateGroup({
   group.name = groupName || group.name;
   group.color = groupColor || group.color;
 
+  if(!Array.isArray(group.tableIndexes)){
+  group.tableIndexes = [];
+}
+
+if(!Array.isArray(group.bookingIds)){
+  group.bookingIds = [];
+}
+
+if(!Array.isArray(group.payments)){
+  group.payments = [];
+}
+
   group.tableIndexes = Array.from(new Set([
     ...group.tableIndexes.map(Number),
     ...tableIndexes.map(Number)
@@ -185,14 +197,47 @@ Promise.all(
   }
 });
 
+
 try{
   renderList();
   renderBookingGrid();
   startBookingAutoRefresh();
-}catch(e){
-    alert("预约页面错误：" + e.message);
+}catch(error){
+  console.error("预约页面渲染失败",error);
+
+  alert(
+    "预约页面渲染失败：\n" +
+    (error?.message || String(error))
+  );
+}
+
+}, error => {
+  console.error("预约数据监听失败",error);
+
+  alert(
+    "预约数据读取失败：\n\n" +
+    (error?.code || error?.name || "未知错误") +
+    "\n" +
+    (error?.message || String(error))
+  );
+
+  /*
+   * 云端失败时，已有本地状态仍然可以显示。
+   */
+  if(state){
+    try{
+      renderList();
+      renderBookingGrid();
+      startBookingAutoRefresh();
+    }catch(renderError){
+      console.error(
+        "本机预约状态显示失败",
+        renderError
+      );
+    }
   }
 });
+
 
 async function save(action="booking_update"){
   return saveStateSafely({db, ref, getState:()=>state, action});
@@ -1492,133 +1537,222 @@ function fillModalPackages(){
   `).join("");
 }
 
-  async function confirmGridBooking(){
+function resetBookingConfirmButton(){
+  const btn = document.getElementById("modalConfirmBtn");
+  if(!btn) return;
+
+  btn.disabled = false;
+
+  const type =
+    document.getElementById("modalType")?.value || "booking";
+
+  btn.innerText =
+    type === "walkin"
+      ? "开始计时"
+      : "确认预约";
+}
+
+async function confirmGridBooking(){
   if(!selection) return;
 
-  const confirmBtn = document.getElementById("modalConfirmBtn");
+  const confirmBtn =
+    document.getElementById("modalConfirmBtn");
+
   if(confirmBtn?.disabled) return;
+
   if(confirmBtn){
     confirmBtn.disabled = true;
     confirmBtn.innerText = "正在保存预约…";
   }
 
-  const type = document.getElementById("modalType")?.value || "booking";
-  const name = document.getElementById("modalName").value.trim();
-  const phone = document.getElementById("modalPhone").value.trim();
+  let completed = false;
 
-  const slots = getSlots();
+  try{
+    const type =
+      document.getElementById("modalType")?.value || "booking";
 
-  const start = Math.min(selection.startRow, selection.endRow);
-  const end = Math.max(selection.startRow, selection.endRow) + 1;
+    const name =
+      document.getElementById("modalName")?.value.trim() || "";
 
-  const startTable = Math.min(selection.startTableIndex, selection.endTableIndex);
-  const endTable = Math.max(selection.startTableIndex, selection.endTableIndex);
+    const phone =
+      document.getElementById("modalPhone")?.value.trim() || "";
 
-  const tableIndexes = Array.from(
-    { length: endTable - startTable + 1 },
-    (_,idx)=>startTable + idx
-  );
+    const slots = getSlots();
 
-  const busyTables =
-  currentBookingDate === getTodayDate()
-    ? tableIndexes.filter(idx=>state.tables[idx]?.start)
-    : [];
+    const start =
+      Math.min(selection.startRow, selection.endRow);
 
-  if(busyTables.length){
-    alert("以下桌位正在使用中，不能操作：\n" + busyTables.map(i=>state.tables[i].name).join("、"));
-    return;
-  }
+    const end =
+      Math.max(selection.startRow, selection.endRow) + 1;
 
-  const startTime = slots[start];
-  const endTime = slots[end] || `${getBusinessHours().close}:00`;
+    const startTable =
+      Math.min(
+        selection.startTableIndex,
+        selection.endTableIndex
+      );
 
-  if(type === "walkin"){
-    const packageIndex = Number(document.getElementById("modalPackage")?.value || 0);
-    const now = Date.now();
-    const walkinColor = getNextBookingColor();
-      for(const idx of tableIndexes){
-      const t = state.tables[idx];
-      if(!t) return;
+    const endTable =
+      Math.max(
+        selection.startTableIndex,
+        selection.endTableIndex
+      );
 
-      t.type = "walkin";
-      t.activeColor = walkinColor;
-      t.bookingId = null;
-      t.packageIndex = packageIndex;
-      t.pay = "";
-      t.currency = "日元";
-      t.customer = {
-        name,
-        phoneLast4:String(phone || "").slice(-4)
-      };
-      t.start = now;
-      t.pausedAt = null;
-      t.extra = 0;
-      t.alerted = false;
-      t.alerting = false;
-      t.lastAction = "start";
-      await createOrUpdateTableRecord(t, {
-  customerType:"walkin",
-  checkoutMethod:"Walk-in开始计时"
-});
+    const tableIndexes = Array.from(
+      {length:endTable - startTable + 1},
+      (_,idx)=>startTable + idx
+    );
+
+    const busyTables =
+      currentBookingDate === getTodayDate()
+        ? tableIndexes.filter(
+            idx=>state.tables[idx]?.start
+          )
+        : [];
+
+    if(busyTables.length){
+      alert(
+        "以下桌位正在使用中，不能操作：\n" +
+        busyTables
+          .map(i=>state.tables[i]?.name)
+          .filter(Boolean)
+          .join("、")
+      );
+      return;
     }
 
-await save();
+    const startTime = slots[start];
+    const endTime =
+      slots[end] ||
+      `${getBusinessHours().close}:00`;
 
-closeBookingModal();
-renderBookingGrid();
-renderList();
+    if(!startTime || !endTime){
+      alert("没有正确取得预约时间，请重新选择");
+      return;
+    }
 
-    alert("Walk-in 已开始计时");
-    return;
+    if(type === "walkin"){
+      const packageIndex = Number(
+        document.getElementById("modalPackage")?.value || 0
+      );
+
+      const now = Date.now();
+      const walkinColor = getNextBookingColor();
+
+      for(const idx of tableIndexes){
+        const t = state.tables[idx];
+
+        if(!t){
+          throw new Error(
+            `${idx + 1}号桌的数据不存在`
+          );
+        }
+
+        t.type = "walkin";
+        t.activeColor = walkinColor;
+        t.bookingId = null;
+        t.packageIndex = packageIndex;
+        t.pay = "";
+        t.currency = "日元";
+        t.customer = {
+          name,
+          phoneLast4:String(phone).slice(-4)
+        };
+        t.start = now;
+        t.pausedAt = null;
+        t.extra = 0;
+        t.alerted = false;
+        t.alerting = false;
+        t.lastAction = "start";
+
+        await createOrUpdateTableRecord(t,{
+          customerType:"walkin",
+          checkoutMethod:"Walk-in开始计时"
+        });
+      }
+
+      await save("start_walkin");
+
+      completed = true;
+      closeBookingModal();
+      renderBookingGrid();
+      renderList();
+
+      alert("Walk-in 已开始计时");
+      return;
+    }
+
+    const packageIndex =
+      findPackageIndexByDuration(startTime,endTime);
+
+    const groupId = makeGroupId();
+    const groupColor = getNextBookingColor();
+
+    const booking = {
+      id:Date.now(),
+      groupId,
+      groupColor,
+      groupName:name
+        ? `${name}一组`
+        : "未命名组",
+      date:currentBookingDate,
+      color:groupColor,
+      name,
+      phone,
+      tableIndexes,
+      startTime,
+      endTime,
+      packageIndex,
+      checkedIn:false,
+      checkInTime:null,
+      checkInTimeText:"",
+      cancelled:false,
+      createdAt:Date.now()
+    };
+
+    createOrUpdateGroup({
+      groupId,
+      groupName:booking.groupName,
+      groupColor,
+      tableIndexes,
+      bookingId:booking.id
+    });
+
+    if(!Array.isArray(state.bookings)){
+      state.bookings = [];
+    }
+
+    state.bookings.push(booking);
+
+    /*
+     * 先保存到本机。
+     * saveStateSafely 会负责后续云端同步。
+     */
+    await save("create_booking");
+
+    completed = true;
+    closeBookingModal();
+    renderBookingGrid();
+    renderList();
+
+  }catch(error){
+    console.error("创建预约失败",error);
+
+    alert(
+      "预约保存失败：\n" +
+      (error?.message || String(error))
+    );
+
+  }finally{
+    /*
+     * 成功时 closeBookingModal() 已经恢复按钮。
+     * 失败或校验中止时，在这里恢复按钮。
+     */
+    if(!completed){
+      resetBookingConfirmButton();
+    }
   }
-
-
-  const packageIndex = findPackageIndexByDuration(startTime,endTime);
-
-  const groupId = makeGroupId();
-  const groupColor = getNextBookingColor();
-
-  const booking = {
-  id: Date.now(),
-  groupId,
-  groupColor,
-  groupName: name ? `${name}一组` : "未命名组",
-  date: currentBookingDate,
-  color: groupColor,    
-    name,
-    phone,
-    tableIndexes,
-    startTime,
-    endTime,
-    packageIndex,
-    checkedIn:false,
-    checkInTime:null,
-    checkInTimeText:"",
-    cancelled:false,
-  };
-
-  createOrUpdateGroup({
-  groupId,
-  groupName: booking.groupName,
-  groupColor,
-  tableIndexes,
-  bookingId: booking.id
-});
-
-  state.bookings.push(booking);
-
-  // 预约先写入本机并立即关闭窗口，不等待弱网下的云端事务。
-  // saveStateSafely 会把操作加入待同步队列，联网后自动补传。
-  const savePromise = save("create_booking");
-  closeBookingModal();
-  renderBookingGrid();
-  renderList();
-  savePromise.catch(err=>{
-    console.error("预约保存失败",err);
-    alert("预约已保留在当前页面，但本机保存失败，请不要关闭页面并立即重试。\n" + (err?.message || err));
-  });
-  
 }
+
 
 function closeBookingModal(){
   document.getElementById("bookingModalBg").style.display = "none";
