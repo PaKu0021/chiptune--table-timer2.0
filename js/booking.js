@@ -1223,7 +1223,7 @@ function drawMoveLines(pointerX = null, pointerY = null){
 async function confirmMoveTable(){
 
   if(moveMode === "running"){
-  confirmMoveRunningTable();
+  await confirmMoveRunningTable();
   return;
 }
 
@@ -1379,6 +1379,7 @@ async function confirmMoveRunningTable(){
 
   const oldFromName = fromTable.name;
   const oldToName = toTable.name;
+  const movingGroupId = fromTable.groupId || "";
 
   try{
     /*
@@ -1397,7 +1398,7 @@ async function confirmMoveRunningTable(){
     /*
      * 更新分组中的桌位编号。
      */
-    const group = getGroupById(fromTable.groupId);
+    const group = getGroupById(movingGroupId);
 
     if(group){
       if(!Array.isArray(group.tableIndexes)){
