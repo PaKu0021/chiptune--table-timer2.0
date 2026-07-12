@@ -207,14 +207,14 @@
     </select>
     <div style="font-weight:900;margin:14px 0 8px;">选择组内桌位</div>
     <div id="groupManagerTables" class="table-grid"></div>
-    <button class="btn-main full" onclick="saveGroupManager()">保存组</button>
+    <button id="groupManagerSave" class="btn-main full" onclick="saveGroupManager()">保存组</button>
     <button id="groupManagerDelete" class="btn-danger full" onclick="dissolveCurrentGroup()">拆散该组</button>
     <button class="btn-ghost full" onclick="closeGroupManager()">取消</button>
   </div>
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.7.0";
+  import { renderNav } from "./js/nav.js?v=2.7.1";
 
   try {
     renderNav("app");
@@ -222,7 +222,7 @@
     console.error("导航加载失败", error);
   }
 
-  import("./js/app.js?v=2.7.0").catch(error => {
+  import("./js/app.js?v=2.7.1").catch(error => {
     alert(
       "计时系统加载失败：\n\n" +
       error.name + "\n" +
