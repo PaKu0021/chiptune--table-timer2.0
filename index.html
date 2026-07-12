@@ -1,202 +1,247 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Chiptune 系统</title>
-<link rel="stylesheet" href="./css/style.css">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<title>MARD221 Pixel Generator</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;padding:20px;background:#111;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+h1{margin:0 0 20px;font-size:42px}.panel{background:#1b1b1b;border-radius:24px;padding:24px;margin-bottom:20px}.row{margin-bottom:22px}
+label{display:block;margin-bottom:10px;font-size:24px}input[type="range"]{width:100%}.value{font-size:22px;opacity:.8}
+.inline{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.inline label{margin:0}.hint{font-size:17px;line-height:1.45;opacity:.7;margin-top:8px}
+button{width:100%;border:0;border-radius:18px;padding:20px;margin-top:14px;color:#fff;font-size:25px;font-weight:700;background:#333}
+#generateBtn{background:#4f8cff}#exportBtn,#saveBtn{background:#22aa55}#editToggle.active{background:#e4942f}.tool.active{background:#4f8cff}.tool:disabled,#undoBtn:disabled,#redoBtn:disabled{opacity:.4}
+canvas{display:block;margin:0 auto;background:#000;image-rendering:pixelated;touch-action:none;cursor:crosshair;transform-origin:top left;will-change:width,height}#canvasWrap{overflow:auto;max-height:72vh;border-radius:16px;background:#0a0a0a;padding:8px;overscroll-behavior:contain;touch-action:none;-webkit-user-select:none;user-select:none}.tool-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}.tool-grid button{margin:0;padding:14px 8px;font-size:18px}.zoom-row{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center}.zoom-row label{margin:0;font-size:18px}.danger{background:#9b3d3d!important}
+#viewer,#resultPanel,#editPanel{display:none}#previewImg{width:100%;border-radius:20px}.toolbar{display:grid;grid-template-columns:1fr 1fr;gap:12px}.toolbar button{margin:0}
+#paletteGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:8px;max-height:330px;overflow:auto;padding:4px}
+.swatch{min-height:52px;margin:0;padding:5px 2px;border-radius:9px;border:3px solid transparent;font-size:14px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,.8)}
+.swatch.selected{border-color:#fff;box-shadow:0 0 0 2px #4f8cff}.selection{display:flex;align-items:center;gap:12px;margin-bottom:14px;font-size:20px}.selected-chip{width:34px;height:34px;border-radius:8px;border:2px solid #fff}
+#loading{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;align-items:center;justify-content:center;flex-direction:column;font-size:32px}.spinner{width:80px;height:80px;border:8px solid #333;border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:30px}@keyframes spin{to{transform:rotate(360deg)}}
+@media(max-width:600px){body{padding:12px}h1{font-size:31px}.panel{padding:17px;border-radius:18px}label{font-size:20px}button{font-size:21px;padding:17px}}
+</style>
 </head>
-
-<body class="home-page">
-
-<div class="home-shell">
-<div class="brand-card brand-dashboard">
-  <div class="hero-top">
-    <div class="logo-dot">C</div>
-    <div>
-      <h1>Chiptune</h1>
-      <p>池袋拼豆体验店管理系统</p>
-    </div>
-  </div>
-
-  <div class="hero-stats">
-    <div class="stat-item">
-      <div class="stat-label">使用中</div>
-      <div class="stat-value" id="homeUsingCount">0桌</div>
-    </div>
-
-    <div class="stat-item">
-      <div class="stat-label">空闲</div>
-      <div class="stat-value" id="homeFreeCount">0桌</div>
-    </div>
-
-    <div class="stat-item">
-      <div class="stat-label">今日预约</div>
-      <div class="stat-value" id="homeBookingCount">0组</div>
-    </div>
-
-    <div class="stat-item">
-      <div class="stat-label">今日营业额</div>
-      <div class="stat-value" id="homeRevenue">¥0</div>
-    </div>
-  </div>
-</div>
-<div class="home-grid">
-
-<a id="cardBooking" class="home-card" href="./booking.html">
-  <span class="emoji">📅</span>
-    <strong>预约系统</strong>
-    <small>客人预约 / 指定桌位 / 调整座位</small>
-  </a>
-
-<a id="cardApp" class="home-card" href="./app.html">
-  <span class="emoji">⏱️</span>
-    <strong>进入计时系统</strong>
-    <small>桌位计时 / 结账 / 二维码 / 多设备同步</small>
-  </a>
-
-<a id="cardBill" class="home-card" href="./today-bill.html">
-  <div class="emoji">🧾</div>
-    <strong>今日账单</strong>
-    <small>只查看今天收款记录</small>
-  </a>
-
-<a id="cardOwner" class="home-card" href="./owner.html">
-  <span class="emoji">📊</span>
-    <strong>老板模式</strong>
-    <small>收入统计 / 报表 / CSV导出</small>
-  </a>
-
+<body>
+<div id="editor">
+<h1>MARD221 Pixel Generator</h1>
+<div class="panel">
+<div class="row"><label>上传图片</label><input type="file" id="upload" accept="image/*"></div>
+<div class="row"><label>像素宽度 <span class="value" id="widthValue">64</span></label><input type="range" id="pixelWidth" min="16" max="128" value="64"></div>
+<div class="row"><label>像素格尺寸 <span class="value" id="cellValue">24</span></label><input type="range" id="cellSize" min="16" max="48" value="24"></div>
+<div class="row"><label>颜色复杂度 <span class="value" id="complexityValue">60%</span></label><input type="range" id="colorComplexity" min="1" max="100" value="60"><div class="hint">越低，使用的颜色越少；越高，保留的颜色和细节越多。生成后拖动也会重新计算整张图。</div></div>
+<div class="row inline"><label><input type="checkbox" id="showCode" checked> 显示色号</label><label><input type="checkbox" id="showGrid" checked> 显示网格</label></div>
+<button id="generateBtn">生成拼豆图</button>
 </div>
 
-      
+<div id="resultPanel" class="panel">
+<div id="resultStats" class="selection"></div>
+<div class="toolbar"><button id="editToggle">开启编辑模式</button><button id="undoBtn" disabled>撤销</button></div>
+<div class="tool-grid">
+<button class="tool active" data-tool="brush">画笔</button><button class="tool" data-tool="eraser">橡皮擦</button><button class="tool" data-tool="eyedropper">吸管</button><button class="tool" data-tool="fill">油漆桶</button>
+<button class="tool" data-tool="replace">整色替换</button><button class="tool" data-tool="pan">拖动画布</button><button id="redoBtn" disabled>重做</button><button id="resetBtn" class="danger">恢复生成结果</button>
 </div>
- 
+<div class="zoom-row"><label>缩放</label><input type="range" id="zoomRange" min="50" max="300" step="1" value="100"><span id="zoomValue">100%</span></div>
+<div class="hint" id="toolHint">画笔：单指点击或拖动修改；双指可缩放和移动画面。</div>
+</div>
 
+<div id="editPanel" class="panel">
+<div class="selection">当前颜色：<span id="selectedChip" class="selected-chip"></span><strong id="selectedCode">H7</strong></div>
+<div id="paletteGrid"></div>
+</div>
 
-<script type="module">
-import { db } from "./js/firebase.js";
-import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending, subscribeAllRecords } from "./js/safe-state.js?v=2.6.7";
-import { doc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-const ref = doc(db,"shop","main");
-const recordsRef = collection(db,"records");
+<div id="canvasWrap"><canvas id="canvas"></canvas></div>
+<button id="exportBtn" style="display:none">生成导出图片</button>
+</div>
 
-let homeState = null;
-let allRecords = [];
-installConnectionGuard();
+<div id="viewer">
+<div class="toolbar" style="margin-bottom:20px"><button id="backBtn">返回编辑</button><button id="saveBtn">保存到相册</button></div>
+<img id="previewImg" alt="拼豆图预览">
+</div>
+<div id="loading"><div class="spinner"></div><div>正在生成图片...</div></div>
+<script src="palette.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const upload=$("upload"),canvas=$("canvas"),ctx=canvas.getContext("2d"),pixelWidth=$("pixelWidth"),cellSize=$("cellSize"),colorComplexity=$("colorComplexity");
+const widthValue=$("widthValue"),cellValue=$("cellValue"),complexityValue=$("complexityValue"),previewImg=$("previewImg"),loading=$("loading"),editor=$("editor"),viewer=$("viewer");
+const paletteRgb=palette.map(p=>({...p,rgb:hexToRgb(p.hex)}));
+let img=null,sourcePixels=null,pixelGrid=[],generatedGrid=[],gridW=0,gridH=0,finalBlob=null,editing=false,selectedColor=palette.find(p=>p.code==="H7")||palette[0],isPainting=false,undoStack=[],redoStack=[],currentStroke=null,currentTool="brush",lastPaintedIndex=-1;
 
-loadLocalState().then(local=>{
-  if(local){
-    homeState = local;
-    updateHome();
+pixelWidth.oninput=()=>widthValue.textContent=pixelWidth.value;
+cellSize.oninput=()=>{cellValue.textContent=cellSize.value;if(pixelGrid.length)renderGrid()};
+colorComplexity.oninput=()=>{complexityValue.textContent=colorComplexity.value+"%"};
+colorComplexity.onchange=()=>{if(sourcePixels)buildGridFromSource()};
+$("showCode").onchange=()=>pixelGrid.length&&renderGrid();
+$("showGrid").onchange=()=>pixelGrid.length&&renderGrid();
+
+upload.onchange=e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{img=new Image();img.onload=()=>{canvas.width=img.width;canvas.height=img.height;ctx.drawImage(img,0,0)};img.src=reader.result};reader.readAsDataURL(file)};
+
+function hexToRgb(hex){hex=hex.replace("#","");return[parseInt(hex.slice(0,2),16),parseInt(hex.slice(2,4),16),parseInt(hex.slice(4,6),16)]}
+function colorDistanceSq(a,b){return(a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2}
+function nearestPaletteIndex(rgb,allowed=null){let best=0,bestDist=Infinity;const list=allowed||paletteRgb.map((_,i)=>i);for(const i of list){const d=colorDistanceSq(rgb,paletteRgb[i].rgb);if(d<bestDist){bestDist=d;best=i}}return best}
+
+function complexityToColorCount(percent,available){const min=Math.min(6,available);const curved=Math.pow(percent/100,1.7);return Math.max(min,Math.min(available,Math.round(min+(available-min)*curved)))}
+
+function chooseRepresentativeColors(baseIndexes,target){const freq=new Map();for(const i of baseIndexes)freq.set(i,(freq.get(i)||0)+1);const candidates=[...freq.keys()];if(target>=candidates.length)return candidates;
+const ranked=[...candidates].sort((a,b)=>freq.get(b)-freq.get(a));const selected=[ranked[0]];
+while(selected.length<target){let best=null,bestScore=-1;for(const c of candidates){if(selected.includes(c))continue;let minDist=Infinity;for(const s of selected)minDist=Math.min(minDist,colorDistanceSq(paletteRgb[c].rgb,paletteRgb[s].rgb));const score=minDist*Math.sqrt(freq.get(c));if(score>bestScore){bestScore=score;best=c}}if(best===null)break;selected.push(best)}return selected}
+
+function buildGridFromSource(){if(!sourcePixels)return;loading.style.display="flex";setTimeout(()=>{const base=[];for(let i=0;i<sourcePixels.length;i+=4)base.push(nearestPaletteIndex([sourcePixels[i],sourcePixels[i+1],sourcePixels[i+2]]));const available=new Set(base).size;const target=complexityToColorCount(parseInt(colorComplexity.value),available);const allowed=chooseRepresentativeColors(base,target);pixelGrid=base.map((baseIndex,pos)=>{const i=pos*4;return nearestPaletteIndex([sourcePixels[i],sourcePixels[i+1],sourcePixels[i+2]],allowed)});generatedGrid=[...pixelGrid];undoStack=[];redoStack=[];renderGrid();updateStats();loading.style.display="none"},30)}
+
+function renderGrid(){const cell=parseInt(cellSize.value);canvas.width=gridW*cell;canvas.height=gridH*cell;ctx.clearRect(0,0,canvas.width,canvas.height);ctx.font=`bold ${cell*.32}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle";
+for(let y=0;y<gridH;y++)for(let x=0;x<gridW;x++){const p=paletteRgb[pixelGrid[y*gridW+x]];ctx.fillStyle=p.hex;ctx.fillRect(x*cell,y*cell,cell,cell);if($("showGrid").checked){ctx.strokeStyle="#000";ctx.strokeRect(x*cell,y*cell,cell,cell)}if($("showCode").checked){const brightness=p.rgb[0]*.299+p.rgb[1]*.587+p.rgb[2]*.114;ctx.lineWidth=2;ctx.strokeStyle=brightness<140?"#000":"#fff";ctx.fillStyle=brightness<140?"#fff":"#000";ctx.strokeText(p.code,x*cell+cell/2,y*cell+cell/2);ctx.fillText(p.code,x*cell+cell/2,y*cell+cell/2)}}}
+
+function updateStats(){const used=new Set(pixelGrid);$("resultStats").textContent=`尺寸 ${gridW} × ${gridH}　总豆数 ${gridW*gridH}　使用 ${used.size} 色`;$("undoBtn").disabled=!undoStack.length;$("redoBtn").disabled=!redoStack.length}
+
+$("generateBtn").onclick=()=>{if(!img){alert("请先上传图片");return}const ratio=img.height/img.width;gridW=parseInt(pixelWidth.value);gridH=Math.max(1,Math.round(gridW*ratio));const temp=document.createElement("canvas");temp.width=gridW;temp.height=gridH;const tctx=temp.getContext("2d");tctx.drawImage(img,0,0,gridW,gridH);sourcePixels=tctx.getImageData(0,0,gridW,gridH).data;buildGridFromSource();$("resultPanel").style.display="block";$("exportBtn").style.display="block"};
+
+function setupPalette(){const grid=$("paletteGrid");for(const p of palette){const b=document.createElement("button");b.className="swatch";b.textContent=p.code;b.style.background=p.hex;const rgb=hexToRgb(p.hex),brightness=rgb[0]*.299+rgb[1]*.587+rgb[2]*.114;b.style.color=brightness<140?"#fff":"#000";b.onclick=()=>selectColor(p,b);grid.appendChild(b)}selectColor(selectedColor,grid.querySelectorAll(".swatch")[palette.indexOf(selectedColor)])}
+function selectColor(p,button){selectedColor=p;$("selectedChip").style.background=p.hex;$("selectedCode").textContent=p.code;document.querySelectorAll(".swatch").forEach(x=>x.classList.remove("selected"));if(button)button.classList.add("selected")}
+setupPalette();
+
+$("editToggle").onclick=()=>{editing=!editing;$("editToggle").classList.toggle("active",editing);$("editToggle").textContent=editing?"退出编辑模式":"开启编辑模式";$("editPanel").style.display=editing?"block":"none";updateCursor()};
+const toolHints={brush:"画笔：单指点击或拖动修改；双指可缩放和移动画面。",eraser:"橡皮擦：把像素恢复为本次自动生成时的原始颜色。",eyedropper:"吸管：点击图中的像素，直接选取该色号。",fill:"油漆桶：填充与点击位置相连的同色区域。",replace:"整色替换：把画面中所有与点击位置相同的颜色替换为当前颜色。",pan:"拖动画布：按住并拖动查看放大后的画面。"};
+function setTool(tool){currentTool=tool;document.querySelectorAll(".tool").forEach(b=>b.classList.toggle("active",b.dataset.tool===tool));$("toolHint").textContent=toolHints[tool];updateCursor()}
+document.querySelectorAll(".tool").forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
+function updateCursor(){canvas.style.cursor=!editing?"default":currentTool==="pan"?"grab":currentTool==="eyedropper"?"copy":currentTool==="fill"||currentTool==="replace"?"cell":"crosshair"}
+function applyZoom(){const z=parseInt($("zoomRange").value);canvas.style.width=(canvas.width*z/100)+"px";canvas.style.height=(canvas.height*z/100)+"px"}
+const originalRenderGrid=renderGrid;renderGrid=function(){originalRenderGrid();applyZoom()};
+function eventCell(e){const rect=canvas.getBoundingClientRect();const x=Math.floor((e.clientX-rect.left)/rect.width*gridW),y=Math.floor((e.clientY-rect.top)/rect.height*gridH);if(x<0||y<0||x>=gridW||y>=gridH)return null;return{x,y,index:y*gridW+x}}
+function beginAction(){currentStroke={changes:new Map()};lastPaintedIndex=-1}
+function recordChange(index,newIndex){const oldIndex=pixelGrid[index];if(oldIndex===newIndex)return;if(!currentStroke)beginAction();if(!currentStroke.changes.has(index))currentStroke.changes.set(index,{index,oldIndex,newIndex});else currentStroke.changes.get(index).newIndex=newIndex;pixelGrid[index]=newIndex}
+function commitAction(){if(!currentStroke||!currentStroke.changes.size){currentStroke=null;return}undoStack.push([...currentStroke.changes.values()]);if(undoStack.length>200)undoStack.shift();redoStack=[];currentStroke=null;renderGrid();updateStats()}
+function selectedPaletteIndex(){return palette.findIndex(p=>p.code===selectedColor.code)}
+function paintCell(cell){if(!cell||cell.index===lastPaintedIndex)return;lastPaintedIndex=cell.index;const newIndex=currentTool==="eraser"?generatedGrid[cell.index]:selectedPaletteIndex();recordChange(cell.index,newIndex);renderGrid();updateStats()}
+function pickColor(cell){const p=palette[pixelGrid[cell.index]];const buttons=[...document.querySelectorAll(".swatch")];selectColor(p,buttons[palette.indexOf(p)])}
+function floodFill(startIndex,newIndex){const target=pixelGrid[startIndex];if(target===newIndex)return;beginAction();const q=[startIndex],seen=new Uint8Array(pixelGrid.length);seen[startIndex]=1;while(q.length){const i=q.pop();if(pixelGrid[i]!==target)continue;recordChange(i,newIndex);const x=i%gridW,y=Math.floor(i/gridW);for(const n of [x>0?i-1:-1,x<gridW-1?i+1:-1,y>0?i-gridW:-1,y<gridH-1?i+gridW:-1])if(n>=0&&!seen[n]&&pixelGrid[n]===target){seen[n]=1;q.push(n)}}commitAction()}
+function replaceColor(target,newIndex){if(target===newIndex)return;beginAction();for(let i=0;i<pixelGrid.length;i++)if(pixelGrid[i]===target)recordChange(i,newIndex);commitAction()}
+const wrap=$("canvasWrap");
+let panStart=null,renderQueued=false,lastStrokeCell=null;
+const activePointers=new Map();
+let gesture=null,suppressPointerUntil=0;
+
+function requestGridRender(withStats=true){
+  if(renderQueued)return;
+  renderQueued=true;
+  requestAnimationFrame(()=>{renderQueued=false;renderGrid();if(withStats)updateStats()});
+}
+function rollbackCurrentAction(){
+  if(currentStroke){
+    for(const c of currentStroke.changes.values())pixelGrid[c.index]=c.oldIndex;
+    currentStroke=null;
   }
+  isPainting=false;lastPaintedIndex=-1;lastStrokeCell=null;
+  requestGridRender();
+}
+function lineCells(a,b){
+  const cells=[];let x0=a.x,y0=a.y,x1=b.x,y1=b.y;
+  const dx=Math.abs(x1-x0),sx=x0<x1?1:-1,dy=-Math.abs(y1-y0),sy=y0<y1?1:-1;
+  let err=dx+dy;
+  while(true){cells.push({x:x0,y:y0,index:y0*gridW+x0});if(x0===x1&&y0===y1)break;const e2=2*err;if(e2>=dy){err+=dy;x0+=sx}if(e2<=dx){err+=dx;y0+=sy}}
+  return cells;
+}
+function paintPath(cell){
+  if(!cell)return;
+  const cells=lastStrokeCell?lineCells(lastStrokeCell,cell):[cell];
+  for(const c of cells){
+    if(c.index===lastPaintedIndex)continue;
+    lastPaintedIndex=c.index;
+    const newIndex=currentTool==="eraser"?generatedGrid[c.index]:selectedPaletteIndex();
+    recordChange(c.index,newIndex);
+  }
+  lastStrokeCell=cell;
+  requestGridRender();
+}
+function pointerCenter(points){
+  const arr=[...points.values()];
+  return{x:(arr[0].x+arr[1].x)/2,y:(arr[0].y+arr[1].y)/2};
+}
+function pointerDistance(points){
+  const arr=[...points.values()],dx=arr[0].x-arr[1].x,dy=arr[0].y-arr[1].y;
+  return Math.hypot(dx,dy);
+}
+function setZoomAround(nextZoom,oldCenter,newCenter=oldCenter){
+  nextZoom=Math.max(50,Math.min(300,nextZoom));
+  const oldRect=canvas.getBoundingClientRect();
+  if(!oldRect.width||!oldRect.height)return;
+  const nx=(oldCenter.x-oldRect.left)/oldRect.width,ny=(oldCenter.y-oldRect.top)/oldRect.height;
+  $("zoomRange").value=Math.round(nextZoom);
+  $("zoomValue").textContent=Math.round(nextZoom)+"%";
+  applyZoom();
+  const newRect=canvas.getBoundingClientRect();
+  wrap.scrollLeft+=newRect.left+nx*newRect.width-newCenter.x;
+  wrap.scrollTop+=newRect.top+ny*newRect.height-newCenter.y;
+}
+function beginGesture(){
+  if(activePointers.size<2)return;
+  rollbackCurrentAction();
+  panStart=null;
+  const center=pointerCenter(activePointers),distance=pointerDistance(activePointers);
+  gesture={lastCenter:center,lastDistance:Math.max(1,distance),zoom:parseFloat($("zoomRange").value)};
+  suppressPointerUntil=performance.now()+180;
+  canvas.style.cursor="grabbing";
+}
+function updateGesture(){
+  if(!gesture||activePointers.size<2)return;
+  const center=pointerCenter(activePointers),distance=Math.max(1,pointerDistance(activePointers));
+  const next=gesture.zoom*(distance/gesture.lastDistance);
+  setZoomAround(next,gesture.lastCenter,center);
+  gesture.zoom=parseFloat($("zoomRange").value);gesture.lastDistance=distance;gesture.lastCenter=center;
+}
+function finishGesture(){
+  gesture=null;suppressPointerUntil=performance.now()+180;updateCursor();
+}
+function beginPan(e){
+  panStart={pointerId:e.pointerId,x:e.clientX,y:e.clientY,left:wrap.scrollLeft,top:wrap.scrollTop};
+  canvas.style.cursor="grabbing";canvas.setPointerCapture(e.pointerId);
+}
+function handleToolDown(e){
+  const cell=eventCell(e);if(!cell)return;
+  if(currentTool==="eyedropper"){pickColor(cell);setTool("brush");return}
+  if(currentTool==="fill"){floodFill(cell.index,selectedPaletteIndex());return}
+  if(currentTool==="replace"){replaceColor(pixelGrid[cell.index],selectedPaletteIndex());return}
+  isPainting=true;beginAction();lastStrokeCell=null;canvas.setPointerCapture(e.pointerId);paintPath(cell);
+}
+
+canvas.addEventListener("pointerdown",e=>{
+  if(!editing||!pixelGrid.length)return;
+  e.preventDefault();
+  activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
+  if(activePointers.size===2){beginGesture();return}
+  if(activePointers.size>2)return;
+  if(performance.now()<suppressPointerUntil)return;
+  if(currentTool==="pan"||e.button===1||e.button===2){beginPan(e);return}
+  handleToolDown(e);
 });
-
-loadLocalRecords().then(localRecords=>{
-  allRecords = mergeRecordLists(allRecords, localRecords);
-  updateHome();
+canvas.addEventListener("pointermove",e=>{
+  if(activePointers.has(e.pointerId))activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
+  if(gesture){e.preventDefault();updateGesture();return}
+  if(panStart&&panStart.pointerId===e.pointerId){e.preventDefault();wrap.scrollLeft=panStart.left-(e.clientX-panStart.x);wrap.scrollTop=panStart.top-(e.clientY-panStart.y);return}
+  if(isPainting){e.preventDefault();paintPath(eventCell(e))}
 });
-
-window.addEventListener("chiptune-online-change",e=>{
-  if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
-});
-
-
-function getTodayDate(){
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+function endPointer(e){
+  activePointers.delete(e.pointerId);
+  if(gesture){if(activePointers.size<2)finishGesture();return}
+  if(panStart&&panStart.pointerId===e.pointerId){panStart=null;updateCursor()}
+  if(isPainting){isPainting=false;lastStrokeCell=null;commitAction()}
 }
+canvas.addEventListener("pointerup",endPointer);
+canvas.addEventListener("pointercancel",e=>{activePointers.delete(e.pointerId);if(gesture&&activePointers.size<2)finishGesture();if(isPainting)rollbackCurrentAction();panStart=null;updateCursor()});
+canvas.addEventListener("contextmenu",e=>e.preventDefault());
 
-function getRecordBusinessDate(r){
-  if(r.businessDate) return r.businessDate;
+$("zoomRange").oninput=()=>{
+  const rect=wrap.getBoundingClientRect(),center={x:rect.left+rect.width/2,y:rect.top+rect.height/2};
+  setZoomAround(parseInt($("zoomRange").value),center,center);
+};
+function applyHistoryAction(action,useNew){for(const c of action)pixelGrid[c.index]=useNew?c.newIndex:c.oldIndex;renderGrid();updateStats()}
+$("undoBtn").onclick=()=>{const action=undoStack.pop();if(!action)return;applyHistoryAction(action,false);redoStack.push(action);updateStats()};
+$("redoBtn").onclick=()=>{const action=redoStack.pop();if(!action)return;applyHistoryAction(action,true);undoStack.push(action);updateStats()};
+$("resetBtn").onclick=()=>{if(!generatedGrid.length)return;beginAction();for(let i=0;i<pixelGrid.length;i++)if(pixelGrid[i]!==generatedGrid[i])recordChange(i,generatedGrid[i]);commitAction()};
 
-  const ts =
-    r.timestamp ||
-    r.closedAt ||
-    r.paidAt ||
-    r.time ||
-    r.date;
+function drawInfoPanel(baseCanvas){const used=[...new Set(pixelGrid)].map(i=>paletteRgb[i].code).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));const padding=30,infoFont=28,lineHeight=42,maxWidth=baseCanvas.width-padding*2;const probe=document.createElement("canvas").getContext("2d");probe.font=`${infoFont}px sans-serif`;const lines=[];let current="";for(const word of used){const test=current+word+" ";if(probe.measureText(test).width>maxWidth&&current){lines.push(current);current=word+" "}else current=test}if(current.trim())lines.push(current);const infoHeight=220+lines.length*lineHeight,temp=document.createElement("canvas");temp.width=baseCanvas.width;temp.height=baseCanvas.height+infoHeight;const t=temp.getContext("2d");t.fillStyle="#000";t.fillRect(0,0,temp.width,temp.height);t.drawImage(baseCanvas,0,0);t.fillStyle="#fff";t.font=`${infoFont}px sans-serif`;let y=baseCanvas.height+50;t.fillText(`尺寸：${gridW} x ${gridH}`,padding,y);y+=lineHeight;t.fillText(`总像素：${gridW*gridH}`,padding,y);y+=lineHeight*1.5;t.fillText(`使用色号（${used.length}色）：`,padding,y);y+=lineHeight;for(const line of lines){t.fillText(line,padding,y);y+=lineHeight}return temp}
 
-  if(!ts) return "";
-
-  const d = new Date(ts);
-  if(isNaN(d.getTime())) return "";
-
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-onSnapshot(ref,async snap=>{
-  if(!snap.exists()) return;
-
-  homeState = await reconcileCloudState(snap.data());
-  updateHome();
-});
-
-try{
-  subscribeAllRecords({
-    db,
-    onChange:list=>{ allRecords=list; updateHome(); }
-  });
-}catch(err){
-  console.warn("首页账单监听启动失败，不影响导航",err);
-}
-
-function updateHome(){
-  if(!homeState) return;
-
-  const tables = homeState.tables || [];
-  const bookings = homeState.bookings || [];
-  const records = allRecords;
-
-  const usingCount = tables.filter(t=>t.start).length;
-  const freeCount = tables.length - usingCount;
-
-  const today = getTodayDate();
-
-  const todayBookingCount = bookings.filter(b=>{
-    return b.date === today;
-  }).length;
-
-  const todayRevenue = records
-    .filter(r=>{
-
-      const key = getRecordBusinessDate(r);
-      return key === today;
-
-
-    })
-    .reduce((sum,r)=>sum + sumPaymentsJPY(r),0);
-
-  document.getElementById("homeUsingCount").innerText = `${usingCount}桌`;
-  document.getElementById("homeFreeCount").innerText = `${freeCount}桌`;
-  document.getElementById("homeBookingCount").innerText = `${todayBookingCount}组`;
-  document.getElementById("homeRevenue").innerText = `¥${todayRevenue.toLocaleString()}`;
-}
-
-const activeCard = localStorage.getItem("home_active");
-
-if(activeCard){
-  document.querySelectorAll(".home-card").forEach(btn=>{
-    btn.classList.remove("primary");
-  });
-
-  document.getElementById(activeCard)?.classList.add("primary");
-}
-
-function normalizePayments(r){
-  if(Array.isArray(r.payments)) return r.payments;
-
-  return [{
-    amountJPY:Number(r.totalJPY || r.jpy || 0)
-  }];
-}
-
-function sumPaymentsJPY(r){
-  return normalizePayments(r)
-    .reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
-}
-
+$("exportBtn").onclick=async()=>{if(!pixelGrid.length)return;loading.style.display="flex";await new Promise(r=>setTimeout(r,30));const exportCanvas=drawInfoPanel(canvas);previewImg.src=exportCanvas.toDataURL("image/png");finalBlob=await new Promise(resolve=>exportCanvas.toBlob(resolve,"image/png"));editor.style.display="none";viewer.style.display="block";loading.style.display="none"};
+$("saveBtn").onclick=async()=>{if(!finalBlob){alert("请先生成图片");return}const file=new File([finalBlob],"mard221_pixel.png",{type:"image/png"});if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:"MARD221 Pixel"})}catch(e){console.log(e)}}else{alert("当前浏览器不支持直接保存，请长按预览图保存。")} };
+$("backBtn").onclick=()=>{viewer.style.display="none";editor.style.display="block"};
 </script>
-
 </body>
 </html>
