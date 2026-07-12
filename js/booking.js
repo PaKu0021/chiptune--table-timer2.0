@@ -64,8 +64,13 @@ const BOOKING_COLORS = [
 ];
 
 function getNextBookingColor(){
-  const count = (state.bookings || []).length;
-  return BOOKING_COLORS[count % BOOKING_COLORS.length];
+  const count = Array.isArray(state?.bookings)
+    ? state.bookings.length
+    : 0;
+
+  return BOOKING_COLORS[
+    count % BOOKING_COLORS.length
+  ];
 }
 
 function makeGroupId(){
@@ -73,8 +78,15 @@ function makeGroupId(){
 }
 
 function getGroupById(groupId){
-  if(!state.groups) state.groups = [];
-  return state.groups.find(g=>String(g.id) === String(groupId));
+  if(!state) return null;
+
+  if(!Array.isArray(state.groups)){
+    state.groups = [];
+  }
+
+  return state.groups.find(
+    g=>String(g?.id) === String(groupId)
+  ) || null;
 }
 
 function createOrUpdateGroup({
@@ -84,7 +96,9 @@ function createOrUpdateGroup({
   tableIndexes = [],
   bookingId = null
 }){
-  if(!state.groups) state.groups = [];
+  if(!Array.isArray(state.groups)){
+    state.groups = [];
+  }
 
   let group = getGroupById(groupId);
 
@@ -102,31 +116,53 @@ function createOrUpdateGroup({
     state.groups.push(group);
   }
 
-  group.name = groupName || group.name;
-  group.color = groupColor || group.color;
+  group.name =
+    groupName ||
+    group.name ||
+    "未命名组";
+
+  group.color =
+    groupColor ||
+    group.color ||
+    getNextBookingColor();
 
   if(!Array.isArray(group.tableIndexes)){
-  group.tableIndexes = [];
-}
+    group.tableIndexes = [];
+  }
 
-if(!Array.isArray(group.bookingIds)){
-  group.bookingIds = [];
-}
+  if(!Array.isArray(group.bookingIds)){
+    group.bookingIds = [];
+  }
 
-if(!Array.isArray(group.payments)){
-  group.payments = [];
-}
+  if(!Array.isArray(group.payments)){
+    group.payments = [];
+  }
 
-  group.tableIndexes = Array.from(new Set([
-    ...group.tableIndexes.map(Number),
-    ...tableIndexes.map(Number)
-  ]));
+  group.tableIndexes = Array.from(
+    new Set([
+      ...group.tableIndexes
+        .map(Number)
+        .filter(Number.isFinite),
 
-  if(bookingId){
-    group.bookingIds = Array.from(new Set([
-      ...group.bookingIds.map(String),
-      String(bookingId)
-    ]));
+      ...tableIndexes
+        .map(Number)
+        .filter(Number.isFinite)
+    ])
+  );
+
+  if(
+    bookingId !== null &&
+    bookingId !== undefined
+  ){
+    group.bookingIds = Array.from(
+      new Set([
+        ...group.bookingIds
+          .map(String)
+          .filter(Boolean),
+
+        String(bookingId)
+      ])
+    );
   }
 
   group.updatedAt = Date.now();
@@ -1184,7 +1220,7 @@ function drawMoveLines(pointerX = null, pointerY = null){
   svg.replaceChildren(...nodes);
 }
 
-function confirmMoveTable(){
+async function confirmMoveTable(){
 
   if(moveMode === "running"){
   confirmMoveRunningTable();
@@ -1249,6 +1285,20 @@ function confirmMoveTable(){
     return pair ? pair.to : i;
   });
 
+  const group = getGroupById(b.groupId);
+
+if(group){
+  group.tableIndexes = [...b.tableIndexes]
+    .map(Number)
+    .filter(Number.isFinite);
+
+  group.tableIndexes = Array.from(
+    new Set(group.tableIndexes)
+  );
+
+  group.updatedAt = Date.now();
+}
+
   if(b.checkedInTableIndexes){
     b.checkedInTableIndexes = b.checkedInTableIndexes
       .map(Number)
@@ -1260,7 +1310,7 @@ function confirmMoveTable(){
 
   delete b.tableIndex;
 
-  save();
+  await save("move_booking_table");
   closeMoveTableModal();
   renderBookingGrid();
   renderList();
@@ -1283,6 +1333,19 @@ async function confirmMoveRunningTable(){
   const fromIndex = Number(pair.from);
   const toIndex = Number(pair.to);
 
+  if(
+    !Number.isInteger(fromIndex) ||
+    !Number.isInteger(toIndex)
+  ){
+    alert("桌位编号无效，请重新选择");
+    return;
+  }
+
+  if(fromIndex === toIndex){
+    alert("新桌位不能和原桌位相同");
+    return;
+  }
+
   const fromTable = state.tables[fromIndex];
   const toTable = state.tables[toIndex];
 
@@ -1296,48 +1359,132 @@ async function confirmMoveRunningTable(){
     return;
   }
 
-  if(!toTable || toTable.start){
-    alert("目标桌位正在使用中，不能移动");
+  if(!toTable){
+    alert("目标桌位不存在");
     return;
   }
 
-  if(!confirm(`确认把 ${fromTable.name} 移动到 ${toTable.name} 吗？`)){
+  if(toTable.start){
+    alert(`${toTable.name} 正在使用中，不能移动`);
+    return;
+  }
+
+  if(
+    !confirm(
+      `确认把 ${fromTable.name} 移动到 ${toTable.name} 吗？`
+    )
+  ){
     return;
   }
 
   const oldFromName = fromTable.name;
   const oldToName = toTable.name;
 
-  state.tables[toIndex] = {
-    ...fromTable,
-    name: oldToName
-  };
+  try{
+    /*
+     * 移动桌位状态。
+     */
+    state.tables[toIndex] = {
+      ...fromTable,
+      name:oldToName,
+      lastAction:"move_table",
+      movedFromIndex:fromIndex,
+      movedAt:Date.now()
+    };
 
-  state.tables[fromIndex] = resetTable(oldFromName);
+    state.tables[fromIndex] = resetTable(oldFromName);
 
-  if(state.tables[toIndex].recordId){
-    const snap = await getDoc(doc(db,"records",state.tables[toIndex].recordId));
+    /*
+     * 更新分组中的桌位编号。
+     */
+    const group = getGroupById(fromTable.groupId);
 
-    if(snap.exists()){
-      const r = snap.data();
-      r.tableName = oldToName;
-      await saveRecordSafely({db,ref,record:r});
+    if(group){
+      if(!Array.isArray(group.tableIndexes)){
+        group.tableIndexes = [];
+      }
+
+      group.tableIndexes = group.tableIndexes
+        .map(Number)
+        .map(index =>
+          index === fromIndex
+            ? toIndex
+            : index
+        );
+
+      group.tableIndexes = Array.from(
+        new Set(group.tableIndexes)
+      );
+
+      group.updatedAt = Date.now();
     }
+
+    /*
+     * 更新对应收银记录中的桌位名称。
+     */
+    const movedTable = state.tables[toIndex];
+
+    if(movedTable.recordId){
+      const snap = await getDoc(
+        doc(db,"records",movedTable.recordId)
+      );
+
+      if(snap.exists()){
+        const record = {
+          id:snap.id,
+          ...snap.data()
+        };
+
+        record.tableName = oldToName;
+        record.tableIndex = toIndex;
+        record.previousTableName = oldFromName;
+        record.updatedAt = Date.now();
+
+        await saveRecordSafely({
+          db,
+          ref,
+          record
+        });
+      }
+    }
+
+    await save("move_walkin_table");
+
+    closeMoveTableModal();
+    renderBookingGrid();
+    renderList();
+
+    alert(`已移动到 ${oldToName}`);
+
+  }catch(error){
+    console.error("移动 Walk-in 桌位失败",error);
+
+    alert(
+      "移动桌位失败：\n" +
+      (error?.message || String(error))
+    );
   }
-
-  save();
-  closeMoveTableModal();
-  renderBookingGrid();
-  renderList();
-
-  alert(`已移动到 ${oldToName}`);
 }
 
 function closeMoveTableModal(){
   document.getElementById("moveTableModalBg").style.display = "none";
+
   moveBookingId = null;
+  moveRunningFromIndex = null;
+  moveMode = "booking";
   movePairs = [];
   draggingMoveFrom = null;
+
+  window.removeEventListener("pointermove", moveDragLine);
+  window.removeEventListener("pointerup", endMoveDrag);
+
+  if(dragTempLine){
+    dragTempLine.remove();
+    dragTempLine = null;
+  }
+
+  moveAreaRect = null;
+  dragFromCenter = null;
 }
 
 function startSelectSlot(e,tableIndex,rowIndex){
@@ -1635,10 +1782,23 @@ async function confirmGridBooking(){
         document.getElementById("modalPackage")?.value || 0
       );
 
-      const now = Date.now();
-      const walkinColor = getNextBookingColor();
+const now = Date.now();
+const walkinColor = getNextBookingColor();
 
-      for(const idx of tableIndexes){
+const walkinGroupId = makeGroupId();
+
+const walkinGroupName = name
+  ? `${name}一组`
+  : "Walk-in一组";
+
+createOrUpdateGroup({
+  groupId: walkinGroupId,
+  groupName: walkinGroupName,
+  groupColor: walkinColor,
+  tableIndexes
+});
+
+for(const idx of tableIndexes){
         const t = state.tables[idx];
 
         if(!t){
@@ -1648,9 +1808,14 @@ async function confirmGridBooking(){
         }
 
         t.type = "walkin";
-        t.activeColor = walkinColor;
-        t.bookingId = null;
-        t.packageIndex = packageIndex;
+
+t.groupId = walkinGroupId;
+t.groupColor = walkinColor;
+t.groupName = walkinGroupName;
+
+t.activeColor = walkinColor;
+t.bookingId = null;
+t.packageIndex = packageIndex;        
         t.pay = "";
         t.currency = "日元";
         t.customer = {
