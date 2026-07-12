@@ -1,10 +1,10 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.7.1";
+import { db } from "./firebase.js?v=2.7.2";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.1";
-/*import { formatTime } from "./common.js?v=2.7.1";*/
-import { resetTable, formatTime } from "./common.js?v=2.7.1";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.1";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.2";
+/*import { formatTime } from "./common.js?v=2.7.2";*/
+import { resetTable, formatTime } from "./common.js?v=2.7.2";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.2";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -2723,6 +2723,36 @@ function closeGroupManager(){
   editingGroupId = "";
 }
 
+async function syncTableRecordGroup(tableIndex){
+  const table = state.tables?.[Number(tableIndex)];
+  if(!table?.recordId) return;
+
+  let record = getLocalRecordSync(table.recordId);
+  if(!record){
+    try{
+      record = await Promise.race([
+        getTableRecord(table),
+        new Promise(resolve=>setTimeout(()=>resolve(null),1200))
+      ]);
+    }catch(_error){
+      record = null;
+    }
+  }
+  if(!record) return;
+
+  if(table.groupId){
+    record.groupId = String(table.groupId);
+    record.groupName = String(table.groupName || "未命名组");
+    record.groupColor = String(table.groupColor || table.activeColor || "#B7E4C7");
+  }else{
+    delete record.groupId;
+    delete record.groupName;
+    delete record.groupColor;
+  }
+  record.updatedAt = Date.now();
+  await saveRecordSafely({db,ref,record});
+}
+
 async function saveGroupManager(){
   const button = document.getElementById("groupManagerSave");
   const originalText = button?.innerText || "保存组";
@@ -2733,6 +2763,15 @@ async function saveGroupManager(){
 
     const id = editingGroupId || await allocateGroupId(db,state.groups || []);
     if(!id) throw new Error("无法生成组 ID");
+
+    // 保存变更前的成员范围。除了新选中的桌，也要同步从原组移出的桌位账单。
+    const affectedIndexes = new Set(indexes);
+    ensureGroups(state).forEach(g=>{
+      const oldIndexes = (g.tableIndexes || []).map(Number);
+      if(g.id === id || oldIndexes.some(i=>indexes.includes(i))){
+        oldIndexes.forEach(i=>affectedIndexes.add(i));
+      }
+    });
 
     // 从其他组移除被重新分配的桌位，实现拆组与重组。
     ensureGroups(state).forEach(g=>{
@@ -2754,8 +2793,11 @@ async function saveGroupManager(){
     });
     syncGroupReferences(state,group);
 
-    // 本地优先保存；即使云端暂时不可用，也会进入安全同步队列。
+    // 组与桌位状态保存后，将同一批桌位现有账单的 groupId 一并更新。
+    // 今日账单读取的是 records 集合，不能只修改 shop/main 中的桌位。
     await save("manage_group");
+    await Promise.all([...affectedIndexes].map(index=>syncTableRecordGroup(index)));
+
     closeGroupManager();
     render();
   }catch(error){

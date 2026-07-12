@@ -1,7 +1,7 @@
-import { db } from "./firebase.js?v=2.7.1";
+import { db } from "./firebase.js?v=2.7.2";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.1";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.2";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
