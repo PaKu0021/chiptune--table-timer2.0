@@ -91,56 +91,29 @@ function toJPY(r){
   return 0;
 }
 
+function buildCurrencySummary(rows){
+  const channels={"现金":{currency:"日元",amount:0},"PayPay":{currency:"日元",amount:0},"微信":{currency:"人民币",amount:0},"支付宝":{currency:"人民币",amount:0},"未记录":{currency:"日元",amount:0}};
+  let actualJPY=0, actualRMB=0;
+  rows.forEach(r=>normalizePayments(r).forEach(p=>{
+    const pay=p.pay || r.pay || "未记录"; const rmb=isRmbPayment(p,r); const amount=rmb?paymentRMB(p):Number(p.amountJPY||0);
+    if(!channels[pay]) channels[pay]={currency:rmb?"人民币":"日元",amount:0};
+    channels[pay].currency=rmb?"人民币":"日元"; channels[pay].amount+=amount;
+    if(rmb) actualRMB+=amount; else actualJPY+=amount;
+  }));
+  const jpyToRmb=Math.floor(actualJPY*RATE), rmbToJpy=Math.floor(actualRMB/RATE);
+  return {channels,actualJPY,actualRMB,jpyToRmb,rmbToJpy,convertedJPY:actualJPY+rmbToJpy,convertedRMB:actualRMB+jpyToRmb};
+}
 function renderSummary(rows){
-  const pays = {
-    "现金":0,
-    "PayPay":0,
-    "微信":0,
-    "支付宝":0,
-    "未记录":0
-  };
-
-  let totalJPY = 0;
-  let totalRMB = 0;
-
-  rows.forEach(r=>{
-    normalizePayments(r).forEach(p=>{
-      const pay = p.pay || "未记录";
-      const jpy = Number(p.amountJPY || 0);
-
-      if(!pays[pay]) pays[pay] = 0;
-
-      pays[pay] += jpy;
-      totalJPY += jpy;
-
-      if(isRmbPayment(p,r)){
-        totalRMB += paymentRMB(p);
-      }
-    });
-  });
-
-  document.getElementById("printSummary").innerHTML = `
-    <table class="record-table">
-      <tbody>
-        ${Object.keys(pays).map(k=>`
-          <tr>
-            <td><b>${k}</b></td>
-            <td>¥${Math.floor(pays[k]).toLocaleString()}</td>
-          </tr>
-        `).join("")}
-
-        <tr>
-          <td><b>日元总计</b></td>
-          <td><b>¥${Math.floor(totalJPY).toLocaleString()}</b></td>
-        </tr>
-
-        <tr>
-          <td><b>人民币总计</b></td>
-          <td><b>¥${Math.floor(totalRMB).toLocaleString()}</b></td>
-        </tr>
-      </tbody>
-    </table>
-  `;
+  const s=buildCurrencySummary(rows);
+  document.getElementById("printSummary").innerHTML=`<table class="record-table"><tbody>
+    ${Object.entries(s.channels).map(([name,v])=>`<tr><td><b>${name}</b></td><td>${v.currency==="人民币"?"人民币 ":""}¥${Math.floor(v.amount).toLocaleString()}</td></tr>`).join("")}
+    <tr><td><b>日元实收总计</b></td><td><b>¥${Math.floor(s.actualJPY).toLocaleString()}</b></td></tr>
+    <tr><td><b>日元实收对应人民币参考</b></td><td><b>人民币 ¥${Math.floor(s.jpyToRmb).toLocaleString()}</b></td></tr>
+    <tr><td><b>人民币实收总计</b></td><td><b>人民币 ¥${Math.floor(s.actualRMB).toLocaleString()}</b></td></tr>
+    <tr><td><b>人民币实收对应日元参考</b></td><td><b>¥${Math.floor(s.rmbToJpy).toLocaleString()}</b></td></tr>
+    <tr><td><b>换算日元总收入</b></td><td><b>¥${Math.floor(s.convertedJPY).toLocaleString()}</b></td></tr>
+    <tr><td><b>换算人民币总收入</b></td><td><b>人民币 ¥${Math.floor(s.convertedRMB).toLocaleString()}</b></td></tr>
+  </tbody></table>`;
 }
 
 document.getElementById("printTitle").innerText =

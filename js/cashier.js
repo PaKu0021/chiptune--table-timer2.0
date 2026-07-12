@@ -1,6 +1,6 @@
-import { db } from "./firebase.js?v=2.7.3";
+import { db } from "./firebase.js?v=2.7.4";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.3";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.4";
 
 
 import {
@@ -236,6 +236,44 @@ function getPaySummary(r){
 }
 
 
+function buildCurrencySummary(rows){
+  const channels = {
+    "现金":{currency:"日元",amount:0},
+    "PayPay":{currency:"日元",amount:0},
+    "微信":{currency:"人民币",amount:0},
+    "支付宝":{currency:"人民币",amount:0},
+    "未记录":{currency:"日元",amount:0}
+  };
+  let actualJPY = 0;
+  let actualRMB = 0;
+  rows.forEach(r=>{
+    normalizePayments(r).forEach(p=>{
+      const pay = p.pay || r.pay || "未记录";
+      const rmb = isRmbPayment(p,r);
+      const amount = rmb ? paymentRMB(p) : paymentJPY(p);
+      if(!channels[pay]) channels[pay] = {currency:rmb ? "人民币" : "日元",amount:0};
+      channels[pay].currency = rmb ? "人民币" : "日元";
+      channels[pay].amount += amount;
+      if(rmb) actualRMB += amount; else actualJPY += amount;
+    });
+  });
+  const jpyToRmb = Math.floor(actualJPY * RATE);
+  const rmbToJpy = Math.floor(actualRMB / RATE);
+  return {
+    channels, actualJPY, actualRMB, jpyToRmb, rmbToJpy,
+    convertedJPY: actualJPY + rmbToJpy,
+    convertedRMB: actualRMB + jpyToRmb
+  };
+}
+
+function channelSummaryText(summary){
+  return Object.entries(summary.channels)
+    .filter(([,v])=>Number(v.amount)!==0)
+    .map(([name,v])=>`${name} ${v.currency === "人民币" ? "人民币 " : ""}¥${Math.floor(v.amount).toLocaleString()}`)
+    .join(" / ") || "暂无";
+}
+
+
 function toJPY(r){
   if(Array.isArray(r.payments)){
     return sumPaymentsJPY(r);
@@ -406,53 +444,19 @@ function renderCashierButtons(){
 }
 
 function renderSummary(rows){
-  const pays = {
-    "现金":0,
-    "PayPay":0,
-    "微信":0,
-    "支付宝":0,
-    "未记录":0
-  };
-
-  let totalJPY = 0;
-  let totalRMB = 0;
-
-rows.forEach(r=>{
-  normalizePayments(r).forEach(p=>{
-    const pay = p.pay || "未记录";
-    const jpy = paymentJPY(p);
-
-    if(!pays[pay]) pays[pay] = 0;
-
-    pays[pay] += jpy;
-    totalJPY += jpy;
-
-    if(isRmbPayment(p,r)){
-      totalRMB += paymentRMB(p);
-    }
-  });
-});
-
+  const summary = buildCurrencySummary(rows);
   document.getElementById("cashierSummary").innerHTML = `
-    <table class="record-table">
-      <tbody>
-        ${Object.keys(pays).map(k=>`
-          <tr>
-            <td><b>${k}</b></td>
-            <td>¥${Math.floor(pays[k]).toLocaleString()}</td>
-          </tr>
-        `).join("")}
-        <tr>
-          <td><b>日元总计</b></td>
-          <td><b>¥${Math.floor(totalJPY).toLocaleString()}</b></td>
-        </tr>
-        <tr>
-          <td><b>人民币参考</b></td>
-          <td><b>¥${Math.floor(totalRMB).toLocaleString()}</b></td>
-        </tr>
-      </tbody>
-    </table>
-  `;
+    <table class="record-table"><tbody>
+      ${Object.entries(summary.channels).map(([name,v])=>`
+        <tr><td><b>${name}</b></td><td>${v.currency === "人民币" ? "人民币 " : ""}¥${Math.floor(v.amount).toLocaleString()}</td></tr>
+      `).join("")}
+      <tr><td><b>日元实收总计</b></td><td><b>¥${Math.floor(summary.actualJPY).toLocaleString()}</b></td></tr>
+      <tr><td><b>日元实收对应人民币参考</b></td><td><b>人民币 ¥${Math.floor(summary.jpyToRmb).toLocaleString()}</b></td></tr>
+      <tr><td><b>人民币实收总计</b></td><td><b>人民币 ¥${Math.floor(summary.actualRMB).toLocaleString()}</b></td></tr>
+      <tr><td><b>人民币实收对应日元参考</b></td><td><b>¥${Math.floor(summary.rmbToJpy).toLocaleString()}</b></td></tr>
+      <tr><td><b>换算日元总收入</b></td><td><b>¥${Math.floor(summary.convertedJPY).toLocaleString()}</b></td></tr>
+      <tr><td><b>换算人民币总收入</b></td><td><b>人民币 ¥${Math.floor(summary.convertedRMB).toLocaleString()}</b></td></tr>
+    </tbody></table>`;
 }
 
 function exportCashierCSV(){
@@ -479,39 +483,16 @@ function exportCashierCSV(){
     r.receiptImage ? "已上传" : "未上传"
   ]);
 
-  const pays = {
-    "现金":0,
-    "PayPay":0,
-    "微信":0,
-    "支付宝":0,
-    "未记录":0
-  };
-
-  let totalJPY = 0;
-  let totalRMB = 0;
-
-rows.forEach(r=>{
-  normalizePayments(r).forEach(p=>{
-    const pay = p.pay || "未记录";
-    const jpy = paymentJPY(p);
-
-    if(!pays[pay]) pays[pay] = 0;
-
-    pays[pay] += jpy;
-    totalJPY += jpy;
-
-    if(isRmbPayment(p,r)){
-      totalRMB += paymentRMB(p);
-    }
-  });
-});
+  const summary = buildCurrencySummary(rows);
   const summaryRows = [
-    [],
-    ["支付方式总计"],
-    ["支付方式","金额（日元）"],
-    ...Object.keys(pays).map(k=>[k, Math.floor(pays[k])]),
-    ["日元总计", Math.floor(totalJPY)],
-    ["人民币参考", Math.floor(totalRMB)]
+    [],["支付方式总计"],["支付方式","实际币种","实际金额"],
+    ...Object.entries(summary.channels).map(([name,v])=>[name,v.currency,Math.floor(v.amount)]),
+    ["日元实收总计","日元",Math.floor(summary.actualJPY)],
+    ["日元实收对应人民币参考","人民币",Math.floor(summary.jpyToRmb)],
+    ["人民币实收总计","人民币",Math.floor(summary.actualRMB)],
+    ["人民币实收对应日元参考","日元",Math.floor(summary.rmbToJpy)],
+    ["换算日元总收入","日元",Math.floor(summary.convertedJPY)],
+    ["换算人民币总收入","人民币",Math.floor(summary.convertedRMB)]
   ];
 
   const csv = [

@@ -1,9 +1,9 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.3";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.3";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.4";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.4";
 
 
-import { db } from "./firebase.js?v=2.7.3";
+import { db } from "./firebase.js?v=2.7.4";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -249,6 +249,54 @@ function displayCurrency(r){
   return "日元";
 }
 
+function getPaySummary(r){
+  const pays = [...new Set(
+    normalizePayments(r)
+      .filter(p=>Number(p.amountJPY || 0) !== 0 || Number(p.amountRMB || 0) !== 0)
+      .map(p=>p.pay || r.pay || "未记录")
+  )];
+  if(pays.length === 0) return r.pay || "未记录";
+  if(pays.length === 1) return pays[0];
+  return "混合";
+}
+
+function buildCurrencySummary(rows){
+  const channels = {
+    "现金":{currency:"日元",amount:0},
+    "PayPay":{currency:"日元",amount:0},
+    "微信":{currency:"人民币",amount:0},
+    "支付宝":{currency:"人民币",amount:0},
+    "未记录":{currency:"日元",amount:0}
+  };
+  let actualJPY = 0;
+  let actualRMB = 0;
+  rows.forEach(r=>{
+    normalizePayments(r).forEach(p=>{
+      const pay = p.pay || r.pay || "未记录";
+      const rmb = isRmbPayment(p,r);
+      const amount = rmb ? paymentRMB(p) : paymentJPY(p);
+      if(!channels[pay]) channels[pay] = {currency:rmb ? "人民币" : "日元",amount:0};
+      channels[pay].currency = rmb ? "人民币" : "日元";
+      channels[pay].amount += amount;
+      if(rmb) actualRMB += amount; else actualJPY += amount;
+    });
+  });
+  const jpyToRmb = Math.floor(actualJPY * RATE);
+  const rmbToJpy = Math.floor(actualRMB / RATE);
+  return {
+    channels, actualJPY, actualRMB, jpyToRmb, rmbToJpy,
+    convertedJPY: actualJPY + rmbToJpy,
+    convertedRMB: actualRMB + jpyToRmb
+  };
+}
+
+function channelSummaryText(summary){
+  return Object.entries(summary.channels)
+    .filter(([,v])=>Number(v.amount)!==0)
+    .map(([name,v])=>`${name} ${v.currency === "人民币" ? "人民币 " : ""}¥${Math.floor(v.amount).toLocaleString()}`)
+    .join(" / ") || "暂无";
+}
+
 function compressImage(file, maxWidth = 600, quality = 0.45){
   return new Promise((resolve, reject)=>{
     const img = new Image();
@@ -290,47 +338,22 @@ function compressImage(file, maxWidth = 600, quality = 0.45){
 function renderTodayBill(){
   const list = getTodayRecords();
   const groupMap = getGroupMap();
-
-  let jpyIncome = 0;
-  let rmbIncome = 0;
-  let convertedJPY = 0;
-  let payStats = {};
-  let typeStats = {walkin:0, booking:0};
-
-  list.forEach(r=>{
-
-  normalizePayments(r).forEach(p=>{
-    const jpy = paymentJPY(p);
-
-    convertedJPY += jpy;
-
-    if(isRmbPayment(p, r)){
-      rmbIncome += paymentRMB(p);
-    }else{
-      jpyIncome += jpy;
-    }
-
-    const pay = p.pay || r.pay || "未记录";
-    payStats[pay] = (payStats[pay] || 0) + jpy;
-  });
-
-  const type = r.customerType || r.type || "walkin";
-  typeStats[type] = (typeStats[type] || 0) + 1;
-});
-
+  const summary = buildCurrencySummary(list);
+  const typeStats = {walkin:0, booking:0};
+  list.forEach(r=>{ const type=r.customerType || r.type || "walkin"; typeStats[type]=(typeStats[type]||0)+1; });
 
   document.getElementById("todaySummary").innerHTML = `
-    日元收入：¥${Math.floor(jpyIncome).toLocaleString()}<br>
-    人民币收入：¥${Math.floor(rmbIncome).toLocaleString()}<br>
-    换算总收入：¥${Math.floor(convertedJPY).toLocaleString()}<br>
-    笔数：${list.length}
-  `;
+    日元实收：¥${Math.floor(summary.actualJPY).toLocaleString()}<br>
+    日元实收对应人民币参考：人民币 ¥${Math.floor(summary.jpyToRmb).toLocaleString()}<br>
+    人民币实收：人民币 ¥${Math.floor(summary.actualRMB).toLocaleString()}<br>
+    人民币实收对应日元参考：¥${Math.floor(summary.rmbToJpy).toLocaleString()}<br>
+    换算日元总收入：¥${Math.floor(summary.convertedJPY).toLocaleString()}<br>
+    换算人民币总收入：人民币 ¥${Math.floor(summary.convertedRMB).toLocaleString()}<br>
+    笔数：${list.length}`;
 
   document.getElementById("todayPayStats").innerHTML = `
-  付款渠道：${Object.keys(payStats).map(k=>`${k} ¥${Math.floor(payStats[k]).toLocaleString()}`).join(" / ") || "暂无"}
-  <br>
-    客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔
-  `;
+    付款渠道：${channelSummaryText(summary)}<br>
+    客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔`;
 
   const { map:groupRecords, singles } = getRecordsByGroup([...list].reverse());
 
@@ -999,6 +1022,6 @@ window.uploadSharedGroupReceipt = function(groupId){
   input.onchange=async()=>{ const file=input.files?.[0]; if(!file)return; const rows=records.filter(r=>String(r.groupId||"")===String(groupId)); if(!rows.length)return;
     const compressedBlob=await compressImage(file); const base64=await fileToBase64(compressedBlob);
     for(const r of rows){ r.receiptImage=base64; r.receiptFileName=file.name||""; r.receiptUploadedAt=Date.now(); r.receiptUploadedTime=new Date().toLocaleString(); await saveRecordSafely({db,ref,record:r}); }
-    records=mergeRecordLists(records,rows); render(); alert("整组收款截图已保存，组内账单共用此截图");
+    records=mergeRecordLists(records,rows); renderTodayBill(); alert("整组收款截图已保存，组内账单共用此截图");
   }; input.click();
 };
