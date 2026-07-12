@@ -1,9 +1,9 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.6.2";
+import { db } from "./firebase.js?v=2.6.5";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.2";
-/*import { formatTime } from "./common.js?v=2.6.2";*/
-import { resetTable, formatTime } from "./common.js?v=2.6.2";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.5";
+/*import { formatTime } from "./common.js?v=2.6.5";*/
+import { resetTable, formatTime } from "./common.js?v=2.6.5";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -47,7 +47,7 @@ async function refreshSharedStateFromServer(){
     console.warn("主动刷新共享桌位状态失败",err);
   }
 }
-setInterval(refreshSharedStateFromServer,5000);
+setInterval(refreshSharedStateFromServer,15000);
 window.addEventListener("online",refreshSharedStateFromServer);
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refreshSharedStateFromServer(); });
 
@@ -84,7 +84,7 @@ const defaultState = {
     {name:"6小时", minutes:360, price:5500, extensionPrice:800, unlimited:false},
     {name:"不限时", minutes:0, price:5500, extensionPrice:0, unlimited:true}
   ],
-  tables: Array.from({length:8},(_,i)=>newTable(i+1)),
+  tables: Array.from({length:12},(_,i)=>newTable(i+1)),
   bookings:[],
   customers:{}
 };
@@ -996,7 +996,7 @@ async function addHour(i){
     const deltaJPY = Math.max(0, afterJPY - beforeJPY);
     await createOrUpdateRecord(state.tables[i],{
       adjustmentJPY: state.tables[i].payTiming === "prepaid" ? deltaJPY : 0,
-      actionKey:`extend_${Number(state.tables[i].extra || 0)}`,
+      actionKey:`extend_${Date.now()}_${Number(state.tables[i].extra || 0)}`,
       note:"续时1小时，开始时已收款"
     });
     render();

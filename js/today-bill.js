@@ -1,8 +1,8 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.6.3";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.6.5";
 
 
-import { db } from "./firebase.js?v=2.6.3";
+import { db } from "./firebase.js?v=2.6.5";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -35,6 +35,15 @@ let uploadingPaymentIndex = null;
 let uploadingGroupId = null;
 let uploadingGroupPaymentIndex = null;
 let editingGroupId = null;
+let groupReceiptMap = {};
+
+// 整组截图独立存放，避免把 Base64 图片塞进 shop/main。
+onSnapshot(collection(db,"groupReceipts"), snap=>{
+  const next = {};
+  snap.docs.forEach(d=>{ next[String(d.id)] = {id:d.id,...d.data()}; });
+  groupReceiptMap = next;
+  try{ renderTodayBill(); }catch(err){ console.warn("整组截图刷新失败",err); }
+}, err=>console.warn("整组截图监听失败",err));
 
 
 onSnapshot(ref, { includeMetadataChanges:true }, async snap => {
@@ -345,7 +354,8 @@ function renderTodayBill(){
     if(group?.payments?.length){
       const nonCashGroupPayment = group.payments.find(p=>p.pay && p.pay !== "现金");
       const legacyReceiptPayment = group.payments.find(p=>p.receiptImage);
-      const groupHasReceipt = !!(group.receiptImage || legacyReceiptPayment?.receiptImage);
+      const groupReceipt = groupReceiptMap[String(group.id)] || null;
+      const groupHasReceipt = !!(groupReceipt?.receiptImage || group.receiptImage || legacyReceiptPayment?.receiptImage);
       html += `
         <tr>
           <td colspan="15" style="background:#fffaf0;font-weight:800;">
@@ -599,18 +609,30 @@ async function handleGroupPaymentReceiptFile(file){
   try{
     const compressed = await compressImage(file,800,0.6);
     const base64 = await fileToBase64(compressed);
-    group.receiptImage = base64;
-    group.receiptFileName = file.name;
-    group.receiptUploadedAt = Date.now();
-    group.receiptUploadedTime = new Date().toLocaleString();
-    const target = group.payments?.find(p=>p.pay && p.pay !== "现金") || group.payments?.[0];
-    if(target){
-      target.receiptImage = base64;
-      target.receiptFileName = file.name;
-      target.receiptUploadedAt = group.receiptUploadedAt;
-      target.receiptUploadedTime = group.receiptUploadedTime;
-    }
-    await saveStateSafely({db, ref, getState:()=>state, action:"group_receipt_upload"});
+    const receiptDoc = {
+      groupId:String(group.id),
+      receiptImage:base64,
+      receiptFileName:file.name,
+      receiptUploadedAt:Date.now(),
+      receiptUploadedTime:new Date().toLocaleString(),
+      updatedAt:Date.now()
+    };
+    // 独立文档保存。shop/main 中不再写入图片。
+    await setDoc(doc(db,"groupReceipts",String(group.id)), receiptDoc, {merge:true});
+    groupReceiptMap[String(group.id)] = receiptDoc;
+    // 清理旧版可能残留在主状态和付款明细中的重复图片。
+    delete group.receiptImage;
+    delete group.receiptFileName;
+    delete group.receiptUploadedAt;
+    delete group.receiptUploadedTime;
+    (group.payments || []).forEach(p=>{
+      delete p.receiptImage;
+      delete p.receiptFileName;
+      delete p.receiptUploadedAt;
+      delete p.receiptUploadedTime;
+    });
+    saveStateSafely({db, ref, getState:()=>state, action:"cleanup_legacy_group_receipt"})
+      .catch(err=>console.warn("旧整组截图字段清理稍后重试",err));
     uploadingGroupId = null;
     uploadingGroupPaymentIndex = null;
     alert("整组付款截图已保存（整组只需上传一次）");
@@ -686,7 +708,8 @@ function viewPaymentReceipt(recordId, paymentIndex){
 function viewGroupPaymentReceipt(groupId){
   const group = (state.groups || []).find(g=>String(g.id) === String(groupId));
   const legacy = group?.payments?.find(p=>p.receiptImage);
-  const receiptImage = group?.receiptImage || legacy?.receiptImage;
+  const receiptDoc = groupReceiptMap[String(groupId)] || null;
+  const receiptImage = receiptDoc?.receiptImage || group?.receiptImage || legacy?.receiptImage;
 
   if(!receiptImage){
     alert("没有截图");
@@ -729,8 +752,7 @@ const r = records.find(x => x.id === recordId);
 });
 
 if(!hasReceipt){
-  const ok = confirm("这笔付款还没有上传收款截图，确定先确认吗？");
-  if(!ok) return;
+  r.extensionReceiptPending = true;
 }
 
   r.extensionConfirmed = true;
@@ -776,32 +798,86 @@ async function saveEditedGroup(){
   if(!group){ alert("找不到这个组"); return; }
   const selectedIds = [...document.querySelectorAll(".edit-group-record-check:checked")].map(el=>String(el.value));
   if(!selectedIds.length){ alert("请至少选择一张桌"); return; }
-  const selected = records.filter(r=>selectedIds.includes(String(r.id)));
-  const tableIndexes = [];
-  for(const r of selected){
-    r.groupId = group.id;
-    r.groupName = group.name || r.groupName || "未命名组";
-    r.groupColor = group.color || r.groupColor || "#eef8ff";
-    r.editedAt = Date.now();
+
+  const button = document.querySelector('#editGroupModalBg .btn-main');
+  if(button){ button.disabled=true; button.textContent="正在保存…"; }
+
+  const now = Date.now();
+  const today = getTodayRecords().filter(r=>r.id && r.tableName);
+  const selectedSet = new Set(selectedIds);
+  const changedRecords = [];
+  const selectedTableIndexes = [];
+
+  // 先把所有关系在内存中一次性算完，再统一保存，避免逐条 await 造成半完成状态。
+  for(const r of today){
+    const belongsHere = String(r.groupId || "") === String(group.id);
+    const selected = selectedSet.has(String(r.id));
     const idx = (state.tables || []).findIndex(t=>String(t?.name || "") === String(r.tableName || ""));
-    if(idx >= 0){
-      tableIndexes.push(idx);
-      const t = state.tables[idx];
-      if(t){
+
+    if(selected){
+      r.groupId = group.id;
+      r.groupName = group.name || "未命名组";
+      r.groupColor = group.color || "#eef8ff";
+      r.editedAt = now;
+      if(idx >= 0){
+        selectedTableIndexes.push(idx);
+        const t = state.tables[idx];
         t.groupId = group.id;
         t.groupName = group.name;
         t.groupColor = group.color;
         t.activeColor = group.color || t.activeColor;
       }
+      changedRecords.push(r);
+    }else if(belongsHere){
+      delete r.groupId;
+      delete r.groupName;
+      delete r.groupColor;
+      r.editedAt = now;
+      if(idx >= 0){
+        const t = state.tables[idx];
+        if(String(t?.groupId || "") === String(group.id)){
+          delete t.groupId; delete t.groupName; delete t.groupColor;
+        }
+      }
+      changedRecords.push(r);
     }
-    await saveRecordSafely({db,ref,record:r});
   }
-  group.tableIndexes = Array.from(new Set([...(group.tableIndexes || []).map(Number),...tableIndexes]));
-  group.updatedAt = Date.now();
-  await saveStateSafely({db,ref,getState:()=>state,action:"today_bill_add_group_tables"});
-  closeEditGroup();
-  renderTodayBill();
-  alert("组桌位已更新");
+
+  // 从其他组中移除这次被转入本组的桌位，避免一桌残留在多个组。
+  const selectedIndexSet = new Set(selectedTableIndexes.map(Number));
+  for(const g of (state.groups || [])){
+    if(String(g.id) === String(group.id)) continue;
+    const before = Array.isArray(g.tableIndexes) ? g.tableIndexes.map(Number) : [];
+    const after = before.filter(i=>!selectedIndexSet.has(i));
+    if(after.length !== before.length){
+      g.tableIndexes = after;
+      g.updatedAt = now;
+    }
+  }
+
+  group.tableIndexes = Array.from(new Set(selectedTableIndexes.map(Number)));
+  group.updatedAt = now;
+
+  try{
+    // 每条账单先落本机，云端失败由队列稍后补传。
+    await Promise.all(changedRecords.map(r=>
+      Promise.race([
+        saveRecordSafely({db,ref,record:r}),
+        new Promise((_,reject)=>setTimeout(()=>reject(new Error("账单本机保存超时")),8000))
+      ]).catch(err=>{ console.warn("组账单保存进入后台重试",r.id,err); })
+    ));
+
+    await Promise.race([
+      saveStateSafely({db,ref,getState:()=>state,action:"today_bill_replace_group_tables"}),
+      new Promise((_,reject)=>setTimeout(()=>reject(new Error("组状态保存超时")),8000))
+    ]).catch(err=>console.warn("组状态将在后台继续同步",err));
+
+    closeEditGroup();
+    renderTodayBill();
+    alert("组桌位已更新");
+  }finally{
+    if(button){ button.disabled=false; button.textContent="保存组桌位"; }
+  }
 }
 
 function openEditRecord(recordId){

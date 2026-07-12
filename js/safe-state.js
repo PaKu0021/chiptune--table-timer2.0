@@ -32,6 +32,24 @@ const RECORD_HISTORY_SYNC_META = "chiptune_records_history_sync_v2";
 const RECORD_DELETES_COLLECTION = "recordDeletes";
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+function withTimeout(promise, ms=8000, label="本地数据库操作"){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error(label+"超时")),ms))
+  ]);
+}
+function stripImagesDeep(value){
+  if(Array.isArray(value)) return value.map(stripImagesDeep);
+  if(value && typeof value === "object"){
+    const out={};
+    for(const [k,v] of Object.entries(value)){
+      if(["receiptImage","imageBase64"].includes(k)) out[k]="";
+      else out[k]=stripImagesDeep(v);
+    }
+    return out;
+  }
+  return value;
+}
 
 let baseline = null;
 let saveQueue = Promise.resolve();
@@ -63,53 +81,58 @@ function openLocalDb(){
 
 async function idbGet(store,key){
   const db = await openLocalDb();
-  return new Promise((resolve,reject)=>{
+  const task = new Promise((resolve,reject)=>{
     const tx = db.transaction(store,"readonly");
     const req = tx.objectStore(store).get(key);
     req.onsuccess = ()=>resolve(req.result ?? null);
     req.onerror = ()=>reject(req.error);
   });
+  return withTimeout(task,8000,"读取本地数据");
 }
 
 async function idbPut(store,value,key){
   const db = await openLocalDb();
-  return new Promise((resolve,reject)=>{
+  const task = new Promise((resolve,reject)=>{
     const tx = db.transaction(store,"readwrite");
     const req = key === undefined ? tx.objectStore(store).put(value) : tx.objectStore(store).put(value,key);
     req.onsuccess = ()=>resolve(value);
     req.onerror = ()=>reject(req.error);
   });
+  return withTimeout(task,8000,"写入本地数据");
 }
 
 async function idbDelete(store,key){
   const db = await openLocalDb();
-  return new Promise((resolve,reject)=>{
+  const task = new Promise((resolve,reject)=>{
     const tx = db.transaction(store,"readwrite");
     tx.objectStore(store).delete(key);
     tx.oncomplete = ()=>resolve();
     tx.onerror = ()=>reject(tx.error);
   });
+  return withTimeout(task,8000,"删除本地数据");
 }
 
 async function idbAll(store){
   const db = await openLocalDb();
-  return new Promise((resolve,reject)=>{
+  const task = new Promise((resolve,reject)=>{
     const tx = db.transaction(store,"readonly");
     const req = tx.objectStore(store).getAll();
     req.onsuccess = ()=>resolve(req.result || []);
     req.onerror = ()=>reject(req.error);
   });
+  return withTimeout(task,8000,"读取本地列表");
 }
 
 async function idbClear(store){
   const db = await openLocalDb();
-  return new Promise((resolve,reject)=>{
+  const task = new Promise((resolve,reject)=>{
     const tx = db.transaction(store,"readwrite");
     tx.objectStore(store).clear();
     tx.oncomplete = ()=>resolve();
     tx.onerror = ()=>reject(tx.error);
     tx.onabort = ()=>reject(tx.error || new Error("本地队列清理失败"));
   });
+  return withTimeout(task,8000,"清理本地队列");
 }
 
 function writeShadow(key,value){
@@ -214,11 +237,7 @@ async function writeLocalRecords(records){
   // 完整账单（包括收款截图）只存 IndexedDB，避免 localStorage 容量不足。
   await idbPut("kv",list,RECORDS_KEY);
   // localStorage 只保留不含大图片的轻量应急副本。
-  const light = list.map(r=>{
-    const x={...r};
-    if(x.receiptImage) x.receiptImage="";
-    return x;
-  });
+  const light = list.map(stripImagesDeep);
   writeShadow(RECORDS_SHADOW,light);
 }
 
