@@ -1,7 +1,7 @@
-import { db } from "./firebase.js?v=2.6.8";
+import { db } from "./firebase.js?v=2.6.9";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.6.8";
-import { resetTable } from "./common.js?v=2.6.8";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.6.9";
+import { resetTable } from "./common.js?v=2.6.9";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -289,13 +289,55 @@ function getCustomerKey(name, phone){
   return `${name}_${phone}`;
 }
 
-function addCustomerVisit({name, phone, packageIndex, tableIndexes, startTime, endTime}){
-  const key = getCustomerKey(name, phone);
+function addCustomerVisit({
+  name,
+  phone,
+  packageIndex,
+  tableIndexes,
+  startTime,
+  endTime
+}){
+  const key =
+    getCustomerKey(name,phone);
+
   if(!key) return;
 
-  if(!state.customers) state.customers = [];
+  if(
+    !state.customers ||
+    Array.isArray(state.customers) ||
+    typeof state.customers !== "object"
+  ){
+    const oldCustomers =
+      Array.isArray(state.customers)
+        ? state.customers
+        : [];
 
-  let customer = state.customers.find(c=>c.key === key);
+    state.customers = {};
+
+    oldCustomers.forEach(customer=>{
+      if(!customer) return;
+
+      const oldKey =
+        customer.key ||
+        getCustomerKey(
+          customer.name,
+          customer.phoneLast4
+        );
+
+      if(!oldKey) return;
+
+      state.customers[oldKey] = {
+        ...customer,
+        key:oldKey,
+        visits:Array.isArray(customer.visits)
+          ? customer.visits
+          : []
+      };
+    });
+  }
+
+  let customer =
+    state.customers[key];
 
   if(!customer){
     customer = {
@@ -303,26 +345,64 @@ function addCustomerVisit({name, phone, packageIndex, tableIndexes, startTime, e
       name,
       phoneLast4:String(phone || "").slice(-4),
       visitCount:0,
+      firstVisitAt:Date.now(),
+      lastVisitAt:Date.now(),
       visits:[]
     };
-    state.customers.push(customer);
+
+    state.customers[key] = customer;
   }
 
-  const p = state.packages?.[packageIndex] || {};
+  if(!Array.isArray(customer.visits)){
+    customer.visits = [];
+  }
+
+  const p =
+    state.packages?.[Number(packageIndex)] || {};
+
   const tableNames = tableIndexes
     .map(i=>state.tables[i]?.name)
     .filter(Boolean)
     .join("、");
 
-  customer.visitCount += 1;
+  const now = Date.now();
 
   customer.visits.push({
-    date: currentBookingDate,
-    packageName: p.name || "",
-    timeRange: `${startTime || "-"} - ${endTime || "-"}`,
+    id:
+      "visit_" +
+      now +
+      "_" +
+      Math.random().toString(36).slice(2,8),
+
+    date:currentBookingDate,
+    startAt:now,
+    endAt:null,
+    range:`${startTime || "-"}-${endTime || "-"}`,
+    tableName:tableNames,
     tableNames,
-    createdAt: Date.now()
+    customerType:"booking",
+    packageName:p.name || "",
+    packageMinutes:p.unlimited
+      ? "不限时"
+      : Number(p.minutes || 0),
+    extraMinutes:0,
+    totalJPY:Number(p.price || 0),
+    pay:"",
+    closed:false,
+    createdAt:now
   });
+
+  customer.name =
+    name || customer.name || "";
+
+  customer.phoneLast4 =
+    String(phone || customer.phoneLast4 || "")
+      .slice(-4);
+
+  customer.visitCount =
+    customer.visits.length;
+
+  customer.lastVisitAt = now;
 }
 
 async function createOrUpdateTableRecord(t, {

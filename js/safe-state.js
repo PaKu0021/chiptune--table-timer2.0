@@ -56,6 +56,58 @@ let saveQueue = Promise.resolve();
 let badge = null;
 let flushTimer = null;
 
+const stateChannel =
+  typeof BroadcastChannel !== "undefined"
+    ? new BroadcastChannel("chiptune-state-sync-v1")
+    : null;
+
+function broadcastState(state, action = "state_update"){
+  const detail = {
+    state:clone(state),
+    action,
+    sentAt:Date.now(),
+    deviceId:getDeviceId()
+  };
+
+  /*
+   * 同一个页面内的监听器。
+   */
+  window.dispatchEvent(
+    new CustomEvent(
+      "chiptune-state-broadcast",
+      {detail}
+    )
+  );
+
+  /*
+   * 不同标签页、不同窗口、PWA 页面之间同步。
+   */
+  try{
+    stateChannel?.postMessage(detail);
+  }catch(error){
+    console.warn("跨页面状态广播失败",error);
+  }
+}
+
+stateChannel?.addEventListener(
+  "message",
+  event=>{
+    if(!event.data?.state) return;
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "chiptune-state-broadcast",
+        {
+          detail:event.data
+        }
+      )
+    );
+  }
+);
+
+
+
+
 function role(){
   const p = location.pathname.toLowerCase();
   if(p.includes("booking")) return "booking";
@@ -427,25 +479,160 @@ async function pendingKeys(){
 }
 
 export async function reconcileCloudState(cloud){
-  const localBox = readShadow(STATE_SHADOW) || await idbGet("kv",STATE_KEY).catch(()=>null);
+  const localBox =
+    readShadow(STATE_SHADOW) ||
+    await idbGet("kv",STATE_KEY).catch(()=>null);
+
   const local = localBox?.state;
+
+  /*
+   * 本机没有状态时，直接使用云端。
+   */
   if(!local){
     baseline = clone(cloud);
     await writeLocalState(cloud,cloud);
     return clone(cloud);
   }
 
-  const pending = await pendingKeys();
-  const merged = clone(cloud || {});
-  // 云端是多设备共享状态的基准。只有本机仍在待上传队列中的字段，
-  // 才暂时保留本机值；上传完成后所有设备立即以云端最新状态为准。
-  for(const key of Object.keys(local)){
-    if(key === "_sync") continue;
-    if(pending.has(key)) merged[key] = clone(local[key]);
+  const queueItems = (
+    await idbAll("queue").catch(()=>[])
+  ).sort((a,b)=>
+    Number(a.createdAt || 0) -
+    Number(b.createdAt || 0)
+  );
+
+  /*
+   * 只处理最后一个待上传状态。
+   * enqueue() 已经保证队列通常只有一个最新状态。
+   */
+  const pendingItem =
+    queueItems.length
+      ? queueItems[queueItems.length - 1]
+      : null;
+
+  /*
+   * 没有本机待上传修改时，云端就是最终状态。
+   */
+  if(!pendingItem){
+    baseline = clone(cloud);
+
+    await writeLocalState(
+      cloud,
+      cloud
+    );
+
+    return clone(cloud);
   }
 
+  const pendingLocal =
+    pendingItem.state ||
+    local;
+
+  const pendingBase =
+    pendingItem.base ||
+    localBox?.cloudBaseline ||
+    baseline ||
+    {};
+
+  const changed =
+    Array.isArray(pendingItem.changed)
+      ? pendingItem.changed
+      : changedKeys(
+          pendingLocal,
+          pendingBase
+        );
+
+  const merged = clone(cloud || {});
+
+  for(const key of changed){
+    if(key === "_sync") continue;
+
+    const localValue = pendingLocal?.[key];
+    const baseValue = pendingBase?.[key];
+
+    /*
+     * tables 必须按桌位逐个合并。
+     *
+     * 不能因为本机修改了1号桌，
+     * 就把其他设备刚修改的5号桌一起覆盖。
+     */
+    if(
+      key === "tables" &&
+      Array.isArray(localValue)
+    ){
+      const cloudTables =
+        Array.isArray(merged.tables)
+          ? clone(merged.tables)
+          : [];
+
+      const baseTables =
+        Array.isArray(baseValue)
+          ? baseValue
+          : [];
+
+      localValue.forEach((table,index)=>{
+        const baseTable = baseTables[index];
+
+        if(!same(table,baseTable)){
+          cloudTables[index] = clone(table);
+        }
+      });
+
+      merged.tables = cloudTables;
+      continue;
+    }
+
+    /*
+     * 预约按预约ID合并。
+     */
+    if(key === "bookings"){
+      merged.bookings = mergeArrayChanges(
+        merged.bookings,
+        localValue,
+        baseValue,
+        "booking"
+      );
+      continue;
+    }
+
+    /*
+     * 分组按groupId合并。
+     */
+    if(key === "groups"){
+      merged.groups = mergeArrayChanges(
+        merged.groups,
+        localValue,
+        baseValue,
+        "group"
+      );
+      continue;
+    }
+
+if(key === "customers"){
+  merged.customers = mergeCustomerChanges(
+    merged.customers,
+    localValue,
+    baseValue
+  );
+  continue;
+}
+    /*
+     * 其他普通字段才直接使用本机值。
+     */
+    merged[key] = clone(localValue);
+  }
+
+  /*
+   * baseline 必须记录真实云端状态，
+   * 不能记录临时合并后的状态。
+   */
   baseline = clone(cloud);
-  await writeLocalState(merged,cloud);
+
+  await writeLocalState(
+    merged,
+    cloud
+  );
+
   return merged;
 }
 
@@ -499,6 +686,80 @@ function mergeObjectChanges(latestValue, localValue, baseValue){
   return latest;
 }
 
+function normalizeCustomersMap(value){
+  if(Array.isArray(value)){
+    const result = {};
+
+    value.forEach((customer,index)=>{
+      if(!customer || typeof customer !== "object") return;
+
+      const key =
+        customer.key ||
+        (
+          customer.name && customer.phoneLast4
+            ? `${String(customer.name).trim()}_${String(customer.phoneLast4).slice(-4)}`
+            : `customer_${index}`
+        );
+
+      result[key] = {
+        ...clone(customer),
+        key,
+        visits:Array.isArray(customer.visits)
+          ? clone(customer.visits)
+          : []
+      };
+    });
+
+    return result;
+  }
+
+  if(value && typeof value === "object"){
+    return clone(value);
+  }
+
+  return {};
+}
+
+function mergeCustomerChanges(
+  latestValue,
+  localValue,
+  baseValue
+){
+  const latest =
+    normalizeCustomersMap(latestValue);
+
+  const local =
+    normalizeCustomersMap(localValue);
+
+  const base =
+    normalizeCustomersMap(baseValue);
+
+  /*
+   * 本机相对基线删除的客户，
+   * 也从云端最新结果中删除。
+   */
+  for(const key of Object.keys(base)){
+    if(!(key in local)){
+      delete latest[key];
+    }
+  }
+
+  /*
+   * 只写入本机新增或修改的客户，
+   * 保留其他设备新增的客户。
+   */
+  for(const [key,customer] of Object.entries(local)){
+    if(
+      !(key in base) ||
+      !same(customer,base[key])
+    ){
+      latest[key] = clone(customer);
+    }
+  }
+
+  return latest;
+}
+
 function mergeState(latest, local, base, keys){
   const merged = clone(latest || {});
   const changed = keys?.length ? keys : changedKeys(local,base);
@@ -516,8 +777,12 @@ function mergeState(latest, local, base, keys){
       merged.bookings = mergeArrayChanges(merged.bookings,localValue,baseValue,"booking");
     }else if(key === "groups"){
       merged.groups = mergeArrayChanges(merged.groups,localValue,baseValue,"group");
-    }else if(key === "customers"){
-      merged.customers = mergeObjectChanges(merged.customers,localValue,baseValue);
+}else if(key === "customers"){
+  merged.customers = mergeCustomerChanges(
+    merged.customers,
+    localValue,
+    baseValue
+  );      
     }else{
       merged[key] = clone(localValue);
     }
@@ -554,6 +819,10 @@ async function flushOne({db,ref}, item){
   await writeLocalState(result.merged,result.merged);
   writeShadow(STATE_SHADOW,{state:clone(result.merged),cloudBaseline:clone(result.merged),savedAt:Date.now(),deviceId:getDeviceId()});
   window.dispatchEvent(new CustomEvent("chiptune-cloud-state-saved",{detail:{state:clone(result.merged)}}));
+  broadcastState(
+  result.merged,
+  item.action || "cloud_saved"
+);
   try{
     await addDoc(collection(db,"operationLogs"),{action:item.action,changed:item.changed,deviceId:item.deviceId,createdAt:serverTimestamp(),clientTime:item.createdAt});
   }catch(err){ console.warn("操作日志写入失败",err); }
@@ -627,10 +896,30 @@ export function installConnectionGuard(){
   update();
 }
 
-export function saveStateSafely({db,ref,getState,action="state_update"}){
+export function saveStateSafely({
+  db,
+  ref,
+  getState,
+  action="state_update"
+}){
   const immediate = clone(getState());
-  const immediateBase = clone(baseline || immediate);
-  writeShadow(STATE_SHADOW,{state:immediate,cloudBaseline:immediateBase,savedAt:Date.now(),deviceId:getDeviceId()});
+  const immediateBase =
+    clone(baseline || immediate);
+
+  writeShadow(
+    STATE_SHADOW,
+    {
+      state:immediate,
+      cloudBaseline:immediateBase,
+      savedAt:Date.now(),
+      deviceId:getDeviceId()
+    }
+  );
+
+  /*
+   * 本机一保存，马上通知预约页和计时器页。
+   */
+  broadcastState(immediate,action);
 
   saveQueue = saveQueue.catch(()=>{}).then(async()=>{
     const local = clone(getState());
@@ -758,6 +1047,7 @@ export function emergencySaveState({db,ref,state,action="emergency_state_update"
   const base = clone(baseline || local);
   // Synchronous shadow first, so closing the modal/page cannot lose this state.
   writeShadow(STATE_SHADOW,{state:local,cloudBaseline:base,savedAt:Date.now(),deviceId:getDeviceId()});
+  broadcastState(local,action);
   setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? "● 已紧急保存本机 · 等待上传" : "● 已紧急保存本机 · 当前离线");
 
   Promise.resolve().then(async()=>{

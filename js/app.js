@@ -1,9 +1,9 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.6.8";
+import { db } from "./firebase.js?v=2.6.9";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.8";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.9";
 /*import { formatTime } from "./common.js?v=2.6.5";*/
-import { resetTable, formatTime } from "./common.js?v=2.6.8";
+import { resetTable, formatTime } from "./common.js?v=2.6.9";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -11,33 +11,21 @@ const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpU
 
 let state = null;
 installConnectionGuard();
+
 loadLocalState()
-  .then(local => {
+  .then(local=>{
     if(!local || state) return;
 
-    state = local;
-
-    if(!Array.isArray(state.tables) || state.tables.length === 0){
-      state.tables = structuredClone(defaultState.tables);
-    }
-
-    if(!Array.isArray(state.packages) || state.packages.length === 0){
-      state.packages = structuredClone(defaultState.packages);
-    }
-
-    if(!Array.isArray(state.bookings)){
-      state.bookings = [];
-    }
-
-    if(!state.customers || typeof state.customers !== "object"){
-      state.customers = {};
-    }
-
-    render();
-    autoCloseOldTables();
+    applyIncomingAppState(
+      local,
+      "本机缓存"
+    );
   })
-  .catch(error => {
-    console.error("读取本机桌位状态失败", error);
+  .catch(error=>{
+    console.error(
+      "读取本机桌位状态失败",
+      error
+    );
   });
 window.addEventListener("chiptune-online-change",e=>{
   if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
@@ -47,26 +35,96 @@ window.addEventListener("chiptune-sync-tick",()=>{
 });
 
 // 本机事务写入云端成功后，立即采用服务器最终合并状态。
-window.addEventListener("chiptune-cloud-state-saved",e=>{
-  if(!e.detail?.state) return;
-  state = e.detail.state;
-  try{ render(); }catch(err){ console.warn("同步后刷新页面失败",err); }
-});
+window.addEventListener(
+  "chiptune-cloud-state-saved",
+  event=>{
+    applyIncomingAppState(
+      event.detail?.state,
+      "云端保存"
+    );
+  }
+);
 
+window.addEventListener(
+  "chiptune-state-broadcast",
+  event=>{
+    const incoming =
+      event.detail?.state;
+
+    if(!incoming) return;
+
+    applyIncomingAppState(
+      incoming,
+      event.detail?.action
+        ? `本机页面同步：${event.detail.action}`
+        : "本机页面同步"
+    );
+
+    setSyncStatus(
+      navigator.onLine
+        ? "pending"
+        : "offline",
+      navigator.onLine
+        ? "● 已收到预约操作 · 正在同步云端"
+        : "● 已收到预约操作 · 当前离线"
+    );
+  }
+);
+
+window.addEventListener(
+  "storage",
+  event=>{
+    if(
+      event.key !== "chiptune_state_shadow_v2" ||
+      !event.newValue
+    ){
+      return;
+    }
+
+    try{
+      const box =
+        JSON.parse(event.newValue);
+
+      if(!box?.state) return;
+
+      applyIncomingAppState(
+        box.state,
+        "本机状态备份"
+      );
+    }catch(error){
+      console.warn(
+        "读取其他页面状态失败",
+        error
+      );
+    }
+  }
+);
 // iPad 桌面网页偶尔会只停留在 Firestore 缓存。每 5 秒主动向服务器核对一次，
 // 确保手机、iPad 和其他终端都能看到同一份最新桌位状态。
 async function refreshSharedStateFromServer(){
   if(!navigator.onLine) return;
+
   try{
-    const snap = await getDocFromServer(ref);
+    const snap =
+      await getDocFromServer(ref);
+
     if(!snap.exists()) return;
-    state = await reconcileCloudState(snap.data());
-    if(!state.packages) state.packages = defaultState.packages;
-    if(!state.bookings) state.bookings = [];
-    if(!state.customers) state.customers = {};
-    render();
-  }catch(err){
-    console.warn("主动刷新共享桌位状态失败",err);
+
+    const incoming =
+      await reconcileCloudState(
+        snap.data()
+      );
+
+    applyIncomingAppState(
+      incoming,
+      "主动服务器刷新"
+    );
+
+  }catch(error){
+    console.warn(
+      "主动刷新共享桌位状态失败",
+      error
+    );
   }
 }
 setInterval(refreshSharedStateFromServer,15000);
@@ -111,69 +169,259 @@ const defaultState = {
   customers:{}
 };
 
-onSnapshot(ref, { includeMetadataChanges:true }, async snap=>{
-  if(snap.exists()){
-    state = await reconcileCloudState(snap.data());
-    if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
-    if(snap.metadata.fromCache) setSyncStatus("cache");
-/*alert("Firestore已读取");*/
-    
-    if(!state.packages) state.packages = defaultState.packages;
-    if(!state.bookings) state.bookings = [];
-    if(!Array.isArray(state.tables) || state.tables.length === 0){
-  state.tables = defaultState.tables;
-  save();
-}    
-    if(!state.customers) state.customers = {};
+function normalizeAppCustomers(customers){
+  const result = {};
 
-    state.tables.forEach((t,i)=>{
-  if(!t.name) t.name = (i+1) + "号桌";
-  if(t.packageIndex === undefined) t.packageIndex = 0;
-  if(!t.customer) t.customer = {name:"", phoneLast4:""};
-  if(t.currency === undefined) t.currency = "日元";
-  if(t.alerted === undefined) t.alerted = false;
-  if(t.alerting === undefined) t.alerting = false;
-  if(t.extra === undefined) t.extra = 0;
-  if(t.pausedAt === undefined) t.pausedAt = null;
-  if(t.pay === undefined) t.pay = "";
-  if(t.payTiming === undefined) t.payTiming = "prepaid";
-  if(t.paidJPY === undefined) t.paidJPY = 0;
-  if(t.paidRMB === undefined) t.paidRMB = 0;
-  if(t.paidAt === undefined) t.paidAt = null;
-  if(t.type === undefined) t.type = "";
-  if(t.lastAction === undefined) t.lastAction = "";
-  if(t.recordId === undefined) t.recordId = null;
-  if(t.customerKey === undefined) t.customerKey = "";
-  if(t.visitId === undefined) t.visitId = null;
-  if(t.visitDate === undefined) t.visitDate = "";
-  if(t.visitRange === undefined) t.visitRange = "";
-  if(t.bookingId === undefined) t.bookingId = null;
-  if(t.activeColor === undefined) t.activeColor = "";
-  if(t.customPackage?.enabled) t.customPackage.enabled = false; // 旧版临时套餐不再参与计费
-});
+  if(Array.isArray(customers)){
+    customers.forEach(customer=>{
+      if(
+        !customer ||
+        typeof customer !== "object"
+      ){
+        return;
+      }
 
-    /*alert("准备render");*/
-    render();
-    autoCloseOldTables();
-  }else{
-    state = defaultState;
-    save();
+      const key =
+        customer.key ||
+        makeCustomerKey(
+          customer.name,
+          customer.phoneLast4
+        );
+
+      if(!key) return;
+
+      result[key] = {
+        ...customer,
+        key,
+        visits:Array.isArray(customer.visits)
+          ? customer.visits
+          : [],
+        visitCount:Array.isArray(customer.visits)
+          ? customer.visits.length
+          : Number(customer.visitCount || 0)
+      };
+    });
+
+    return result;
   }
-}, error => {
-  console.error("读取 shop/main 失败", error);
 
-  alert(
-    "桌位数据读取失败：\n\n" +
-    error.code + "\n" +
-    error.message
+  if(
+    customers &&
+    typeof customers === "object"
+  ){
+    Object.entries(customers)
+      .forEach(([rawKey,customer])=>{
+        if(
+          !customer ||
+          typeof customer !== "object"
+        ){
+          return;
+        }
+
+        const key =
+          customer.key ||
+          rawKey ||
+          makeCustomerKey(
+            customer.name,
+            customer.phoneLast4
+          );
+
+        if(!key) return;
+
+        const visits =
+          Array.isArray(customer.visits)
+            ? customer.visits
+            : [];
+
+        result[key] = {
+          ...customer,
+          key,
+          visits,
+          visitCount:visits.length
+        };
+      });
+  }
+
+  return result;
+}
+
+function normalizeAppState(nextState){
+  const next =
+    nextState && typeof nextState === "object"
+      ? nextState
+      : structuredClone(defaultState);
+
+  if(
+    !Array.isArray(next.tables) ||
+    next.tables.length === 0
+  ){
+    next.tables =
+      structuredClone(defaultState.tables);
+  }
+
+  if(
+    !Array.isArray(next.packages) ||
+    next.packages.length === 0
+  ){
+    next.packages =
+      structuredClone(defaultState.packages);
+  }
+
+  if(!Array.isArray(next.bookings)){
+    next.bookings = [];
+  }
+
+  if(!Array.isArray(next.groups)){
+    next.groups = [];
+  }
+
+  next.customers =
+    normalizeAppCustomers(next.customers);
+
+  next.tables.forEach((t,i)=>{
+    if(!t || typeof t !== "object"){
+      next.tables[i] =
+        resetTable((i + 1) + "号桌");
+      return;
+    }
+
+    if(!t.name) t.name = (i + 1) + "号桌";
+    if(t.packageIndex === undefined) t.packageIndex = 0;
+    if(!t.customer) t.customer = {name:"",phoneLast4:""};
+    if(t.currency === undefined) t.currency = "日元";
+    if(t.alerted === undefined) t.alerted = false;
+    if(t.alerting === undefined) t.alerting = false;
+    if(t.extra === undefined) t.extra = 0;
+    if(t.pausedAt === undefined) t.pausedAt = null;
+    if(t.pay === undefined) t.pay = "";
+    if(t.payTiming === undefined) t.payTiming = "prepaid";
+    if(t.paidJPY === undefined) t.paidJPY = 0;
+    if(t.paidRMB === undefined) t.paidRMB = 0;
+    if(t.paidAt === undefined) t.paidAt = null;
+    if(t.type === undefined) t.type = "";
+    if(t.lastAction === undefined) t.lastAction = "";
+    if(t.recordId === undefined) t.recordId = null;
+    if(t.customerKey === undefined) t.customerKey = "";
+    if(t.visitId === undefined) t.visitId = null;
+    if(t.visitDate === undefined) t.visitDate = "";
+    if(t.visitRange === undefined) t.visitRange = "";
+    if(t.bookingId === undefined) t.bookingId = null;
+    if(t.groupId === undefined) t.groupId = "";
+    if(t.groupName === undefined) t.groupName = "";
+    if(t.groupColor === undefined) t.groupColor = "";
+    if(t.activeColor === undefined) t.activeColor = "";
+
+    if(t.customPackage?.enabled){
+      t.customPackage.enabled = false;
+    }
+  });
+
+  return next;
+}
+
+function applyIncomingAppState(
+  incoming,
+  source="同步"
+){
+  if(
+    !incoming ||
+    typeof incoming !== "object"
+  ){
+    return;
+  }
+
+  state = normalizeAppState(
+    structuredClone(incoming)
   );
 
-  if (!state) {
-    state = structuredClone(defaultState);
+  try{
     render();
-  }
-});
 
+    /*
+     * 不阻塞状态接收和页面刷新。
+     */
+    Promise.resolve()
+      .then(()=>autoCloseOldTables())
+      .catch(error=>{
+        console.warn(
+          "自动检查跨天桌位失败",
+          error
+        );
+      });
+
+    console.log(
+      `${source}状态已应用`
+    );
+
+  }catch(error){
+    console.warn(
+      `${source}后刷新计时器失败`,
+      error
+    );
+  }
+}
+
+onSnapshot(
+  ref,
+  {includeMetadataChanges:true},
+  async snap=>{
+    if(snap.exists()){
+      const incoming =
+        await reconcileCloudState(
+          snap.data()
+        );
+
+      /*
+       * 这里传原始云端数据，
+       * 不要传本机合并后的 state。
+       */
+      if(!snap.metadata.hasPendingWrites){
+        setStateBaseline(
+          snap.data()
+        );
+      }
+
+      if(snap.metadata.fromCache){
+        setSyncStatus("cache");
+      }
+
+      applyIncomingAppState(
+        incoming,
+        snap.metadata.fromCache
+          ? "Firestore缓存"
+          : "Firestore云端"
+      );
+
+    }else{
+      state =
+        structuredClone(defaultState);
+
+      await save(
+        "initialize_state"
+      );
+    }
+  },
+  error=>{
+    console.error(
+      "读取 shop/main 失败",
+      error
+    );
+
+    alert(
+      "桌位数据读取失败：\n\n" +
+      (error.code || "") +
+      "\n" +
+      (error.message || String(error))
+    );
+
+    if(!state){
+      applyIncomingAppState(
+        structuredClone(defaultState),
+        "默认数据"
+      );
+    }
+  }
+);
 
 
 async function save(action="state_update"){
