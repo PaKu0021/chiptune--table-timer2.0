@@ -172,10 +172,25 @@
   </div>
 </div>
 <script type="module">
-  import { renderNav } from "./js/nav.js";
-  renderNav("app");
-  import "./js/app.js?v=2.6.7";
+  import { renderNav } from "./js/nav.js?v=2.6.8";
+
+  try {
+    renderNav("app");
+  } catch (error) {
+    console.error("导航加载失败", error);
+  }
+
+  import("./js/app.js?v=2.6.8").catch(error => {
+    alert(
+      "计时系统加载失败：\n\n" +
+      error.name + "\n" +
+      error.message
+    );
+
+    console.error("app.js 加载失败", error);
+  });
 </script>
+
 <div id="forceEndModalBg" class="modal-bg">
   <div class="modal">
     <h2>强制结束桌位</h2>

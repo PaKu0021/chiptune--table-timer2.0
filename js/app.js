@@ -1,9 +1,9 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.6.5";
+import { db } from "./firebase.js?v=2.6.8";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.8";
 /*import { formatTime } from "./common.js?v=2.6.5";*/
-import { resetTable, formatTime } from "./common.js?v=2.6.5";
+import { resetTable, formatTime } from "./common.js?v=2.6.8";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -11,12 +11,34 @@ const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpU
 
 let state = null;
 installConnectionGuard();
-loadLocalState().then(local=>{
-  if(local && !state){
+loadLocalState()
+  .then(local => {
+    if(!local || state) return;
+
     state = local;
-    try{ render(); autoCloseOldTables(); }catch(err){ console.warn("本机状态初始显示失败",err); }
-  }
-});
+
+    if(!Array.isArray(state.tables) || state.tables.length === 0){
+      state.tables = structuredClone(defaultState.tables);
+    }
+
+    if(!Array.isArray(state.packages) || state.packages.length === 0){
+      state.packages = structuredClone(defaultState.packages);
+    }
+
+    if(!Array.isArray(state.bookings)){
+      state.bookings = [];
+    }
+
+    if(!state.customers || typeof state.customers !== "object"){
+      state.customers = {};
+    }
+
+    render();
+    autoCloseOldTables();
+  })
+  .catch(error => {
+    console.error("读取本机桌位状态失败", error);
+  });
 window.addEventListener("chiptune-online-change",e=>{
   if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
 });
@@ -136,6 +158,19 @@ onSnapshot(ref, { includeMetadataChanges:true }, async snap=>{
   }else{
     state = defaultState;
     save();
+  }
+}, error => {
+  console.error("读取 shop/main 失败", error);
+
+  alert(
+    "桌位数据读取失败：\n\n" +
+    error.code + "\n" +
+    error.message
+  );
+
+  if (!state) {
+    state = structuredClone(defaultState);
+    render();
   }
 });
 
