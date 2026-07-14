@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.8.0";
-import { RMB_PER_JPY } from "./business-day.js?v=2.8.0";
+import { db } from "./firebase.js?v=2.8.1";
+import { RMB_PER_JPY } from "./business-day.js?v=2.8.1";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.8.0";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=2.8.0";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.8.1";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=2.8.1";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -373,47 +373,78 @@ function renderSummary(){
 
 function renderChart(){
   const canvas = document.getElementById("chart");
+  if(!canvas) return;
+
+  const panel = canvas.closest(".panel");
+  const availableWidth = Math.max(320, Math.floor((panel?.clientWidth || window.innerWidth) - 48));
+  const cssWidth = Math.min(availableWidth, 1500);
+  const cssHeight = Math.max(320, Math.min(440, Math.round(cssWidth * 0.34)));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.round(cssHeight * dpr);
+
   const ctx = canvas.getContext("2d");
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,cssWidth,cssHeight);
 
   const list = getFilteredRecords();
   const grouped = {};
 
   list.forEach(r=>{
     const key = getRecordBusinessDate(r);
-
-    const value =
-  currencyMode === "RMB"
-    ? actualRMBIncome(r)
-    : toJPY(r);    
+    const value = currencyMode === "RMB" ? actualRMBIncome(r) : toJPY(r);
     grouped[key] = (grouped[key] || 0) + value;
   });
 
   const labels = Object.keys(grouped).sort();
   const values = labels.map(k=>grouped[k]);
+  const unitText = currencyMode === "JPY"
+    ? "日元收入"
+    : currencyMode === "RMB"
+      ? "人民币收入"
+      : "换算日元总收入";
 
-  const padL = 70;
-  const padR = 25;
-  const padT = 35;
-  const padB = 55;
+  const padL = 78;
+  const padR = 36;
+  const padT = 76;
+  const padB = 58;
+  const w = cssWidth - padL - padR;
+  const h = cssHeight - padT - padB;
 
-  const w = canvas.width - padL - padR;
-  const h = canvas.height - padT - padB;
+  ctx.textBaseline = "alphabetic";
+  ctx.font = "600 15px -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.fillStyle = "#332d24";
+  ctx.fillText(`单位：${unitText}`,padL,28);
 
-  ctx.font = "14px -apple-system";
+  ctx.font = "13px -apple-system, BlinkMacSystemFont, sans-serif";
   ctx.fillStyle = "#8a8174";
+  ctx.fillText("按营业日统计",padL,50);
 
   if(!labels.length){
-    ctx.fillText("暂无数据",padL,60);
+    ctx.font = "15px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillStyle = "#8a8174";
+    ctx.textAlign = "center";
+    ctx.fillText("暂无收入数据",padL + w / 2,padT + h / 2);
+    ctx.textAlign = "left";
     return;
   }
 
   const maxValue = Math.max(...values,1);
-  const yMax = Math.ceil(maxValue / 1000) * 1000 || 1000;
-  const steps = 5;
+  const roughStep = maxValue / 5;
+  const magnitude = 10 ** Math.floor(Math.log10(Math.max(roughStep,1)));
+  const normalized = roughStep / magnitude;
+  const niceFactor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  const yStep = niceFactor * magnitude;
+  const yMax = Math.max(yStep * 5, Math.ceil(maxValue / yStep) * yStep);
+  const steps = Math.max(4, Math.round(yMax / yStep));
 
-  ctx.strokeStyle = "#e6dccb";
+  ctx.strokeStyle = "#ebe2d4";
   ctx.lineWidth = 1;
+  ctx.textAlign = "right";
+  ctx.font = "12px -apple-system, BlinkMacSystemFont, sans-serif";
 
   for(let i=0;i<=steps;i++){
     const y = padT + h - (i/steps)*h;
@@ -425,57 +456,87 @@ function renderChart(){
     ctx.stroke();
 
     ctx.fillStyle = "#8a8174";
-    ctx.fillText(value.toLocaleString(),8,y+4);
+    ctx.fillText(value.toLocaleString(),padL-12,y+4);
   }
 
-  ctx.strokeStyle = "#332d24";
+  ctx.strokeStyle = "#6b6258";
+  ctx.lineWidth = 1.25;
   ctx.beginPath();
   ctx.moveTo(padL,padT);
   ctx.lineTo(padL,padT+h);
   ctx.lineTo(padL+w,padT+h);
   ctx.stroke();
 
+  const points = labels.map((label,i)=>({
+    label,
+    value:values[i],
+    x:labels.length === 1 ? padL + w/2 : padL + i*(w/(labels.length-1)),
+    y:padT + h - (values[i]/yMax)*h
+  }));
+
+  // 轻微面积填充，让走势更容易辨认。
+  const gradient = ctx.createLinearGradient(0,padT,0,padT+h);
+  gradient.addColorStop(0,"rgba(216,169,0,0.22)");
+  gradient.addColorStop(1,"rgba(216,169,0,0.02)");
+  ctx.beginPath();
+  ctx.moveTo(points[0].x,padT+h);
+  points.forEach((point,i)=> i === 0 ? ctx.lineTo(point.x,point.y) : ctx.lineTo(point.x,point.y));
+  ctx.lineTo(points[points.length-1].x,padT+h);
+  ctx.closePath();
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
   ctx.strokeStyle = "#d8a900";
   ctx.lineWidth = 4;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   ctx.beginPath();
-
-  labels.forEach((label,i)=>{
-    const x = labels.length === 1 ? padL + w/2 : padL + i*(w/(labels.length-1));
-    const y = padT + h - (values[i]/yMax)*h;
-
-    if(i===0) ctx.moveTo(x,y);
-    else ctx.lineTo(x,y);
-  });
-
+  points.forEach((point,i)=> i === 0 ? ctx.moveTo(point.x,point.y) : ctx.lineTo(point.x,point.y));
   ctx.stroke();
 
-  labels.forEach((label,i)=>{
-    const x = labels.length === 1 ? padL + w/2 : padL + i*(w/(labels.length-1));
-    const y = padT + h - (values[i]/yMax)*h;
-
+  const minLabelGap = 34;
+  points.forEach((point,i)=>{
     ctx.fillStyle = "#332d24";
     ctx.beginPath();
-    ctx.arc(x,y,5,0,Math.PI*2);
+    ctx.arc(point.x,point.y,5,0,Math.PI*2);
     ctx.fill();
 
-    ctx.font = "13px -apple-system";
-    ctx.fillText(Math.floor(values[i]).toLocaleString(),x-18,y-12);
+    ctx.strokeStyle = "#fffaf1";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const isNearTop = point.y < padT + 28;
+    const prev = points[i-1];
+    const next = points[i+1];
+    const crowded = (prev && Math.abs(prev.y-point.y)<minLabelGap) || (next && Math.abs(next.y-point.y)<minLabelGap);
+    const placeBelow = isNearTop || (crowded && i % 2 === 1);
+    const labelY = placeBelow ? point.y + 22 : point.y - 14;
+
+    ctx.font = "600 12px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.textAlign = "center";
+    const text = Math.floor(point.value).toLocaleString();
+    const textWidth = ctx.measureText(text).width;
+    const boxX = Math.max(padL, Math.min(point.x - textWidth/2 - 5, padL+w-textWidth-10));
+    ctx.fillStyle = "rgba(255,250,241,0.92)";
+    ctx.beginPath();
+    ctx.roundRect(boxX,labelY-13,textWidth+10,18,6);
+    ctx.fill();
+    ctx.fillStyle = "#4b4339";
+    ctx.fillText(text,boxX+(textWidth+10)/2,labelY);
 
     ctx.fillStyle = "#8a8174";
-    ctx.fillText(label.slice(5),x-22,padT+h+25);
+    ctx.font = "12px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(point.label.slice(5),point.x,padT+h+28);
   });
 
-  ctx.fillStyle = "#332d24";
-  ctx.font = "15px -apple-system";
-const unitText =
-  currencyMode === "JPY"
-    ? "单位：日元收入"
-    : currencyMode === "RMB"
-      ? "单位：人民币收入"
-      : "单位：换算日元总收入";
-
-ctx.fillText(unitText,padL,22);
+  ctx.textAlign = "left";
 }
+
+let chartResizeTimer = null;
+window.addEventListener("resize",()=>{
+  clearTimeout(chartResizeTimer);
+  chartResizeTimer = setTimeout(renderChart,160);
+});
 
 function renderPackages(){
   const box = document.getElementById("packageBox");
