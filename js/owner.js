@@ -1,7 +1,8 @@
-import { db } from "./firebase.js?v=2.7.5";
+import { db } from "./firebase.js?v=2.7.6";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.6";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, businessDateToLocalDate } from "./business-day.js?v=2.7.6";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -84,24 +85,8 @@ function save(action="owner_update"){
   return saveStateSafely({db, ref, getState:()=>state, action});
 }
 
-function dateKey(ts){
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function getRecordTime(r){
-  return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
-}
-
-function getRecordBusinessDate(r){
-  if(r.businessDate) return r.businessDate;
-
-  const d = new Date(r.startAt || r.timestamp || r.time || r.date || Date.now());
-  return dateKey(d.getTime());
-}
-
 function getFilteredRecords(){
-  const now = new Date();
+  const now = businessDateToLocalDate(getCurrentBusinessDate()) || new Date();
 
   return records.filter(r=>{
     const businessDate = getRecordBusinessDate(r);
@@ -111,12 +96,12 @@ function getFilteredRecords(){
     }
 
     if(currentFilter === "today"){
-      return businessDate === dateKey(Date.now());
+      return businessDate === getCurrentBusinessDate();
     }
 
-    const d = new Date(businessDate + "T00:00:00");
+    const d = businessDateToLocalDate(businessDate);
 
-    if(isNaN(d.getTime())) return false;
+    if(!d || isNaN(d.getTime())) return false;
 
     if(currentFilter === "week"){
       const day = now.getDay() || 7;

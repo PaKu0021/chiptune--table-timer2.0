@@ -1,6 +1,7 @@
-import { db } from "./firebase.js?v=2.7.5";
+import { db } from "./firebase.js?v=2.7.6";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.5";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.6";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, businessDateToLocalDate } from "./business-day.js?v=2.7.6";
 
 
 import {
@@ -119,27 +120,6 @@ function get90DaysAgo(){
 
   return d.getTime();
 }
-
-function dateKey(ts){
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function getTodayDate(){
-  return dateKey(Date.now());
-}
-
-function getRecordTime(r){
-  return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || 0;
-}
-
-function getRecordBusinessDate(r){
-  if(r.businessDate) return r.businessDate;
-
-  const d = new Date(r.startAt || r.timestamp || r.time || r.date || Date.now());
-  return dateKey(d.getTime());
-}
-
 
 function normalizePayments(r){
   if(Array.isArray(r.payments)) return r.payments;
@@ -319,13 +299,13 @@ function displayCurrency(r){
 
 function setQuickRange(type){
   quickRange = type;
-  const now = new Date();
+  const now = businessDateToLocalDate(getCurrentBusinessDate()) || new Date();
   let start = "";
   let end = "";
 
   if(type === "today"){
-    start = getTodayDate();
-    end = getTodayDate();
+    start = getCurrentBusinessDate();
+    end = getCurrentBusinessDate();
   }
 
   if(type === "week"){
@@ -334,13 +314,13 @@ function setQuickRange(type){
     monday.setDate(now.getDate() - day + 1);
 
     start = dateKey(monday.getTime());
-    end = getTodayDate();
+    end = getCurrentBusinessDate();
   }
 
   if(type === "month"){
     const first = new Date(now.getFullYear(), now.getMonth(), 1);
     start = dateKey(first.getTime());
-    end = getTodayDate();
+    end = getCurrentBusinessDate();
   }
 
   if(type === "all"){

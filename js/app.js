@@ -1,10 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.7.5";
+import { db } from "./firebase.js?v=2.7.6";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.5";
-/*import { formatTime } from "./common.js?v=2.7.5";*/
-import { resetTable, formatTime } from "./common.js?v=2.7.5";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.6";
+/*import { formatTime } from "./common.js?v=2.7.6";*/
+import { resetTable, formatTime } from "./common.js?v=2.7.6";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.6";
+import { getBusinessDateKey } from "./business-day.js?v=2.7.6";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -772,7 +773,7 @@ const dueJPY = Math.max(0, originalJPY - paidJPY);
 record = {
   id,
   timestamp: now,
-  businessDate: getDateText(now),
+  businessDate: getBusinessDateKey(now),
 
   time: new Date(now).toLocaleString(),
 
@@ -791,7 +792,7 @@ record = {
 
   record.businessDate =
     record.businessDate ||
-    getDateText(record.timestamp || Date.now());
+    getBusinessDateKey(record.startAt || record.timestamp || Date.now());
   record.tableName = t.name;
   record.groupId = t.groupId || record.groupId || "";
 record.groupName = t.groupName || record.groupName || "";
@@ -1538,7 +1539,7 @@ async function confirmCheckout(){
       record = getLocalRecordSync(t.recordId) || {
         id: t.recordId || ("rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8)),
         timestamp: Date.now(),
-        businessDate: getDateText(Date.now()),
+        businessDate: getBusinessDateKey(Date.now()),
         time: new Date().toLocaleString(),
         tableName: t.name,
         receiptImage:"",
@@ -1580,7 +1581,7 @@ async function confirmCheckout(){
     record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
     record.closedAt = Date.now();
     record.closedTime = new Date(record.closedAt).toLocaleString();
-    record.businessDate = record.businessDate || getDateText(record.timestamp || record.closedAt);
+    record.businessDate = record.businessDate || getBusinessDateKey(record.startAt || record.timestamp || record.closedAt);
 
     const visit = createOrUpdateCustomerVisit(t);
     if(visit){
@@ -1715,7 +1716,7 @@ async function confirmForceEnd(){
       record = {
         id,
         timestamp: now,
-        businessDate: getDateText(now),
+        businessDate: getBusinessDateKey(now),
         time: new Date(now).toLocaleString(),
         tableName: t.name,
         receiptImage:"",
@@ -1761,7 +1762,7 @@ async function confirmForceEnd(){
     record.closed = true;
     record.closedAt = now;
     record.closedTime = new Date(now).toLocaleString();
-    record.businessDate = record.businessDate || getDateText(record.timestamp || now);
+    record.businessDate = record.businessDate || getBusinessDateKey(record.startAt || record.timestamp || now);
     record.forceClosed = true;
     record.forceClosedAt = now;
 
@@ -2589,7 +2590,7 @@ record.closedTime = new Date(now).toLocaleString();
 
 record.businessDate =
     record.businessDate ||
-    getDateText(record.timestamp || now);
+    getBusinessDateKey(record.startAt || record.timestamp || now);
       record.closedTime = new Date().toLocaleString();
 
       await updateRecordOnly(record);
@@ -2690,7 +2691,7 @@ record.closedTime = new Date(now).toLocaleString();
 
 record.businessDate =
     record.businessDate ||
-    getDateText(record.timestamp || now);
+    getBusinessDateKey(record.startAt || record.timestamp || now);
 
 
     await updateRecordOnly(record);

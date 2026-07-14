@@ -1,9 +1,10 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.5";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.6";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.6";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate } from "./business-day.js?v=2.7.6";
 
 
-import { db } from "./firebase.js?v=2.7.5";
+import { db } from "./firebase.js?v=2.7.6";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -64,18 +65,6 @@ subscribeAllRecords({
   db,
   onChange:list=>{ records=list; renderTodayBill(); }
 });
-
-function dateKey(ts){
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function getRecordBusinessDate(r){
-  if(r.businessDate) return r.businessDate;
-
-  const d = new Date(r.startAt || r.timestamp || r.time || r.date || Date.now());
-  return dateKey(d.getTime());
-}
 
 function getRecordTime(r){
   return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
@@ -176,7 +165,7 @@ function paymentDetailHTML(r){
 
 function getTodayRecords(){
   return records.filter(r=>{
-    return getRecordBusinessDate(r) === dateKey(Date.now());
+    return getRecordBusinessDate(r) === getCurrentBusinessDate();
   });
 }
 
@@ -926,7 +915,7 @@ function openEditRecord(recordId){
   document.getElementById("editPay").value = r.pay || "现金";
   document.getElementById("editTotalJPY").value = toJPY(r);
   document.getElementById("editBusinessDate").value =
-  r.businessDate || getRecordBusinessDate(r);
+  getRecordBusinessDate(r) || r.businessDate || "";
 
   document.getElementById("editGroupPaid").value =
     r.groupPaymentId ? "yes" : "";
@@ -971,6 +960,7 @@ async function saveEditedRecord(){
   r.dueJPY = 0;
   r.currency = pay === "微信" || pay === "支付宝" ? "人民币" : "日元";
   r.businessDate = businessDate || getRecordBusinessDate(r);
+  r.businessDateManual = Boolean(businessDate);
 
   r.payments = [{
     type:"收入",
