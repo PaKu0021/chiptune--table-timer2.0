@@ -1,3 +1,7 @@
+## 当前修正版：2.8.0
+
+详见 `UPDATE-2.8.0-PAYMENT-INTEGRITY.txt`。
+
 # chiptune--table-timer2.0
 ## 2026-07 安全保存改造
 - 新增 `js/safe-state.js`。
