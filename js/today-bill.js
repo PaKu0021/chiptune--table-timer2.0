@@ -1,10 +1,10 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.7";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.7";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate } from "./business-day.js?v=2.7.7";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.9";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.9";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=2.7.9";
 
 
-import { db } from "./firebase.js?v=2.7.7";
+import { db } from "./firebase.js?v=2.7.9";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -38,6 +38,7 @@ let uploadingGroupId = null;
 let uploadingGroupPaymentIndex = null;
 let editingGroupId = null;
 let groupReceiptMap = {};
+let timeSortDirection = "asc";
 
 // 整组截图独立存放，避免把 Base64 图片塞进 shop/main。
 onSnapshot(collection(db,"groupReceipts"), snap=>{
@@ -66,8 +67,8 @@ subscribeAllRecords({
   onChange:list=>{ records=list; renderTodayBill(); }
 });
 
-function getRecordTime(r){
-  return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
+function getRecordTime(record){
+  return getRecordTimestamp(record);
 }
 
 
@@ -324,7 +325,22 @@ function compressImage(file, maxWidth = 600, quality = 0.45){
   });
 }
 
+function updateTodayTimeSortHeader(){
+  const button = document.getElementById("todayTimeSortButton");
+  if(!button) return;
+  const ascending = timeSortDirection === "asc";
+  button.innerHTML = `时间 <span aria-hidden="true">${ascending ? "▲" : "▼"}</span>`;
+  button.title = ascending ? "当前从早到晚，点击切换为从晚到早" : "当前从晚到早，点击切换为从早到晚";
+  button.setAttribute("aria-label", button.title);
+}
+
+function toggleTodayTimeSort(){
+  timeSortDirection = timeSortDirection === "asc" ? "desc" : "asc";
+  renderTodayBill();
+}
+
 function renderTodayBill(){
+  updateTodayTimeSortHeader();
   const list = getTodayRecords();
   const groupMap = getGroupMap();
   const summary = buildCurrencySummary(list);
@@ -344,12 +360,35 @@ function renderTodayBill(){
     付款渠道：${channelSummaryText(summary)}<br>
     客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔`;
 
-  const { map:groupRecords, singles } = getRecordsByGroup([...list].reverse());
+  const directionFactor = timeSortDirection === "asc" ? 1 : -1;
+  const compareRecordsByTime = (a,b)=>{
+    const diff = getRecordTime(a) - getRecordTime(b);
+    if(diff) return diff * directionFactor;
+    return String(a.tableName || "").localeCompare(String(b.tableName || ""), "zh-CN", {numeric:true}) * directionFactor;
+  };
+  const chronological = [...list].sort(compareRecordsByTime);
+  const { map:groupRecords, singles } = getRecordsByGroup(chronological);
+
+  // 组作为一个完整区块显示；区块按照组内最早一笔账单时间排列，散桌也参与同一时间轴。
+  const blocks = [
+    ...Object.keys(groupRecords).map(groupId=>({
+      type:"group",
+      groupId,
+      rows:groupRecords[groupId].sort(compareRecordsByTime),
+      time:Math.min(...groupRecords[groupId].map(getRecordTime).filter(Boolean)) || 0
+    })),
+    ...singles.map(record=>({type:"single", record, time:getRecordTime(record)}))
+  ].sort((a,b)=>(a.time-b.time) * directionFactor);
 
   let html = "";
 
-  Object.keys(groupRecords).forEach(groupId=>{
-    const rows = groupRecords[groupId];
+  blocks.forEach(block=>{
+    if(block.type === "single"){
+      html += renderRecordRow(block.record,true);
+      return;
+    }
+    const groupId = block.groupId;
+    const rows = block.rows;
     const group = groupMap[groupId];
 
     html += `
@@ -387,10 +426,6 @@ function renderTodayBill(){
     rows.forEach(r=>{
       html += renderRecordRow(r,false);
     });
-  });
-
-  singles.forEach(r=>{
-    html += renderRecordRow(r,true);
   });
 
   document.getElementById("todayRecords").innerHTML = html;
@@ -1002,6 +1037,7 @@ async function saveEditedRecord(){
   alert("账单已修改");
 }
 
+window.toggleTodayTimeSort = toggleTodayTimeSort;
 window.confirmExtension = confirmExtension;
 window.uploadReceipt = uploadReceipt;
 window.handleReceiptFileChange = handleReceiptFileChange;

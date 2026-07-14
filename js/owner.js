@@ -1,12 +1,17 @@
-import { db } from "./firebase.js?v=2.7.7";
+import { db } from "./firebase.js?v=2.7.9";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.7";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, businessDateToLocalDate } from "./business-day.js?v=2.7.7";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.9";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=2.7.9";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
 const RATE = 0.044;
+
+// 所有页面统一使用营业日模块解析账单时间，避免未定义函数及 Safari 日期格式差异。
+function getRecordTime(record){
+  return getRecordTimestamp(record);
+}
 
 let state = null;
 installConnectionGuard();

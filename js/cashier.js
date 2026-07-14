@@ -1,7 +1,7 @@
-import { db } from "./firebase.js?v=2.7.7";
+import { db } from "./firebase.js?v=2.7.9";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.7";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, businessDateToLocalDate } from "./business-day.js?v=2.7.7";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.9";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=2.7.9";
 
 
 import {
@@ -95,6 +95,11 @@ function closeReceiptPreview(){
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 
+// 所有页面统一使用营业日模块解析账单时间，避免未定义函数及 Safari 日期格式差异。
+function getRecordTime(record){
+  return getRecordTimestamp(record);
+}
+
 let state = null;
 let records = [];
 installConnectionGuard();
@@ -110,6 +115,7 @@ window.addEventListener("chiptune-online-change",e=>{
   }
 });
 let quickRange = "today";
+let timeSortDirection = "asc";
 let initialized = false; 
 
 function get90DaysAgo(){
@@ -334,6 +340,20 @@ function setQuickRange(type){
   renderCashier();
 }
 
+function updateCashierTimeSortHeader(){
+  const button = document.getElementById("cashierTimeSortButton");
+  if(!button) return;
+  const ascending = timeSortDirection === "asc";
+  button.innerHTML = `时间 <span aria-hidden="true">${ascending ? "▲" : "▼"}</span>`;
+  button.title = ascending ? "当前从早到晚，点击切换为从晚到早" : "当前从晚到早，点击切换为从早到晚";
+  button.setAttribute("aria-label", button.title);
+}
+
+function toggleCashierTimeSort(){
+  timeSortDirection = timeSortDirection === "asc" ? "desc" : "asc";
+  renderCashier();
+}
+
 function getFilteredRecords(){
   const start = document.getElementById("startDate").value;
   const end = document.getElementById("endDate").value;
@@ -355,16 +375,22 @@ function getFilteredRecords(){
 
     return true;
   }).sort((a,b)=>{
+    const directionFactor = timeSortDirection === "asc" ? 1 : -1;
     const da = getRecordBusinessDate(a);
     const db = getRecordBusinessDate(b);
 
-    if(da !== db) return da.localeCompare(db);
+    if(da !== db) return da.localeCompare(db) * directionFactor;
 
-    return getRecordTime(a) - getRecordTime(b);
+    const ta = getRecordTime(a);
+    const tb = getRecordTime(b);
+    if(ta && tb && ta !== tb) return (ta - tb) * directionFactor;
+    if(ta !== tb) return (ta ? -1 : 1) * directionFactor;
+    return String(a.tableName || "").localeCompare(String(b.tableName || ""), "zh-CN", {numeric:true}) * directionFactor;
   });
 }
 
 function renderCashier(){
+  updateCashierTimeSortHeader();
   const rows = getFilteredRecords();
 
   document.getElementById("cashierTitle").innerText =
@@ -590,6 +616,7 @@ alert(`已清理 ${count} 条90天前截图`);
 }
 
 
+window.toggleCashierTimeSort = toggleCashierTimeSort;
 window.applyDateFilter = applyDateFilter;
 window.setQuickRange = setQuickRange;
 window.renderCashier = renderCashier;
