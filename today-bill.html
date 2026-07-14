@@ -36,7 +36,12 @@
       <table class="record-table">
         <thead>
           <tr>
-            <th>时间</th>
+            <th>
+              <button id="todayTimeSortButton" type="button" onclick="toggleTodayTimeSort()"
+                style="border:0;background:transparent;padding:0;font:inherit;font-weight:900;color:inherit;cursor:pointer;white-space:nowrap;">
+                时间 ▲
+              </button>
+            </th>
             <th>桌位</th>
             <th>客人</th>
             <th>类型</th>
@@ -130,7 +135,7 @@
 import { renderNav } from "./js/nav.js";
 
 renderNav("bill");
-import("./js/today-bill.js?v=2.7.7");
+import("./js/today-bill.js?v=2.7.9");
 </script>
 
 
