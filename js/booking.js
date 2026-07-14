@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.8.1";
+import { db } from "./firebase.js?v=2.8.2";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.8.1";
-import { resetTable } from "./common.js?v=2.8.1";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.8.1";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.1";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.8.2";
+import { resetTable } from "./common.js?v=2.8.2";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.8.2";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.2";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -382,13 +382,116 @@ function addCustomerVisit({
   customer.lastVisitAt = now;
 }
 
+
+function normalizeBookingPayments(record){
+  if(Array.isArray(record?.payments)) return record.payments;
+  if(Number(record?.totalJPY || 0) > 0){
+    return [{
+      type:"收入",
+      reason:"历史套餐付款",
+      pay:record.pay || "未记录",
+      currency:currencyForPaymentMethod(record.pay),
+      amountJPY:Number(record.totalJPY || 0),
+      amountRMB:jpyToRmb(record.totalJPY || 0),
+      timestamp:Number(record.timestamp || Date.now()),
+      time:record.time || new Date().toLocaleString()
+    }];
+  }
+  return [];
+}
+
+function sumBookingPayments(payments){
+  return (payments || []).reduce((sum,p)=>sum + Number(p?.amountJPY || 0),0);
+}
+
+function allocateGroupPrepayments(group, tableIndexes, fallbackPackageIndex = 0){
+  const result = new Map(tableIndexes.map(i=>[Number(i),[]]));
+  const remainingCapacity = new Map();
+  tableIndexes.forEach(i=>{
+    const t = state.tables[Number(i)] || {};
+    const p = state.packages?.[Number(t.start ? (t.packageIndex || 0) : fallbackPackageIndex)] || {};
+    remainingCapacity.set(Number(i), Number(p.price || 0));
+  });
+
+  for(const payment of (group?.payments || []).filter(p=>p && p.referenceOnly)){
+    let remaining = Number(payment.amountJPY || 0);
+    if(remaining <= 0) continue;
+    for(const rawIndex of tableIndexes){
+      const index = Number(rawIndex);
+      const capacity = Number(remainingCapacity.get(index) || 0);
+      if(capacity <= 0) continue;
+      const amount = Math.min(capacity, remaining);
+      if(amount > 0){
+        result.get(index).push({
+          type:"收入",
+          reason:"整组套餐预付款",
+          pay:payment.pay || payment.method || "未记录",
+          currency:currencyForPaymentMethod(payment.pay || payment.method),
+          amountJPY:amount,
+          amountRMB:jpyToRmb(amount),
+          note:payment.note || "同组统一收款",
+          timestamp:Number(payment.createdAt || Date.now()),
+          time:payment.createdTime || new Date(payment.createdAt || Date.now()).toLocaleString(),
+          source:"group-prepayment",
+          groupPaymentId:payment.id
+        });
+        remainingCapacity.set(index, capacity - amount);
+        remaining -= amount;
+      }
+      if(remaining <= 0) break;
+    }
+  }
+  return result;
+}
+
+async function syncGroupPrepaymentsToRunningTables(booking, group){
+  const allIndexes = (booking.tableIndexes || [booking.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+  const allocations = allocateGroupPrepayments(group, allIndexes, booking.packageIndex || 0);
+
+  for(const index of allIndexes){
+    const t = state.tables[index];
+    if(!t?.start || !t.recordId) continue;
+    let record = null;
+    try{
+      const snap = await getDoc(doc(db,"records",t.recordId));
+      if(snap.exists()) record = {id:snap.id,...snap.data()};
+    }catch(err){
+      console.warn("读取组内账单失败",err);
+    }
+    if(!record) continue;
+    const existing = normalizeBookingPayments(record)
+      .filter(p=>p?.source !== "group-prepayment" && p?.reason !== "整组套餐预付款");
+    // 一旦使用整组收款，移除自动生成但没有付款依据的套餐行，避免重复。
+    const preserved = existing.filter(p=>
+      p?.reason !== "套餐预付款" &&
+      p?.reason !== "整组套餐预付款"
+    );
+    record.payments = [...(allocations.get(index) || []), ...preserved];
+    const paid = sumBookingPayments(record.payments);
+    const p = state.packages?.[Number(t.packageIndex || 0)] || {};
+    const original = Number(record.originalJPY || p.price || 0);
+    record.paidJPY = paid;
+    record.totalJPY = paid;
+    record.totalRMB = jpyToRmb(paid);
+    record.dueJPY = Math.max(0, original - paid);
+    record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+    record.pay = [...new Set(record.payments.filter(x=>Number(x.amountJPY||0)!==0).map(x=>x.pay||"未记录"))].join("+") || "未记录";
+    t.paidJPY = paid;
+    t.paidRMB = jpyToRmb(paid);
+    await saveRecordSafely({db,ref,record});
+  }
+}
+
 async function createOrUpdateTableRecord(t, {
   customerType = "walkin",
-  checkoutMethod = "开始计时"
+  checkoutMethod = "开始计时",
+  prepaidLines = null
 } = {}){
 
   const p = state.packages?.[Number(t.packageIndex || 0)] || {};
-  const paidJPY = Number(p.price || 0);
+  const packagePrice = Number(p.price || 0);
   const now = Date.now();
 
   let record = null;
@@ -426,29 +529,47 @@ async function createOrUpdateTableRecord(t, {
 
   record.packageName = p.name || "";
   record.packageMinutes = p.unlimited ? "不限时" : p.minutes;
-  record.packagePrice = paidJPY;
+  record.packagePrice = packagePrice;
 
   record.extraMinutes = Math.floor(Number(t.extra || 0) / 60000);
   record.extensionAmount = 0;
-  record.originalJPY = paidJPY;
+  record.originalJPY = packagePrice;
 
+  if(Array.isArray(prepaidLines)){
+    record.payments = prepaidLines;
+  }else if(!Array.isArray(record.payments) || record.payments.length === 0){
+    record.payments = t.pay ? [{
+      type:"收入",
+      reason:"套餐预付款",
+      pay:t.pay,
+      currency:currencyForPaymentMethod(t.pay),
+      amountJPY:packagePrice,
+      amountRMB:jpyToRmb(packagePrice),
+      note:"预约到店时已确认收款",
+      timestamp:now,
+      time:new Date(now).toLocaleString(),
+      source:"manual"
+    }] : [];
+  }
+
+  const paidJPY = sumBookingPayments(record.payments);
   record.paidJPY = paidJPY;
-  record.dueJPY = 0;
+  record.dueJPY = Math.max(0, packagePrice - paidJPY);
   record.totalJPY = paidJPY;
   record.totalRMB = jpyToRmb(paidJPY);
 
-  record.pay = t.pay || "未记录";
-  record.currency = t.currency || "日元";
+  record.pay = [...new Set(record.payments.filter(x=>Number(x.amountJPY||0)!==0).map(x=>x.pay||"未记录"))].join("+") || "未记录";
+  record.currency = t.pay ? currencyForPaymentMethod(t.pay) : "日元";
   record.payTiming = "prepaid";
 
-  record.paidStatus = "已结清";
+  record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
   record.recordType = "prepaid";
   record.checkoutMethod = checkoutMethod;
   record.roundRule = "不抹零";
 
   t.paidJPY = paidJPY;
   t.paidRMB = jpyToRmb(paidJPY);
-  t.paidAt = now;
+  t.paidAt = paidJPY > 0 ? now : null;
 
   await saveRecordSafely({db,ref,record});
 
@@ -2378,8 +2499,17 @@ if(t.recordId){
       ...snap.data()
     };
 
-    r.pay = value;
-    r.currency = t.currency || r.currency || "日元";
+    r.payments = normalizeBookingPayments(r);
+    const target = [...r.payments].reverse().find(p=>Number(p.amountJPY || 0) !== 0);
+    if(target){
+      target.pay = value;
+      target.currency = currencyForPaymentMethod(value);
+      target.amountRMB = jpyToRmb(target.amountJPY || 0);
+      target.updatedAt = Date.now();
+    }
+    r.pay = [...new Set(r.payments.filter(p=>Number(p.amountJPY||0)!==0).map(p=>p.pay||"未记录"))].join("+") || value;
+    r.currency = currencyForPaymentMethod(value);
+    t.currency = currencyForPaymentMethod(value);
 
     await saveRecordSafely({db,ref,record:r});
   }
@@ -2603,6 +2733,8 @@ if(group){
 }
 
 const now = Date.now();
+const hasGroupPrepayments = Array.isArray(group?.payments) && group.payments.some(p=>p?.referenceOnly && Number(p.amountJPY || 0) > 0);
+const groupPrepaymentAllocations = allocateGroupPrepayments(group, allIndexes, b.packageIndex || 0);
 
 for(const idx of startIndexes){
   const oldName = state.tables[idx]?.name || `${idx + 1}号桌`;
@@ -2633,9 +2765,11 @@ for(const idx of startIndexes){
 
   state.tables[idx] = t;
 
+  const allocatedLines = groupPrepaymentAllocations.get(idx) || [];
   await createOrUpdateTableRecord(state.tables[idx], {
     customerType:"booking",
-    checkoutMethod:"预约到店开始计时"
+    checkoutMethod:"预约到店开始计时",
+    prepaidLines:hasGroupPrepayments ? allocatedLines : null
   });
 }
 
@@ -2915,7 +3049,11 @@ async function confirmGroupPayment(){
 
   payment.currency = currencyForPaymentMethod(pay);
   payment.referenceOnly = true;
-  group.payments = [payment];
+  if(!Array.isArray(group.payments)) group.payments = [];
+  group.payments.push(payment);
+  group.updatedAt = Date.now();
+
+  await syncGroupPrepaymentsToRunningTables(b, group);
 
   b.groupPaymentStatus = "paid";
   b.groupPaymentUpdatedAt = Date.now();
