@@ -1,8 +1,8 @@
-import { db } from "./firebase.js?v=2.7.4";
+import { db } from "./firebase.js?v=2.7.5";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.7.4";
-import { resetTable } from "./common.js?v=2.7.4";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.7.4";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.7.5";
+import { resetTable } from "./common.js?v=2.7.5";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.7.5";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -141,7 +141,7 @@ onSnapshot(ref, { includeMetadataChanges:true }, async snap=>{
   state.bookings.forEach(b=>{
   if(!b.groupId) b.groupId = `legacy_${b.id}`;
   if(!b.groupColor) b.groupColor = b.color || getNextBookingColor();
-  if(!b.groupName) b.groupName = b.name ? `${b.name}一组` : "未命名组";
+  if(!b.groupName) b.groupName = "预约组";
   if(!b.color) b.color = b.groupColor;
   createOrUpdateGroup({
     groupId:b.groupId,
@@ -1810,9 +1810,7 @@ const walkinColor = getNextBookingColor();
 
 const walkinGroupId = await makeGroupId();
 
-const walkinGroupName = name
-  ? `${name}一组`
-  : "Walk-in一组";
+const walkinGroupName = "Walk-in组";
 
 createOrUpdateGroup({
   groupId: walkinGroupId,
@@ -1879,9 +1877,7 @@ t.packageIndex = packageIndex;
       id:Date.now(),
       groupId,
       groupColor,
-      groupName:name
-        ? `${name}一组`
-        : "未命名组",
+      groupName:"预约组",
       date:currentBookingDate,
       color:groupColor,
       name,
@@ -2593,7 +2589,7 @@ for(const idx of startIndexes){
     bookingId:b.id,
     groupId:b.groupId,
     groupColor:b.groupColor || b.color || getNextBookingColor(),
-    groupName:b.groupName || (b.name ? `${b.name}一组` : "未命名组"),
+    groupName:b.groupName || "预约组",
     activeColor:b.groupColor || b.color || getNextBookingColor(),
     customerKey:getCustomerKey(b.name, b.phone),
     pay:b.pay || "",
@@ -2870,7 +2866,7 @@ async function confirmGroupPayment(){
 
   const group = createOrUpdateGroup({
     groupId:b.groupId,
-    groupName:b.groupName || (b.name ? `${b.name}一组` : "未命名组"),
+    groupName:b.groupName || "预约组",
     groupColor:b.groupColor || b.color || getNextBookingColor(),
     tableIndexes,
     bookingId:b.id

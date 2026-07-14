@@ -1,9 +1,9 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.4";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.4";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.5";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.5";
 
 
-import { db } from "./firebase.js?v=2.7.4";
+import { db } from "./firebase.js?v=2.7.5";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -540,10 +540,9 @@ if(!recordId) return;
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
 
-    await setDoc(
-      doc(db,"records",r.id),
-      r
-    );
+    await saveRecordSafely({db,ref,record:r});
+    records = mergeRecordLists(records,[r]);
+    renderTodayBill();
 
     alert("收款截图已保存");
 
@@ -599,15 +598,20 @@ async function handlePaymentReceiptFile(file){
 
     const base64 = await fileToBase64(compressed);
 
+    const uploadedAt = Date.now();
     payment.receiptImage = base64;
     payment.receiptFileName = file.name;
-    payment.receiptUploadedAt = Date.now();
-    payment.receiptUploadedTime = new Date().toLocaleString();
+    payment.receiptUploadedAt = uploadedAt;
+    payment.receiptUploadedTime = new Date(uploadedAt).toLocaleString();
+    // 同时保存在账单级别，避免付款明细合并或索引变化后出现“查看但没有截图”。
+    record.receiptImage = base64;
+    record.receiptFileName = file.name;
+    record.receiptUploadedAt = uploadedAt;
+    record.receiptUploadedTime = payment.receiptUploadedTime;
 
-    await setDoc(
-      doc(db,"records",record.id),
-      record
-    );
+    await saveRecordSafely({db,ref,record});
+    records = mergeRecordLists(records,[record]);
+    renderTodayBill();
 
     uploadingPaymentRecordId = null;
     uploadingPaymentIndex = null;
@@ -703,7 +707,8 @@ function viewPaymentReceipt(recordId, paymentIndex){
   const r = records.find(x=>x.id === recordId);
   const p = r?.payments?.[paymentIndex];
 
-  if(!p || !p.receiptImage){
+  const receiptImage = p?.receiptImage || r?.receiptImage;
+  if(!receiptImage){
     alert("没有截图");
     return;
   }
@@ -724,7 +729,7 @@ function viewPaymentReceipt(recordId, paymentIndex){
     document.body.appendChild(bg);
   }
 
-  document.getElementById("receiptPreviewImg").src = p.receiptImage;
+  document.getElementById("receiptPreviewImg").src = receiptImage;
   bg.style.display = "block";
 }
 

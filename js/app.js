@@ -1,10 +1,10 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.7.4";
+import { db } from "./firebase.js?v=2.7.5";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.4";
-/*import { formatTime } from "./common.js?v=2.7.4";*/
-import { resetTable, formatTime } from "./common.js?v=2.7.4";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.4";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.5";
+/*import { formatTime } from "./common.js?v=2.7.5";*/
+import { resetTable, formatTime } from "./common.js?v=2.7.5";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.5";
 const ref = doc(db, "shop", "main");
 const RATE = 0.044;
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -574,6 +574,33 @@ function normalizePayments(record){
   return [];
 }
 
+function consolidatePayment(record, {amountJPY, pay, reason="桌位消费", note=""} = {}){
+  const oldPayments = normalizePayments(record);
+  const receiptSource = oldPayments.find(p=>p?.receiptImage) || null;
+  const first = oldPayments[0] || {};
+  const amount = Number(amountJPY ?? sumPaymentsJPY(oldPayments) ?? 0);
+  const line = {
+    ...first,
+    type: amount < 0 ? "退款" : "收入",
+    reason,
+    pay: pay || first.pay || record.pay || "未记录",
+    amountJPY: amount,
+    amountRMB: getRMB(amount),
+    note: note || first.note || "",
+    time: first.time || new Date().toLocaleString(),
+    timestamp: first.timestamp || Date.now(),
+    updatedAt: Date.now()
+  };
+  if(receiptSource){
+    line.receiptImage = receiptSource.receiptImage;
+    line.receiptFileName = receiptSource.receiptFileName || "";
+    line.receiptUploadedAt = receiptSource.receiptUploadedAt || null;
+    line.receiptUploadedTime = receiptSource.receiptUploadedTime || "";
+  }
+  record.payments = amount === 0 ? [] : [line];
+  return record.payments;
+}
+
 function sumPaymentsJPY(payments){
   return payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
 }
@@ -785,41 +812,23 @@ record.groupColor = t.groupColor || t.activeColor || record.groupColor || "";
 
   record.payments = normalizePayments(record);
 
-if(isNewRecord && t.payTiming === "prepaid" && paidJPY > 0){
-  record.payments.push(
-    makePaymentLine({
-      type:"收入",
-      reason:"套餐费",
-      pay:t.pay || "未记录",
-      amountJPY:paidJPY,
-      note:"开始计时时记录"
-    })
-  );
-}
-
-const packageLine = record.payments.find(p=>p.reason === "套餐费");
-
-if(packageLine && packageLine.pay === "未记录" && t.pay){
-  packageLine.pay = t.pay;
-}
-
-// 先付款模式下，续时/撤回续时直接修改同一条账单，
-// 并把本次差额作为续时收费或退款记录追加进去。
-const adjustmentJPY = Number(options.adjustmentJPY || 0);
-if(adjustmentJPY !== 0){
-  const actionKey = String(options.actionKey || "");
-  const alreadyAdded = actionKey && record.payments.some(p=>p.actionKey === actionKey);
-  if(!alreadyAdded){
-    const line = makePaymentLine({
-      type: adjustmentJPY > 0 ? "收入" : "退款",
-      reason: adjustmentJPY > 0 ? "续时费" : "撤回续时",
-      pay: t.pay || "未记录",
-      amountJPY: adjustmentJPY,
-      note: options.note || (adjustmentJPY > 0 ? "续时1小时" : "撤回续时1小时")
-    });
-    if(actionKey) line.actionKey = actionKey;
-    record.payments.push(line);
-  }
+// 一张桌位只保留一条收入记录。续时、撤回和改支付方式都更新原记录。
+if(t.payTiming === "prepaid"){
+  paidJPY = originalJPY;
+  t.paidJPY = originalJPY;
+  t.paidRMB = getRMB(originalJPY);
+  consolidatePayment(record,{
+    amountJPY:originalJPY,
+    pay:t.pay || record.pay || "未记录",
+    reason:"桌位消费",
+    note: options.note || "套餐与续时合计"
+  });
+}else if(record.payments.length){
+  consolidatePayment(record,{
+    amountJPY:sumPaymentsJPY(record.payments),
+    pay:t.pay || record.pay || "未记录",
+    reason:"桌位消费"
+  });
 }
 
 const paymentsTotalJPY = sumPaymentsJPY(record.payments);
@@ -1272,7 +1281,7 @@ async function start(i){
     const groupId = await allocateGroupId(db,state.groups || []);
     const group = upsertGroup(state,{
       id:groupId,
-      name:t.customer?.name ? `${t.customer.name}一组` : `${t.name}一组`,
+      name:`${t.name}组`,
       color:t.activeColor || "#B7E4C7",
       tableIndexes:[i],
       peopleCount:1,
@@ -1540,15 +1549,12 @@ async function confirmCheckout(){
     }
 
     record.payments = normalizePayments(record);
-    if(finalJPY !== 0){
-      record.payments.push(makePaymentLine({
-        type: finalJPY < 0 ? "退款" : "收入",
-        reason: finalJPY < 0 ? "退款/改套餐" : "结账补收",
-        pay,
-        amountJPY: finalJPY,
-        note
-      }));
-    }
+    consolidatePayment(record,{
+      amountJPY:finalChargeJPY,
+      pay,
+      reason:"桌位消费",
+      note:note || "结账确认"
+    });
 
     const paymentTotalJPY = sumPaymentsJPY(record.payments);
     const p = getPackage(t);
@@ -2292,7 +2298,7 @@ async function confirmBatchStart(){
   }
 
 const groupId = await allocateGroupId(db,state.groups || []);
-const groupName = document.getElementById("batchGroupName")?.value.trim() || `现场客人一组`;
+const groupName = document.getElementById("batchGroupName")?.value.trim() || `现场组`;
 const paymentMode = document.getElementById("batchGroupPaymentMode")?.value || "split";
 const group = upsertGroup(state,{
   id:groupId,
