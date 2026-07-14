@@ -1,4 +1,4 @@
-Chiptune Table Timer 2.8.1
+Chiptune Table Timer 2.8.2
 
 - 优化老板模式收入折线图。
 - 单位说明移动至独立顶部区域，避免与最高点金额重叠。
