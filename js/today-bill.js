@@ -1,10 +1,10 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.6";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.6";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate } from "./business-day.js?v=2.7.6";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.7";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.7";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate } from "./business-day.js?v=2.7.7";
 
 
-import { db } from "./firebase.js?v=2.7.6";
+import { db } from "./firebase.js?v=2.7.7";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -797,9 +797,15 @@ function openEditGroup(groupId){
     .map(r=>{
       const checked = currentIds.has(String(r.id));
       const otherGroup = r.groupId && String(r.groupId)!==editingGroupId;
-      return `<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #eadfce;border-radius:12px;margin:6px 0;">
-        <input type="checkbox" class="edit-group-record-check" value="${r.id}" ${checked ? "checked" : ""}>
-        <span><b>${r.tableName}</b>｜${r.customerName || "-"}｜${r.packageName || "-"}${otherGroup ? "｜当前属于其他组，勾选后将移入本组" : ""}</span>
+      return `<label class="edit-group-card ${checked ? "selected" : ""} ${otherGroup ? "other-group" : ""}">
+        <input type="checkbox" class="edit-group-record-check" value="${r.id}" ${checked ? "checked" : ""} onchange="this.closest('.edit-group-card')?.classList.toggle('selected', this.checked)">
+        <span class="edit-group-checkmark" aria-hidden="true">✓</span>
+        <span class="edit-group-card-body">
+          <strong>${r.tableName}</strong>
+          <span class="edit-group-customer">${r.customerName || "未填写姓名"}</span>
+          <span class="edit-group-package">${r.packageName || "未选择套餐"}</span>
+          ${otherGroup ? '<em>当前属于其他组，选择后会移入本组</em>' : ''}
+        </span>
       </label>`;
     }).join("") || "今天暂无可加入的桌位账单";
   document.getElementById("editGroupModalBg").style.display = "block";

@@ -1,8 +1,8 @@
-import { db } from "./firebase.js?v=2.7.6";
+import { db } from "./firebase.js?v=2.7.7";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.7.6";
-import { resetTable } from "./common.js?v=2.7.6";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.7.6";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.7.7";
+import { resetTable } from "./common.js?v=2.7.7";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.7.7";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -15,6 +15,40 @@ loadLocalState().then(local=>{
 });
 window.addEventListener("chiptune-online-change",e=>{
   if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
+});
+
+// 预约页必须立即接收计时器、账单页等同一设备页面的本地状态变化。
+// 即使 Firestore 暂时同步失败，也不需要再靠“锁定/解锁”触发重绘。
+window.addEventListener("chiptune-state-broadcast", event=>{
+  const incoming = event.detail?.state;
+  if(!incoming) return;
+
+  state = incoming;
+  if(!Array.isArray(state.bookings)) state.bookings = [];
+  if(!Array.isArray(state.customers)) state.customers = [];
+  if(!Array.isArray(state.tables)) state.tables = [];
+  ensureGroups(state);
+
+  try{
+    renderBookingGridPreservingScroll();
+    renderList();
+  }catch(error){
+    console.warn("预约页即时刷新失败", error);
+  }
+});
+
+window.addEventListener("storage", event=>{
+  if(event.key !== "chiptune_state_shadow_v2" || !event.newValue) return;
+  try{
+    const box = JSON.parse(event.newValue);
+    if(!box?.state) return;
+    state = box.state;
+    ensureGroups(state);
+    renderBookingGridPreservingScroll();
+    renderList();
+  }catch(error){
+    console.warn("预约页读取跨页面备份失败", error);
+  }
 });
 
 let activeBookingId = null;
@@ -698,6 +732,26 @@ updateBookingLockUI();
 startRunningTimeTextTimer();
 }
 
+function renderBookingGridPreservingScroll(){
+  const scroller =
+    document.querySelector(".booking-grid-wrap") ||
+    document.getElementById("bookingGrid");
+  const left = scroller ? scroller.scrollLeft : 0;
+  const top = scroller ? scroller.scrollTop : 0;
+
+  renderBookingGrid();
+
+  requestAnimationFrame(()=>{
+    const current =
+      document.querySelector(".booking-grid-wrap") ||
+      document.getElementById("bookingGrid");
+    if(current){
+      current.scrollLeft = left;
+      current.scrollTop = top;
+    }
+  });
+}
+
 function startBookingAutoRefresh(){
   if(bookingAutoRefreshTimer) return;
 
@@ -718,17 +772,20 @@ function startBookingAutoRefresh(){
     const left = scroller ? scroller.scrollLeft : 0;
     const top = scroller ? scroller.scrollTop : 0;
 
-    renderBookingGrid();
-    renderList();
+    loadLocalState().then(local=>{
+      if(local) state = local;
+      renderBookingGrid();
+      renderList();
 
-    requestAnimationFrame(()=>{
-      if(scroller){
-        scroller.scrollLeft = left;
-        scroller.scrollTop = top;
-      }
-    });
+      requestAnimationFrame(()=>{
+        if(scroller){
+          scroller.scrollLeft = left;
+          scroller.scrollTop = top;
+        }
+      });
+    }).catch(error=>console.warn("预约自动刷新读取本机状态失败", error));
 
-  },30000);
+  },5000);
 }
 
 document.addEventListener("visibilitychange",()=>{
@@ -2366,8 +2423,6 @@ function openBookingAction(id){
   document.getElementById("detailPay").value =
     b.pay || "";
 
-  document.getElementById("detailStartTime").value = b.startTime || "";
-  document.getElementById("detailEndTime").value = b.endTime || "";
   const indexes = (b.tableIndexes || [b.tableIndex])
   .filter(v=>v !== undefined && v !== null)
   .map(Number);
@@ -2398,47 +2453,15 @@ async function saveBookingDetail(){
   const newPhone = document.getElementById("detailPhone").value.trim();
   const newPay = document.getElementById("detailPay").value;
   const newPackageIndex = Number(document.getElementById("detailPackage").value || 0);
-  const newStartTime = document.getElementById("detailStartTime").value;
-  const newEndTime = document.getElementById("detailEndTime").value;
-
-  if(!newStartTime || !newEndTime){
-    alert("请选择预约开始和结束时间");
-    return;
-  }
-
-  if(timeToMinutes(newStartTime) >= timeToMinutes(newEndTime)){
-    alert("结束时间必须晚于开始时间");
-    return;
-  }
 
   const indexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
 
-  const tempBooking = {
-    ...b,
-    startTime:newStartTime,
-    endTime:newEndTime
-  };
-
-  const conflictTables = indexes.filter(idx=>{
-    return hasBookingConflict(idx, tempBooking, b.id);
-  });
-
-  if(conflictTables.length){
-    alert(
-      "这个时间段已有预约，冲突桌位：\n" +
-      conflictTables.map(i=>state.tables[i]?.name).join("、")
-    );
-    return;
-  }
-
   b.name = newName;
   b.phone = newPhone;
   b.pay = newPay;
   b.packageIndex = newPackageIndex;
-  b.startTime = newStartTime;
-  b.endTime = newEndTime;
 
   indexes.forEach(idx=>{
     const t = state.tables[idx];

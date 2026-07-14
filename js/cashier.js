@@ -1,7 +1,7 @@
-import { db } from "./firebase.js?v=2.7.6";
+import { db } from "./firebase.js?v=2.7.7";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.6";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, businessDateToLocalDate } from "./business-day.js?v=2.7.6";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.7";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, businessDateToLocalDate } from "./business-day.js?v=2.7.7";
 
 
 import {
