@@ -123,12 +123,6 @@
 
     <input id="detailPhone" placeholder="手机号">
 
-    <label>开始时间</label>
-<input id="detailStartTime" type="time">
-
-<label>结束时间</label>
-<input id="detailEndTime" type="time">
-
     <div id="detailTablesBox"></div>
 
     <select id="detailPackage"></select>
@@ -328,7 +322,7 @@
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.7.6";
+  import { renderNav } from "./js/nav.js?v=2.7.7";
 
   try {
     renderNav("booking");
@@ -336,7 +330,7 @@
     console.error("预约页面导航加载失败", error);
   }
 
-  import("./js/booking.js?v=2.7.6")
+  import("./js/booking.js?v=2.7.7")
     .catch(error => {
       console.error("booking.js 加载失败", error);
 

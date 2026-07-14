@@ -106,11 +106,11 @@
 
 
 <div class="modal-bg" id="editGroupModalBg">
-  <div class="modal">
+  <div class="modal edit-group-modal">
     <h2>修改组 / 添加桌位</h2>
-    <div id="editGroupInfo" style="font-weight:800;line-height:1.7;margin-bottom:12px;"></div>
-    <p style="color:#8a8174;font-weight:700;">勾选需要加入本组的桌位账单。已有桌位保持勾选，也可以把其他桌加入本组。</p>
-    <div id="editGroupRecordList" style="max-height:50vh;overflow:auto;"></div>
+    <div id="editGroupInfo" class="edit-group-info"></div>
+    <p class="edit-group-help">选择要放进这个组的桌位。已选桌位会高亮显示。</p>
+    <div id="editGroupRecordList" class="edit-group-record-list"></div>
     <div class="action-row">
       <button class="btn-main" onclick="saveEditedGroup()">保存组桌位</button>
       <button class="btn-ghost" onclick="closeEditGroup()">取消</button>
@@ -130,7 +130,7 @@
 import { renderNav } from "./js/nav.js";
 
 renderNav("bill");
-import("./js/today-bill.js?v=2.7.6");
+import("./js/today-bill.js?v=2.7.7");
 </script>
 
 
