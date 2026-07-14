@@ -76,7 +76,8 @@
 
 <script type="module">
 import { db } from "./js/firebase.js";
-import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending, subscribeAllRecords } from "./js/safe-state.js?v=2.7.5";
+import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending, subscribeAllRecords } from "./js/safe-state.js?v=2.7.6";
+import { getCurrentBusinessDate, getRecordBusinessDate } from "./js/business-day.js?v=2.7.6";
 import { doc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -102,29 +103,6 @@ window.addEventListener("chiptune-online-change",e=>{
 });
 
 
-function getTodayDate(){
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function getRecordBusinessDate(r){
-  if(r.businessDate) return r.businessDate;
-
-  const ts =
-    r.timestamp ||
-    r.closedAt ||
-    r.paidAt ||
-    r.time ||
-    r.date;
-
-  if(!ts) return "";
-
-  const d = new Date(ts);
-  if(isNaN(d.getTime())) return "";
-
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
 onSnapshot(ref,async snap=>{
   if(!snap.exists()) return;
 
@@ -141,6 +119,11 @@ try{
   console.warn("首页账单监听启动失败，不影响导航",err);
 }
 
+function getCalendarDate(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
 function updateHome(){
   if(!homeState) return;
 
@@ -151,10 +134,11 @@ function updateHome(){
   const usingCount = tables.filter(t=>t.start).length;
   const freeCount = tables.length - usingCount;
 
-  const today = getTodayDate();
+  const today = getCurrentBusinessDate();
+  const calendarToday = getCalendarDate();
 
   const todayBookingCount = bookings.filter(b=>{
-    return b.date === today;
+    return b.date === calendarToday;
   }).length;
 
   const todayRevenue = records
