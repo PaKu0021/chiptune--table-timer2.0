@@ -1,14 +1,15 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.7.9";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.7.9";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=2.7.9";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.8.0";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.8.0";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=2.8.0";
+import { RMB_PER_JPY } from "./business-day.js?v=2.8.0";
 
 
-import { db } from "./firebase.js?v=2.7.9";
+import { db } from "./firebase.js?v=2.8.0";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
-const RATE = 0.044;
+
 
 let state = null;
 installConnectionGuard();
@@ -104,7 +105,7 @@ function paymentRMB(p){
   if(p.amountRMB !== undefined){
     return Number(p.amountRMB || 0);
   }
-  return Math.floor(Number(p.amountJPY || 0) * RATE);
+  return Math.floor(Number(p.amountJPY || 0) * RMB_PER_JPY);
 }
 
 function sumPaymentsJPY(r){
@@ -205,19 +206,19 @@ function toJPY(r){
 
   if(r.totalJPY !== undefined) return Number(r.totalJPY || 0);
   if(r.jpy !== undefined) return Number(r.jpy || 0);
-  if(r.currency === "人民币") return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+  if(r.currency === "人民币") return Math.floor(Number(r.totalRMB || r.rmb || 0) / RMB_PER_JPY);
   return 0;
 }
 
 
 function toRMB(r){
   if(Array.isArray(r.payments)){
-    return Math.floor(toJPY(r) * RATE);
+    return Math.floor(toJPY(r) * RMB_PER_JPY);
   }
 
   if(r.totalRMB !== undefined) return Number(r.totalRMB || 0);
   if(r.rmb !== undefined) return Number(r.rmb || 0);
-  return Math.floor(toJPY(r) * RATE);
+  return Math.floor(toJPY(r) * RMB_PER_JPY);
 }
 
 function actualRMBIncome(r){
@@ -271,8 +272,8 @@ function buildCurrencySummary(rows){
       if(rmb) actualRMB += amount; else actualJPY += amount;
     });
   });
-  const jpyToRmb = Math.floor(actualJPY * RATE);
-  const rmbToJpy = Math.floor(actualRMB / RATE);
+  const jpyToRmb = Math.floor(actualJPY * RMB_PER_JPY);
+  const rmbToJpy = Math.floor(actualRMB / RMB_PER_JPY);
   return {
     channels, actualJPY, actualRMB, jpyToRmb, rmbToJpy,
     convertedJPY: actualJPY + rmbToJpy,
@@ -996,7 +997,7 @@ async function saveEditedRecord(){
 
   r.pay = pay;
   r.totalJPY = totalJPY;
-  r.totalRMB = Math.floor(totalJPY * RATE);
+  r.totalRMB = Math.floor(totalJPY * RMB_PER_JPY);
   r.paidJPY = totalJPY;
   r.dueJPY = 0;
   r.currency = pay === "微信" || pay === "支付宝" ? "人民币" : "日元";
@@ -1010,7 +1011,7 @@ async function saveEditedRecord(){
     amountJPY: totalJPY,
     amountRMB:
   pay === "微信" || pay === "支付宝"
-    ? Math.floor(totalJPY * RATE)
+    ? Math.floor(totalJPY * RMB_PER_JPY)
     : 0,    
     note,
     time:new Date().toLocaleString(),

@@ -1,4 +1,5 @@
-const RATE = 0.044;
+import { RMB_PER_JPY } from "./business-day.js?v=2.8.0";
+
 
 const raw = sessionStorage.getItem("cashier_print_data");
 const payload = raw ? JSON.parse(raw) : {
@@ -42,7 +43,7 @@ function paymentRMB(p){
   if(p.amountRMB !== undefined){
     return Number(p.amountRMB || 0);
   }
-  return Math.floor(Number(p.amountJPY || 0) * RATE);
+  return Math.floor(Number(p.amountJPY || 0) * RMB_PER_JPY);
 }
 
 function actualRMBIncome(r){
@@ -85,7 +86,7 @@ function toJPY(r){
   if(r.jpy !== undefined) return Number(r.jpy || 0);
 
   if(r.currency === "人民币"){
-    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RMB_PER_JPY);
   }
 
   return 0;
@@ -100,7 +101,7 @@ function buildCurrencySummary(rows){
     channels[pay].currency=rmb?"人民币":"日元"; channels[pay].amount+=amount;
     if(rmb) actualRMB+=amount; else actualJPY+=amount;
   }));
-  const jpyToRmb=Math.floor(actualJPY*RATE), rmbToJpy=Math.floor(actualRMB/RATE);
+  const jpyToRmb=Math.floor(actualJPY*RMB_PER_JPY), rmbToJpy=Math.floor(actualRMB/RMB_PER_JPY);
   return {channels,actualJPY,actualRMB,jpyToRmb,rmbToJpy,convertedJPY:actualJPY+rmbToJpy,convertedRMB:actualRMB+jpyToRmb};
 }
 function renderSummary(rows){

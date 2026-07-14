@@ -1,7 +1,8 @@
-import { db } from "./firebase.js?v=2.7.9";
+import { db } from "./firebase.js?v=2.8.0";
+import { RMB_PER_JPY } from "./business-day.js?v=2.8.0";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.7.9";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=2.7.9";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.8.0";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=2.8.0";
 
 
 import {
@@ -93,7 +94,7 @@ function closeReceiptPreview(){
     
 
 const ref = doc(db, "shop", "main");
-const RATE = 0.044;
+
 
 // 所有页面统一使用营业日模块解析账单时间，避免未定义函数及 Safari 日期格式差异。
 function getRecordTime(record){
@@ -161,7 +162,7 @@ function paymentRMB(p){
   if(p.amountRMB !== undefined){
     return Number(p.amountRMB || 0);
   }
-  return Math.floor(Number(p.amountJPY || 0) * RATE);
+  return Math.floor(Number(p.amountJPY || 0) * RMB_PER_JPY);
 }
 
 function sumPaymentsJPY(r){
@@ -243,8 +244,8 @@ function buildCurrencySummary(rows){
       if(rmb) actualRMB += amount; else actualJPY += amount;
     });
   });
-  const jpyToRmb = Math.floor(actualJPY * RATE);
-  const rmbToJpy = Math.floor(actualRMB / RATE);
+  const jpyToRmb = Math.floor(actualJPY * RMB_PER_JPY);
+  const rmbToJpy = Math.floor(actualRMB / RMB_PER_JPY);
   return {
     channels, actualJPY, actualRMB, jpyToRmb, rmbToJpy,
     convertedJPY: actualJPY + rmbToJpy,
@@ -266,7 +267,7 @@ function toJPY(r){
   }
 
   if(r.currency === "人民币"){
-    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RMB_PER_JPY);
   }
 
   return Number(r.totalJPY || r.jpy || 0);
@@ -274,14 +275,14 @@ function toJPY(r){
 
 function toRMB(r){
   if(Array.isArray(r.payments)){
-    return Math.floor(toJPY(r) * RATE);
+    return Math.floor(toJPY(r) * RMB_PER_JPY);
   }
 
   if(r.currency === "人民币"){
     return Number(r.totalRMB || r.rmb || 0);
   }
 
-  return Math.floor(toJPY(r) * RATE);
+  return Math.floor(toJPY(r) * RMB_PER_JPY);
 }
 
 function actualRMBIncome(r){

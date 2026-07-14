@@ -1,8 +1,9 @@
-import { db } from "./firebase.js?v=2.7.9";
+import { db } from "./firebase.js?v=2.8.0";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.7.9";
-import { resetTable } from "./common.js?v=2.7.9";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.7.9";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.8.0";
+import { resetTable } from "./common.js?v=2.8.0";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.8.0";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.0";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -434,7 +435,7 @@ async function createOrUpdateTableRecord(t, {
   record.paidJPY = paidJPY;
   record.dueJPY = 0;
   record.totalJPY = paidJPY;
-  record.totalRMB = Math.floor(paidJPY * 0.044);
+  record.totalRMB = jpyToRmb(paidJPY);
 
   record.pay = t.pay || "未记录";
   record.currency = t.currency || "日元";
@@ -446,7 +447,7 @@ async function createOrUpdateTableRecord(t, {
   record.roundRule = "不抹零";
 
   t.paidJPY = paidJPY;
-  t.paidRMB = Math.floor(paidJPY * 0.044);
+  t.paidRMB = jpyToRmb(paidJPY);
   t.paidAt = now;
 
   await saveRecordSafely({db,ref,record});
@@ -2902,7 +2903,7 @@ async function confirmGroupPayment(){
     pay,
     payer:payer || b.name || "",
     amountJPY:amount,
-    amountRMB:Math.floor(amount * 0.044),
+    amountRMB:jpyToRmb(amount),
     tableIndexes,
     tableNames,
     note,
@@ -2912,7 +2913,9 @@ async function confirmGroupPayment(){
     createdTime:new Date().toLocaleString()
   };
 
-  group.payments.push(payment);
+  payment.currency = currencyForPaymentMethod(pay);
+  payment.referenceOnly = true;
+  group.payments = [payment];
 
   b.groupPaymentStatus = "paid";
   b.groupPaymentUpdatedAt = Date.now();

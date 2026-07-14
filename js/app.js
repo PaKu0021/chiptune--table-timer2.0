@@ -1,13 +1,13 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.7.9";
+import { db } from "./firebase.js?v=2.8.0";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.7.9";
-/*import { formatTime } from "./common.js?v=2.7.9";*/
-import { resetTable, formatTime } from "./common.js?v=2.7.9";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.7.9";
-import { getBusinessDateKey } from "./business-day.js?v=2.7.9";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.8.0";
+/*import { formatTime } from "./common.js?v=2.8.0";*/
+import { resetTable, formatTime } from "./common.js?v=2.8.0";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.8.0";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.0";
 const ref = doc(db, "shop", "main");
-const RATE = 0.044;
+
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
 
 
@@ -540,7 +540,7 @@ function roundJPY(jpy){
 }
 
 function getRMB(jpy){
-  return Math.floor(jpy * RATE);
+  return jpyToRmb(jpy);
 }
 
 function makePaymentLine({type="收入", reason="", pay="", amountJPY=0, note=""}){
@@ -548,6 +548,7 @@ function makePaymentLine({type="收入", reason="", pay="", amountJPY=0, note=""
     type,
     reason,
     pay: pay || "未记录",
+    currency: currencyForPaymentMethod(pay),
     amountJPY: Number(amountJPY || 0),
     amountRMB: getRMB(Number(amountJPY || 0)),
     note,
@@ -604,6 +605,28 @@ function consolidatePayment(record, {amountJPY, pay, reason="桌位消费", note
 
 function sumPaymentsJPY(payments){
   return payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+}
+
+// 在同一张账单内记录套餐预付款与离店补收。不会创建第二张收入记录。
+function settleRecordToFinalAmount(record,{finalAmountJPY,pay,reason="续时补收",note=""}={}){
+  record.payments = normalizePayments(record);
+  const current = sumPaymentsJPY(record.payments);
+  const target = Number(finalAmountJPY || 0);
+  const diff = target - current;
+  if(diff !== 0){
+    record.payments.push(makePaymentLine({
+      type: diff < 0 ? "退款" : "收入",
+      reason: diff < 0 ? "结账退款" : reason,
+      pay: pay || record.pay || "未记录",
+      amountJPY: diff,
+      note
+    }));
+  }else if(record.payments.length && pay){
+    // 只更换付款方式时修改现有付款，不生成新的付款行。
+    record.payments[record.payments.length - 1].pay = pay;
+    record.payments[record.payments.length - 1].updatedAt = Date.now();
+  }
+  return record.payments;
 }
 
 function getPaymentSummary(payments){
@@ -813,23 +836,22 @@ record.groupColor = t.groupColor || t.activeColor || record.groupColor || "";
 
   record.payments = normalizePayments(record);
 
-// 一张桌位只保留一条收入记录。续时、撤回和改支付方式都更新原记录。
+// 先付款只在入店时收套餐费。续时只提高应收额，离店时再补收；始终沿用同一 recordId。
 if(t.payTiming === "prepaid"){
-  paidJPY = originalJPY;
-  t.paidJPY = originalJPY;
-  t.paidRMB = getRMB(originalJPY);
-  consolidatePayment(record,{
-    amountJPY:originalJPY,
-    pay:t.pay || record.pay || "未记录",
-    reason:"桌位消费",
-    note: options.note || "套餐与续时合计"
-  });
-}else if(record.payments.length){
-  consolidatePayment(record,{
-    amountJPY:sumPaymentsJPY(record.payments),
-    pay:t.pay || record.pay || "未记录",
-    reason:"桌位消费"
-  });
+  const prepaidAmount = Number(t.paidJPY || 0);
+  if(record.payments.length === 0 && prepaidAmount > 0){
+    record.payments = [makePaymentLine({
+      reason:"套餐预付款",
+      pay:t.pay || record.pay || "未记录",
+      amountJPY:prepaidAmount,
+      note:"入店时收取"
+    })];
+  }else if(record.payments.length && options.updatePaymentMethod){
+    record.payments[0].pay = t.pay || record.payments[0].pay || "未记录";
+    record.payments[0].updatedAt = Date.now();
+  }
+}else if(record.payments.length && options.updatePaymentMethod){
+  record.payments[record.payments.length - 1].pay = t.pay || record.payments.at(-1).pay || "未记录";
 }
 
 const paymentsTotalJPY = sumPaymentsJPY(record.payments);
@@ -1382,9 +1404,10 @@ async function setPay(i,v){
 
   const t = state.tables[i];
   t.pay = v;
+  t.currency = currencyForPaymentMethod(v);
 
   if(t.start){
-    await createOrUpdateRecord(t);
+    await createOrUpdateRecord(t,{updatePaymentMethod:true});
   }
 
   save();
@@ -1392,7 +1415,8 @@ async function setPay(i,v){
 
 async function setCurrency(i,v){
   const t = state.tables[i];
-  t.currency = v;
+  const expected = currencyForPaymentMethod(t.pay);
+  t.currency = t.pay ? expected : v;
 
   if(t.start){
     await createOrUpdateRecord(t);
@@ -1454,13 +1478,10 @@ function updateCheckout(){
 </select>
 
 <div class="pay-tip">
-  仅记录本次新增收款，不会修改之前已收款项。
+  套餐预付款会保留；离店时只补收差额，最终合并在同一张账单中。
 </div>
 
-    <select id="checkoutCurrency" style="margin-top:8px;">
-      <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
-      <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
-    </select>
+    <div class="pay-tip">币种会按付款方式自动确定：现金/PayPay 为日元，微信/支付宝为人民币。</div>
   `;
 
 document.getElementById("checkoutAmount").innerHTML = `
@@ -1497,7 +1518,7 @@ async function confirmCheckout(){
   }
 
   const pay = document.getElementById("checkoutPay")?.value || "";
-  const currency = document.getElementById("checkoutCurrency")?.value || "日元";
+  const currency = currencyForPaymentMethod(pay);
   if(!pay){
     alert("请选择付款方式");
     return;
@@ -1550,11 +1571,11 @@ async function confirmCheckout(){
     }
 
     record.payments = normalizePayments(record);
-    consolidatePayment(record,{
-      amountJPY:finalChargeJPY,
+    settleRecordToFinalAmount(record,{
+      finalAmountJPY:finalChargeJPY,
       pay,
-      reason:"桌位消费",
-      note:note || "结账确认"
+      reason:"续时补收",
+      note:note || "离店时结清续时费用"
     });
 
     const paymentTotalJPY = sumPaymentsJPY(record.payments);
@@ -1838,7 +1859,7 @@ async function autoCloseOldTables(){
 
       record.businessDate =
         record.businessDate ||
-        getDateText(t.start || record.timestamp || now);
+        getBusinessDateKey(t.start || record.timestamp || now);
 
       record.closedAt = now;
       record.closedTime = new Date(now).toLocaleString();
@@ -1859,6 +1880,7 @@ async function autoCloseOldTables(){
       record.currency = t.currency || "日元";
       record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
 
+      emergencySaveRecord({db,ref,record});
       await updateRecordOnly(record);
 
       const visit = createOrUpdateCustomerVisit(t);
@@ -2374,11 +2396,6 @@ function openBatchCheckout(){
             <option value="支付宝" ${t.pay==="支付宝"?"selected":""}>支付宝</option>            
           </select>
 
-          <select id="batch-currency-${i}">
-            <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
-            <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
-          </select>
-
           <input
             id="batch-amount-${i}"
             type="number"
@@ -2549,15 +2566,12 @@ async function confirmBatchCheckout(){
       record.payments = normalizePayments(record);
 
       if(paidThisTime !== 0){
-        record.payments.push(
-          makePaymentLine({
-            type:paidThisTime < 0 ? "退款" : "收入",
-            reason:"整组代付",
-            pay:effectiveMethod,
-            amountJPY:paidThisTime,
-            note:groupPayNote || `${groupPayerName || paymentLines.map(line=>line.payerName).filter(Boolean).join("、") || "未填写付款人"} 代付：${tableNames}`
-          })
-        );
+        settleRecordToFinalAmount(record,{
+          finalAmountJPY:sumPaymentsJPY(record.payments) + paidThisTime,
+          pay:effectiveMethod,
+          reason:"整组代付补收",
+          note:groupPayNote || `${groupPayerName || paymentLines.map(line=>line.payerName).filter(Boolean).join("、") || "未填写付款人"} 代付：${tableNames}`
+        });
       }
 
       const paymentTotalJPY = sumPaymentsJPY(record.payments);
@@ -2606,7 +2620,7 @@ record.businessDate =
         coveredPeople:unifiedGroup.peopleCount || indexes.length
       }];
       unifiedGroup.paymentMode = lines.length === 1 ? "unified" : "split";
-      unifiedGroup.payments = [...(unifiedGroup.payments || []),...lines.map(line=>({
+      unifiedGroup.payments = lines.map(line=>({
         id:`pay_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
         payerName:line.payerName,
         method:line.method,
@@ -2614,8 +2628,9 @@ record.businessDate =
         coveredPeople:line.coveredPeople,
         coveredTableIndexes:indexes,
         note:groupPayNote,
-        createdAt:Date.now()
-      }))];
+        createdAt:Date.now(),
+        referenceOnly:true
+      }));
       unifiedGroup.updatedAt = Date.now();
     }
     await save();
@@ -2641,7 +2656,7 @@ record.businessDate =
     const t = state.tables[i];
 
     const pay = document.getElementById(`batch-pay-${i}`).value;
-    const currency = document.getElementById(`batch-currency-${i}`).value;
+    const currency = currencyForPaymentMethod(pay);
     const manualAmount = Number(document.getElementById(`batch-amount-${i}`).value || 0);
 
     stopAlertLoop(i);
@@ -2656,15 +2671,12 @@ record.businessDate =
     record.payments = normalizePayments(record);
 
     if(finalPaidJPY !== 0){
-      record.payments.push(
-        makePaymentLine({
-          type: finalPaidJPY < 0 ? "退款" : "收入",
-          reason: finalPaidJPY < 0 ? "批量退款" : "批量结账",
-          pay,
-          amountJPY: finalPaidJPY,
-          note: "批量结账记录"
-        })
-      );
+      settleRecordToFinalAmount(record,{
+        finalAmountJPY:sumPaymentsJPY(record.payments) + finalPaidJPY,
+        pay,
+        reason:"批量续时补收",
+        note:"批量结账记录"
+      });
     }
 
     const paymentTotalJPY = sumPaymentsJPY(record.payments);

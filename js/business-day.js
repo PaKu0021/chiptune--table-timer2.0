@@ -1,6 +1,13 @@
 // Chiptune 营业日：每天早上 06:00 换日。
 // 例如 7 月 14 日 00:00–05:59 仍归属于 7 月 13 日营业收入。
 export const BUSINESS_DAY_START_HOUR = 6;
+// 全站统一货币配置。现金/PayPay 使用日元；微信/支付宝使用人民币。
+export const RMB_PER_JPY = 0.044;
+export function jpyToRmb(jpy){ return Math.floor(Number(jpy || 0) * RMB_PER_JPY); }
+export function currencyForPaymentMethod(method){
+  return ["微信","支付宝"].includes(String(method || "")) ? "人民币" : "日元";
+}
+
 
 export function dateKey(value = Date.now()){
   const d = value instanceof Date ? new Date(value.getTime()) : new Date(value);
