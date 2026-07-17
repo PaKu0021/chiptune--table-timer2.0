@@ -134,7 +134,7 @@
 
     <button class="btn-success full"
       onclick="checkInBooking()">
-      到店并开始计时
+      到店并进入计时器
     </button>
 
     <button class="btn-danger full"
@@ -152,19 +152,19 @@
 
 <div id="checkInSelectModalBg" class="modal-bg">
   <div class="modal">
-    <h2>到店开始</h2>
+    <h2>到店进入计时器</h2>
 
     <div id="checkInSelectInfo" style="margin-bottom:12px;font-weight:800;"></div>
 
     <select id="checkInMode" onchange="toggleCheckInMode()">
-      <option value="all">一起开始</option>
-      <option value="partial">分开开始</option>
+      <option value="all">全部进入计时器</option>
+      <option value="partial">部分进入计时器</option>
     </select>
 
     <div id="checkInTableChecks" class="table-check-grid" style="display:none;"></div>
 
     <button class="btn-success full" onclick="confirmCheckInSelected()">
-      确认开始计时
+      确认进入计时器
     </button>
 
     <button class="btn-ghost full" onclick="closeCheckInSelectModal()">
@@ -281,7 +281,7 @@
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.9.0";
+  import { renderNav } from "./js/nav.js?v=2.9.1";
 
   try {
     renderNav("booking");
@@ -289,7 +289,7 @@
     console.error("预约页面导航加载失败", error);
   }
 
-  import("./js/booking.js?v=2.9.0")
+  import("./js/booking.js?v=2.9.1")
     .catch(error => {
       console.error("booking.js 加载失败", error);
 
