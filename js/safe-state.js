@@ -963,11 +963,57 @@ export async function saveRecordSafely({db,ref,record}){
     flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
       console.warn("账单同步失败，将自动重试",err);
       setSyncStatus("pending","● 账单已保存本机 · 云端同步失败，将重试");
-    }),150);
+    }),0);
   }
   return next;
 }
 
+
+
+export async function atomicStartTable({db,ref,tableIndex,tablePatch,record}){
+  if(!navigator.onLine){
+    throw new Error("当前离线，无法执行跨设备安全开始");
+  }
+  let result = null;
+  await runTransaction(db, async tx=>{
+    const snap = await tx.get(ref);
+    const latest = snap.exists() ? clone(snap.data()) : {};
+    const tables = Array.isArray(latest.tables) ? clone(latest.tables) : [];
+    const existing = tables[tableIndex] || {};
+
+    if(existing.start){
+      result = {startedByThisDevice:false,state:latest,table:clone(existing)};
+      return;
+    }
+
+    const nextTable = {...existing,...clone(tablePatch)};
+    tables[tableIndex] = nextTable;
+    latest.tables = tables;
+    latest._sync = {
+      revision:Number(latest?._sync?.revision || 0)+1,
+      updatedAt:Date.now(),
+      deviceId:getDeviceId(),
+      action:"atomic_start_table"
+    };
+
+    tx.set(ref,latest);
+    tx.set(doc(db,"records",String(record.id)),clone(record));
+    result = {startedByThisDevice:true,state:latest,table:clone(nextTable)};
+  });
+
+  if(result?.state){
+    baseline = clone(result.state);
+    await writeLocalState(result.state,result.state);
+    writeShadow(STATE_SHADOW,{state:clone(result.state),cloudBaseline:clone(result.state),savedAt:Date.now(),deviceId:getDeviceId()});
+    window.dispatchEvent(new CustomEvent("chiptune-cloud-state-saved",{detail:{state:clone(result.state)}}));
+    broadcastState(result.state,"atomic_start_table");
+  }
+  if(result?.startedByThisDevice && record){
+    const localRecords = await loadLocalRecords().catch(()=>[]);
+    await writeLocalRecords(mergeRecordLists(localRecords,[record]));
+  }
+  return result;
+}
 
 export async function deleteRecordSafely({db,ref,recordId}){
   const id = String(recordId || "");
@@ -1032,7 +1078,7 @@ export function emergencySaveRecord({db,ref,record}){
         flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
           console.warn("紧急账单云端同步失败，将自动重试",err);
           setSyncStatus("pending","● 账单已保存本机 · 云端同步失败，将重试");
-        }),150);
+        }),0);
       }
     }catch(err){
       console.warn("紧急账单 IndexedDB 保存失败，已保留 localStorage 备份",err);
@@ -1061,7 +1107,7 @@ export function emergencySaveState({db,ref,state,action="emergency_state_update"
         flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
           console.warn("紧急状态云端同步失败，将自动重试",err);
           setSyncStatus("pending","● 已保存本机 · 云端同步失败，将重试");
-        }),150);
+        }),0);
       }
     }catch(err){
       console.warn("紧急状态 IndexedDB 保存失败，已保留 localStorage 备份",err);

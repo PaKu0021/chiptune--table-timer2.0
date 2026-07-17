@@ -1,11 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.8.2";
+import { db } from "./firebase.js?v=2.8.5";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.8.2";
-/*import { formatTime } from "./common.js?v=2.8.2";*/
-import { resetTable, formatTime } from "./common.js?v=2.8.2";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.8.2";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.2";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.8.5";
+/*import { formatTime } from "./common.js?v=2.8.5";*/
+import { resetTable, formatTime } from "./common.js?v=2.8.5";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.8.5";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.5";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -129,7 +129,7 @@ async function refreshSharedStateFromServer(){
     );
   }
 }
-setInterval(refreshSharedStateFromServer,15000);
+setInterval(refreshSharedStateFromServer,3000);
 window.addEventListener("online",refreshSharedStateFromServer);
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refreshSharedStateFromServer(); });
 
@@ -303,6 +303,7 @@ function normalizeAppState(nextState){
     if(t.type === undefined) t.type = "";
     if(t.lastAction === undefined) t.lastAction = "";
     if(t.recordId === undefined) t.recordId = null;
+    if(t.startLocked === undefined) t.startLocked = Boolean(t.start);
     if(t.customerKey === undefined) t.customerKey = "";
     if(t.visitId === undefined) t.visitId = null;
     if(t.visitDate === undefined) t.visitDate = "";
@@ -543,14 +544,26 @@ function getRMB(jpy){
   return jpyToRmb(jpy);
 }
 
+function ensureVisitAndRecordId(t){
+  if(!t.visitId){
+    t.visitId = `visit_${Date.now()}_${Math.random().toString(36).slice(2,10)}`;
+  }
+  if(!t.recordId){
+    t.recordId = `rec_${String(t.visitId).replace(/[^a-zA-Z0-9_-]/g,"_")}`;
+  }
+  return t.recordId;
+}
+
 function makePaymentLine({type="收入", reason="", pay="", amountJPY=0, note=""}){
   return {
+    id:`pay_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+    operationId:`op_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
     type,
     reason,
     pay: pay || "未记录",
     currency: currencyForPaymentMethod(pay),
     amountJPY: Number(amountJPY || 0),
-    amountRMB: getRMB(Number(amountJPY || 0)),
+    amountRMB: currencyForPaymentMethod(pay) === "人民币" ? getRMB(Number(amountJPY || 0)) : 0,
     note,
     time: new Date().toLocaleString(),
     timestamp: Date.now()
@@ -587,7 +600,7 @@ function consolidatePayment(record, {amountJPY, pay, reason="桌位消费", note
     reason,
     pay: pay || first.pay || record.pay || "未记录",
     amountJPY: amount,
-    amountRMB: getRMB(amount),
+    amountRMB: currencyForPaymentMethod(pay || first.pay || record.pay) === "人民币" ? getRMB(amount) : 0,
     note: note || first.note || "",
     time: first.time || new Date().toLocaleString(),
     timestamp: first.timestamp || Date.now(),
@@ -605,6 +618,10 @@ function consolidatePayment(record, {amountJPY, pay, reason="桌位消费", note
 
 function sumPaymentsJPY(payments){
   return payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+}
+
+function sumPaymentsRMB(payments){
+  return payments.reduce((sum,p)=>sum + Number(p.amountRMB || 0),0);
 }
 
 // 在同一张账单内记录套餐预付款与离店补收。不会创建第二张收入记录。
@@ -635,6 +652,18 @@ function getPaymentSummary(payments){
 
   if(pays.length === 0) return "未记录";
   if(pays.length === 1) return pays[0];
+  return "混合";
+}
+
+function getCurrencySummary(payments){
+  const currencies = [...new Set(
+    payments
+      .filter(p=>Number(p.amountJPY || 0) !== 0)
+      .map(p=>p.currency || currencyForPaymentMethod(p.pay))
+      .filter(Boolean)
+  )];
+  if(currencies.length === 0) return "未记录";
+  if(currencies.length === 1) return currencies[0];
   return "混合";
 }
 
@@ -784,7 +813,9 @@ const dueJPY = Math.max(0, originalJPY - paidJPY);
 
   if(!record){
     isNewRecord = true;
-    const id = "rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
+    // recordId 一旦分配就必须复用。即使本机账单缓存暂时未读到，
+    // 也不能再生成第二个 ID，否则同一桌会出现两张账单。
+    const id = ensureVisitAndRecordId(t);
     t.recordId = id;
 
 
@@ -843,13 +874,10 @@ if(t.payTiming === "prepaid"){
       amountJPY:prepaidAmount,
       note:"入店时收取"
     })];
-  }else if(record.payments.length && options.updatePaymentMethod){
-    record.payments[0].pay = t.pay || record.payments[0].pay || "未记录";
-    record.payments[0].updatedAt = Date.now();
   }
-}else if(record.payments.length && options.updatePaymentMethod){
-  record.payments[record.payments.length - 1].pay = t.pay || record.payments.at(-1).pay || "未记录";
 }
+// 运行中修改付款方式只更新桌位上的“下一笔付款方式”。
+// 已完成的 payments[] 属于不可变历史，不在这里回写或覆盖。
 
 const paymentsTotalJPY = sumPaymentsJPY(record.payments);
 
@@ -857,14 +885,14 @@ record.paidJPY = paymentsTotalJPY;
 record.dueJPY = Math.max(0, originalJPY - paymentsTotalJPY);
 
 record.totalJPY = paymentsTotalJPY;
-record.totalRMB = getRMB(paymentsTotalJPY);
+record.totalRMB = sumPaymentsRMB(record.payments);
 
 record.pay = getPaymentSummary(record.payments);
 
 
 
 
-  record.currency = t.currency || "日元";
+  record.currency = getCurrencySummary(record.payments);
   record.payTiming = t.payTiming || "prepaid";
   record.paidStatus = Number(record.dueJPY || 0) > 0 ? "未结清" : "已结清";
   record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
@@ -1027,7 +1055,7 @@ filteredTables.forEach(({t,i})=>{
     div.innerHTML = `
       <h3 class="table-title-row"><span>${t.name}</span>${(t.start || t.type || t.recordId) && t.groupId ? `<span class="table-group-id">${t.groupId}</span>` : ""}</h3>
 
-    <select onchange="setPackage(${i},this.value)" ${t.start ? "disabled" : ""}>
+    <select onchange="setPackage(${i},this.value)">
   ${state.packages.map((pkg,idx)=>`
     <option value="${idx}" ${idx===t.packageIndex ? "selected" : ""}>
       ${pkg.name} | ${pkg.unlimited ? "不限时" : pkg.minutes + "分钟"} | ¥${pkg.price}
@@ -1068,10 +1096,21 @@ ${t.start ? `
 
 <input placeholder="提前分钟" id="pre-${i}">
 
+<div class="action-row" style="grid-template-columns:1fr auto;align-items:stretch;">
+  <button class="btn-main"
+    style="${t.lastAction==="start" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}"
+    onclick="start(${i})"
+    ${(t.startLocked || t.start) ? "disabled" : ""}>
+    ${t.start ? "已开始" : (t.startLocked ? "开始已锁定" : "开始")}
+  </button>
+  <button class="btn-ghost" style="min-width:64px;font-size:20px;" onclick="toggleStartLock(${i})" title="开始按钮锁">
+    ${t.startLocked ? "🔒" : "🔓"}
+  </button>
+</div>
+
 <div class="action-row">
-  <button class="btn-ghost" style="${t.lastAction==="start" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="start(${i})">开始</button>
-  <button class="btn-ghost" style="${t.lastAction==="pause" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="pause(${i})">暂停</button>
-  <button class="btn-ghost" style="${t.lastAction==="resume" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="resume(${i})">继续</button>
+  <button class="btn-ghost" style="${t.lastAction==="pause" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="pause(${i})" ${!t.start || t.pausedAt ? "disabled" : ""}>暂停</button>
+  <button class="btn-ghost" style="${t.lastAction==="resume" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="resume(${i})" ${!t.pausedAt ? "disabled" : ""}>继续</button>
 </div>
 
       ${p.unlimited ? "" : `
@@ -1183,15 +1222,19 @@ function notifyLocal(title, body){
 
 async function setPackage(i,v){
   const t = state.tables[i];
+  const nextIndex = Number(v);
+  if(nextIndex === Number(t.packageIndex || 0)) return;
 
-  t.packageIndex = Number(v);
+  // 只替换套餐规则，不修改 start / pausedAt，因此计时连续进行。
+  t.packageIndex = nextIndex;
   if(t.customPackage) t.customPackage.enabled = false;
+
+  render();
+  emergencySaveState({db,ref,state,action:"change_running_package"});
 
   if(t.start){
     await createOrUpdateRecord(t);
   }
-
-  save();
 }
 
 function toggleType(i,type){
@@ -1255,13 +1298,33 @@ function updateCustomer(i){
   save();
 }
 
-async function start(i){
-  const pre = Number(document.getElementById("pre-"+i)?.value || 0);
+function toggleStartLock(i){
   const t = state.tables[i];
+
+  // 已经计时中的桌位允许显示解锁状态，但开始函数仍有 t.start 防重复保护。
+  t.startLocked = !t.startLocked;
+  t.lastAction = t.startLocked ? "lock" : "unlock";
+  render();
+  emergencySaveState({db,ref,state,action:t.startLocked ? "lock_start" : "unlock_start"});
+}
+
+async function start(i){
+  const t = state.tables[i];
+  if(!t || t.start || t.startLocked) return;
+
+  // 跨设备安全优先：离线时不允许新开桌，避免两台离线设备生成两个账单。
+  if(!navigator.onLine){
+    alert("当前离线，无法安全开始计时。请恢复网络后再点击开始。");
+    return;
+  }
+
+  const before = JSON.parse(JSON.stringify(t));
+  t.startLocked = true;
+  ensureVisitAndRecordId(t);
+  const pre = Number(document.getElementById("pre-"+i)?.value || 0);
   const startTime = Date.now() - pre * 60000;
 
   stopAlertLoop(i);
-
   t.start = startTime;
   t.pausedAt = null;
   t.alerted = false;
@@ -1270,7 +1333,6 @@ async function start(i){
 
   const p = getPackage(t);
   t.payTiming = t.payTiming || "prepaid";
-
   if(t.payTiming === "prepaid"){
     t.paidJPY = Number(p.price || 0);
     t.paidRMB = getRMB(t.paidJPY);
@@ -1281,41 +1343,105 @@ async function start(i){
     t.paidAt = null;
   }
 
-  // 如果这桌是预约客人，自动把预约标记为已入桌。
-  if(t.type === "booking" && Array.isArray(state.bookings)){
-    const booking = state.bookings.find(b=>{
-      const raw = Array.isArray(b.tableIndexes) ? b.tableIndexes : [b.tableIndex];
-      const tableIndexes = raw
-        .filter(v => v !== undefined && v !== null && v !== "")
-        .map(v => Number(v));
-      return tableIndexes.includes(i) && !b.checkedIn && (!b.name || b.name === t.customer.name);
-    });
-    if(booking){
-      booking.checkedIn = true;
-      booking.checkInTime = startTime;
-      booking.checkInTimeText = new Date(startTime).toLocaleString();
-    }
+  const initialPayments = [];
+  if(t.payTiming === "prepaid" && Number(t.paidJPY || 0) > 0){
+    initialPayments.push(makePaymentLine({
+      reason:"套餐预付款",
+      pay:t.pay || "未记录",
+      amountJPY:Number(t.paidJPY || 0),
+      note:"入店时收取"
+    }));
   }
+  const initialRecord = {
+    id:t.recordId,
+    visitId:t.visitId,
+    timestamp:startTime,
+    startAt:startTime,
+    startedTime:new Date(startTime).toLocaleString(),
+    businessDate:getBusinessDateKey(startTime),
+    time:new Date(startTime).toLocaleString(),
+    tableName:t.name,
+    customerName:t.customer?.name || "",
+    phoneLast4:t.customer?.phoneLast4 || "",
+    customerType:t.type || "walkin",
+    packageName:p.name,
+    packageMinutes:p.unlimited ? "不限时" : p.minutes,
+    packagePrice:Number(p.price || 0),
+    extraMinutes:0,
+    extensionAmount:0,
+    originalJPY:Number(p.price || 0),
+    payments:initialPayments,
+    paidJPY:sumPaymentsJPY(initialPayments),
+    dueJPY:Math.max(0,Number(p.price || 0)-sumPaymentsJPY(initialPayments)),
+    totalJPY:sumPaymentsJPY(initialPayments),
+    totalRMB:initialPayments.reduce((sum,line)=>sum+Number(line.amountRMB || 0),0),
+    pay:getPaymentSummary(initialPayments),
+    currency:getCurrencySummary(initialPayments),
+    payTiming:t.payTiming,
+    paidStatus:t.payTiming === "prepaid" ? "已结清" : "未结清",
+    status:"进行中",
+    closed:false,
+    receiptImage:"",
+    receiptFileName:""
+  };
 
-  if(!t.groupId){
-    const groupId = await allocateGroupId(db,state.groups || []);
-    const group = upsertGroup(state,{
-      id:groupId,
-      name:`${t.name}组`,
-      color:t.activeColor || "#B7E4C7",
-      tableIndexes:[i],
-      peopleCount:1,
-      paymentMode:"split"
-    });
-    syncGroupReferences(state,group);
-  }
-
-  // 先同步保存桌位状态，确保点击开始后立即生效。
-  emergencySaveState({db,ref,state,action:"start_table"});
   render();
+  setSyncStatus("pending","● 正在由服务器锁定桌位…");
 
-  // 先付款：入座开始时立即建立账单；以后续时和结账都更新这一个 recordId。
-  await createOrUpdateRecord(t);
+  try{
+    const result = await atomicStartTable({
+      db,ref,tableIndex:i,
+      tablePatch:JSON.parse(JSON.stringify(t)),
+      record:initialRecord
+    });
+
+    if(!result?.startedByThisDevice){
+      setSyncStatus("synced","● 该桌已由另一台设备开始，已同步最新状态");
+      render();
+      alert("这张桌已经由另一台设备开始，当前画面已同步。");
+      return;
+    }
+
+    // 服务器成功锁定后再建立组，避免双设备同时生成两组。
+    const current = state.tables[i];
+    if(current && !current.groupId){
+      const groupId = await allocateGroupId(db,state.groups || []);
+      const group = upsertGroup(state,{
+        id:groupId,
+        name:`${current.name}组`,
+        color:current.activeColor || "#B7E4C7",
+        tableIndexes:[i],
+        peopleCount:1,
+        paymentMode:"split"
+      });
+      syncGroupReferences(state,group);
+    }
+
+    // 预约签到仅由成功开始的一台设备执行。
+    if(current?.type === "booking" && Array.isArray(state.bookings)){
+      const booking = state.bookings.find(b=>{
+        const raw = Array.isArray(b.tableIndexes) ? b.tableIndexes : [b.tableIndex];
+        return raw.filter(v=>v!==undefined && v!==null && v!=="").map(Number).includes(i)
+          && !b.checkedIn && (!b.name || b.name === current.customer?.name);
+      });
+      if(booking){
+        booking.checkedIn = true;
+        booking.checkInTime = startTime;
+        booking.checkInTimeText = new Date(startTime).toLocaleString();
+      }
+    }
+
+    emergencySaveState({db,ref,state,action:"start_table_post_transaction"});
+    await createOrUpdateRecord(state.tables[i]);
+    setSyncStatus("synced","● 已同步");
+    render();
+  }catch(error){
+    console.error("原子开始失败",error);
+    state.tables[i] = before;
+    render();
+    setSyncStatus("error","● 开始失败，未产生账单");
+    alert(error?.message || "开始失败，请确认网络后重试");
+  }
 }
 
 function pause(i){
@@ -1403,8 +1529,10 @@ async function setPay(i,v){
   t.pay = v;
   t.currency = currencyForPaymentMethod(v);
 
+  // 运行中修改这里只代表“下一笔补收使用的付款方式”。
+  // 已经收过的套餐预付款必须保留原付款方式，不能被微信/支付宝覆盖。
   if(t.start){
-    await createOrUpdateRecord(t,{updatePaymentMethod:true});
+    await createOrUpdateRecord(t);
   }
 
   save();
@@ -1558,7 +1686,7 @@ async function confirmCheckout(){
     }catch(err){
       console.warn("结账时完整账单读取超时，改用紧急本地账单",err);
       record = getLocalRecordSync(t.recordId) || {
-        id: t.recordId || ("rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8)),
+        id: ensureVisitAndRecordId(t),
         timestamp: Date.now(),
         businessDate: getBusinessDateKey(Date.now()),
         time: new Date().toLocaleString(),
@@ -1591,11 +1719,11 @@ async function confirmCheckout(){
     record.extensionAmount = Math.max(0, finalChargeJPY - Number(p.price || 0));
     record.originalJPY = finalChargeJPY;
     record.totalJPY = paymentTotalJPY;
-    record.totalRMB = getRMB(paymentTotalJPY);
+    record.totalRMB = sumPaymentsRMB(record.payments);
     record.paidJPY = paymentTotalJPY;
     record.dueJPY = Math.max(0, finalChargeJPY - paymentTotalJPY);
     record.pay = getPaymentSummary(record.payments);
-    record.currency = t.currency || "日元";
+    record.currency = getCurrencySummary(record.payments);
     record.roundRule = useRound ? "500抹零" : "不抹零";
     record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
     record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
@@ -1732,7 +1860,7 @@ async function confirmForceEnd(){
     // Read the synchronous local shadow when available, otherwise create a record now.
     let record = getLocalRecordSync(t.recordId);
     if(!record){
-      const id = t.recordId || ("rec_" + now + "_" + Math.random().toString(36).slice(2,8));
+      const id = ensureVisitAndRecordId(t);
       t.recordId = id;
       record = {
         id,
@@ -1770,11 +1898,11 @@ async function confirmForceEnd(){
     const paymentTotalJPY = sumPaymentsJPY(record.payments);
     record.originalJPY = originalJPY;
     record.totalJPY = paymentTotalJPY;
-    record.totalRMB = getRMB(paymentTotalJPY);
+    record.totalRMB = sumPaymentsRMB(record.payments);
     record.paidJPY = paymentTotalJPY;
     record.dueJPY = Math.max(0, originalJPY - paymentTotalJPY);
     record.pay = getPaymentSummary(record.payments);
-    record.currency = t.currency || "日元";
+    record.currency = getCurrencySummary(record.payments);
     record.payTiming = t.payTiming || "prepaid";
     record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
     record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
@@ -1873,11 +2001,11 @@ async function autoCloseOldTables(){
 
       record.originalJPY = getOriginalJPY(t);
       record.totalJPY = paymentTotalJPY;
-      record.totalRMB = getRMB(paymentTotalJPY);
+      record.totalRMB = sumPaymentsRMB(record.payments);
       record.paidJPY = paymentTotalJPY;
       record.dueJPY = Math.max(0, record.originalJPY - paymentTotalJPY);
       record.pay = getPaymentSummary(record.payments);
-      record.currency = t.currency || "日元";
+      record.currency = getCurrencySummary(record.payments);
       record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
 
       emergencySaveRecord({db,ref,record});
@@ -2582,7 +2710,7 @@ async function confirmBatchCheckout(){
 
       record.originalJPY = getOriginalJPY(t);
       record.totalJPY = paymentTotalJPY;
-      record.totalRMB = getRMB(paymentTotalJPY);
+      record.totalRMB = sumPaymentsRMB(record.payments);
       record.paidJPY = paymentTotalJPY;
       record.dueJPY = Math.max(0, record.originalJPY - paymentTotalJPY);
       record.pay = getPaymentSummary(record.payments);
@@ -2687,7 +2815,7 @@ record.businessDate =
 
     record.originalJPY = getOriginalJPY(t);
     record.totalJPY = paymentTotalJPY;
-    record.totalRMB = getRMB(paymentTotalJPY);
+    record.totalRMB = sumPaymentsRMB(record.payments);
     record.paidJPY = paymentTotalJPY;
     record.dueJPY = Math.max(0, record.originalJPY - paymentTotalJPY);
     record.pay = getPaymentSummary(record.payments);
@@ -2890,6 +3018,7 @@ window.setPackage = setPackage;
 window.setWalkin = setWalkin;
 window.setBooking = setBooking;
 window.start = start;
+window.toggleStartLock = toggleStartLock;
 window.pause = pause;
 window.resume = resume;
 window.addHour = addHour;

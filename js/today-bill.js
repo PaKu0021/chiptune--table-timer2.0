@@ -1,11 +1,11 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.8.2";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.8.2";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=2.8.2";
-import { RMB_PER_JPY } from "./business-day.js?v=2.8.2";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.8.5";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.8.5";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=2.8.5";
+import { RMB_PER_JPY } from "./business-day.js?v=2.8.5";
 
 
-import { db } from "./firebase.js?v=2.8.2";
+import { db } from "./firebase.js?v=2.8.5";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -90,6 +90,44 @@ function normalizePayments(r){
   }
 
   return [];
+}
+
+
+function paymentCurrency(pay){
+  return pay === "微信" || pay === "支付宝" ? "人民币" : "日元";
+}
+
+function summarizePaymentMethods(payments){
+  const methods = [...new Set((payments || [])
+    .filter(p=>Number(p.amountJPY || 0) !== 0)
+    .map(p=>p.pay || "未记录"))];
+  if(methods.length === 0) return "未记录";
+  return methods.length === 1 ? methods[0] : "混合";
+}
+
+function summarizeCurrencies(payments){
+  const currencies = [...new Set((payments || [])
+    .filter(p=>Number(p.amountJPY || 0) !== 0)
+    .map(p=>p.currency || paymentCurrency(p.pay)))];
+  if(currencies.length === 0) return "日元";
+  return currencies.length === 1 ? currencies[0] : "混合";
+}
+
+function makeManualAdjustment({amountJPY, pay, note, reason}){
+  return {
+    operationId:`manual_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+    type: amountJPY < 0 ? "退款" : "收入",
+    reason: reason || (amountJPY < 0 ? "手动退款修正" : "手动补收修正"),
+    pay: pay || "未记录",
+    currency: paymentCurrency(pay),
+    amountJPY:Number(amountJPY || 0),
+    amountRMB:paymentCurrency(pay) === "人民币"
+      ? Math.floor(Number(amountJPY || 0) * RMB_PER_JPY)
+      : 0,
+    note:note || "",
+    time:new Date().toLocaleString(),
+    timestamp:Date.now()
+  };
 }
 
 function isRmbPayment(p, r){
@@ -988,35 +1026,39 @@ async function saveEditedRecord(){
   }
 
   const pay = document.getElementById("editPay").value;
-  const totalJPY = Number(document.getElementById("editTotalJPY").value || 0);
+  const targetTotalJPY = Number(document.getElementById("editTotalJPY").value || 0);
   const groupPaid = document.getElementById("editGroupPaid").value === "yes";
   const groupPayerName = document.getElementById("editGroupPayerName").value.trim();
   const groupPaymentId = document.getElementById("editGroupPaymentId").value.trim();
   const note = document.getElementById("editPaymentNote").value.trim();
   const businessDate = document.getElementById("editBusinessDate").value;
 
-  r.pay = pay;
-  r.totalJPY = totalJPY;
-  r.totalRMB = Math.floor(totalJPY * RMB_PER_JPY);
-  r.paidJPY = totalJPY;
+  // payments[] 是真实资金流水。编辑账单时绝不重建或覆盖已有明细。
+  // 总额发生变化时，仅追加一笔差额修正；总额不变时完全保留原付款方式。
+  const payments = normalizePayments(r).map(p=>({...p}));
+  const currentTotalJPY = payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+  const differenceJPY = targetTotalJPY - currentTotalJPY;
+
+  if(differenceJPY !== 0){
+    payments.push(makeManualAdjustment({
+      amountJPY:differenceJPY,
+      pay,
+      note,
+      reason:groupPaid
+        ? (differenceJPY < 0 ? "一人代付/手动退款修正" : "一人代付/手动补收修正")
+        : (differenceJPY < 0 ? "手动退款修正" : "手动补收修正")
+    }));
+  }
+
+  r.payments = payments;
+  r.totalJPY = payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+  r.totalRMB = payments.reduce((sum,p)=>sum + Number(p.amountRMB || 0),0);
+  r.paidJPY = r.totalJPY;
   r.dueJPY = 0;
-  r.currency = pay === "微信" || pay === "支付宝" ? "人民币" : "日元";
+  r.pay = summarizePaymentMethods(payments);
+  r.currency = summarizeCurrencies(payments);
   r.businessDate = businessDate || getRecordBusinessDate(r);
   r.businessDateManual = Boolean(businessDate);
-
-  r.payments = [{
-    type:"收入",
-    reason: groupPaid ? "一人代付/手动修正" : "手动修正",
-    pay,
-    amountJPY: totalJPY,
-    amountRMB:
-  pay === "微信" || pay === "支付宝"
-    ? Math.floor(totalJPY * RMB_PER_JPY)
-    : 0,    
-    note,
-    time:new Date().toLocaleString(),
-    timestamp:Date.now()
-  }];
 
   r.paymentNote = note;
   r.editedAt = Date.now();
@@ -1035,7 +1077,9 @@ async function saveEditedRecord(){
   await saveRecordSafely({db, ref, record:r});
 
   closeEditRecord();
-  alert("账单已修改");
+  alert(differenceJPY === 0
+    ? "账单资料已修改，原付款明细保持不变"
+    : "账单已修改，差额已作为独立付款明细记录");
 }
 
 window.toggleTodayTimeSort = toggleTodayTimeSort;

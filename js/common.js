@@ -72,6 +72,9 @@ export function resetTable(name){
 
     pausedAt:null,
 
-    lastAction:""
+    lastAction:"",
+
+    // 点击开始后自动锁定，防止重复点击产生重复账单。
+    startLocked:false
   };
 }
