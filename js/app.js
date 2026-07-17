@@ -1,11 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.9.3";
+import { db } from "./firebase.js?v=2.9.4";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.3";
-/*import { formatTime } from "./common.js?v=2.9.3";*/
-import { resetTable, formatTime } from "./common.js?v=2.9.3";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.3";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.3";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.4";
+/*import { formatTime } from "./common.js?v=2.9.4";*/
+import { resetTable, formatTime } from "./common.js?v=2.9.4";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.4";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.4";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -839,7 +839,14 @@ record = {
 
   // 入座开始即生成正式账单；结账时只更新同一个 recordId。
   record.startAt = Number(t.start || record.startAt || Date.now());
-  record.startedTime = record.startedTime || new Date(record.startAt).toLocaleString();
+  if(options.syncStartTime){
+    record.timestamp = record.startAt;
+    record.startedTime = new Date(record.startAt).toLocaleString();
+    record.time = record.startedTime;
+    record.businessDate = getBusinessDateKey(record.startAt);
+  }else{
+    record.startedTime = record.startedTime || new Date(record.startAt).toLocaleString();
+  }
   record.closed = false;
   record.status = "进行中";
 
@@ -1096,14 +1103,17 @@ ${t.start ? `
 <button class="btn-ghost" style="${t.type==="booking" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="toggleType(${i},'booking')">预约</button>
 </div>
 
-<input type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="提前分钟" id="pre-${i}" value="${Math.max(0,Math.floor(Number(t.preMinutes || 0)))}" oninput="updatePreMinutes(${i},this.value)">
+<label style="display:block;margin:10px 0 8px;font-weight:700;color:#6f6659;">
+  <span style="display:block;margin-bottom:6px;">提前多少分钟</span>
+  <input type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="输入提前分钟数" id="pre-${i}" value="${Math.max(0,Math.floor(Number(t.preMinutes || 0)))}" oninput="updatePreMinutes(${i},this.value)">
+</label>
 
 <div class="action-row" style="grid-template-columns:1fr auto;align-items:stretch;">
   <button class="btn-main"
-    style="${t.lastAction==="start" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}"
+    style="${t.startLocked ? "background:#c9c6bf;color:#777;border-color:#b8b4ad;box-shadow:none;" : "background:#f2c94c;color:#332d24;border-color:#d8a900;"}"
     onclick="start(${i})"
-    ${(t.startLocked || t.start) ? "disabled" : ""}>
-    ${t.start ? "已开始" : (t.startLocked ? "开始已锁定" : "开始")}
+    ${t.startLocked ? "disabled" : ""}>
+    ${t.start ? "重新记录开始" : "开始"}
   </button>
   <button class="btn-ghost" style="min-width:64px;font-size:20px;" onclick="toggleStartLock(${i})" title="开始按钮锁">
     ${t.startLocked ? "🔒" : "🔓"}
@@ -1372,13 +1382,50 @@ function normalizePreMinutes(value){
 
 function updatePreMinutes(i,value){
   const t = state?.tables?.[i];
-  if(!t || t.start) return;
+  if(!t) return;
   t.preMinutes = normalizePreMinutes(value);
 }
 
 async function start(i){
   const t = state.tables[i];
-  if(!t || t.start || t.startLocked) return;
+  if(!t || t.startLocked) return;
+
+  // 已开始桌位：解锁后再次点击“开始”，只重新记录开始时间，
+  // 不创建新账单、不重复收套餐费。
+  if(t.start){
+    const preInput = document.getElementById("pre-"+i)?.value;
+    const pre = normalizePreMinutes(preInput ?? t.preMinutes);
+    const newStartTime = Date.now() - pre * 60000;
+    const plannedEndAt = getPlannedTimerEndAt(t,newStartTime);
+    const conflict = findTimerBookingConflict(i,newStartTime,plannedEndAt,t.bookingId);
+    if(conflict){
+      alert(formatConflictMessage(t,conflict));
+      return;
+    }
+
+    t.preMinutes = pre;
+    t.start = newStartTime;
+    t.startLocked = true;
+    t.lastAction = "start_time_adjusted";
+
+    // 若正在暂停，暂停点保持为当前时刻，避免出现负的已用时间。
+    if(t.pausedAt && Number(t.pausedAt) < newStartTime){
+      t.pausedAt = Date.now();
+    }
+
+    render();
+    setSyncStatus("pending","● 正在同步新的开始时间…");
+    emergencySaveState({db,ref,state,action:"adjust_start_time"});
+    try{
+      await createOrUpdateRecord(t,{syncStartTime:true});
+      setSyncStatus("synced","● 开始时间已更新");
+    }catch(error){
+      console.error("更新开始时间失败",error);
+      setSyncStatus("error","● 开始时间已保存在本机，等待云端同步");
+    }
+    render();
+    return;
+  }
 
   // 跨设备安全优先：离线时不允许新开桌，避免两台离线设备生成两个账单。
   if(!navigator.onLine){
