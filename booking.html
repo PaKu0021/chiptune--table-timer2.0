@@ -127,13 +127,6 @@
 
     <select id="detailPackage"></select>
 
-    <select id="detailPay">
-      <option value="">付款方式</option>
-      <option value="现金">现金</option>
-      <option value="PayPay">PayPay</option>
-      <option value="微信">微信</option>
-      <option value="支付宝">支付宝</option>
-    </select>
 
     <button class="btn-blue full" onclick="openMoveTableModal()">
   移动桌位
@@ -149,11 +142,6 @@
       取消预约
     </button>
     
-    <button class="btn-success full"
-    onclick="openGroupPayment()">
-    💴 整组收款
-    </button>
-
     <button class="btn-ghost full"
       onclick="closeBookingAction()">
       关闭
@@ -199,30 +187,6 @@
 
     <button class="btn-ghost full" onclick="closeMoveTableModal()">
       取消
-    </button>
-  </div>
-</div>
-
-<div id="runningPayModalBg" class="modal-bg">
-  <div class="modal">
-    <h2>付款方式</h2>
-
-    <div id="runningPayInfo" style="font-weight:900;margin-bottom:12px;"></div>
-
-    <select id="runningPaySelect">
-      <option value="">请选择付款方式</option>
-      <option value="现金">现金</option>
-      <option value="PayPay">PayPay</option>
-      <option value="微信">微信</option>
-      <option value="支付宝">支付宝</option>
-    </select>
-
-    <button class="btn-main full" onclick="confirmRunningTablePay()">
-      保存付款方式
-    </button>
-
-    <button class="btn-ghost full" onclick="closeRunningTablePay()">
-      关闭
     </button>
   </div>
 </div>
@@ -317,7 +281,7 @@
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.8.7";
+  import { renderNav } from "./js/nav.js?v=2.8.8";
 
   try {
     renderNav("booking");
@@ -325,7 +289,7 @@
     console.error("预约页面导航加载失败", error);
   }
 
-  import("./js/booking.js?v=2.8.7")
+  import("./js/booking.js?v=2.8.8")
     .catch(error => {
       console.error("booking.js 加载失败", error);
 
