@@ -135,11 +135,6 @@
       <option value="支付宝">支付宝</option>
     </select>
 
-    <button class="btn-main full"
-      onclick="saveBookingDetail()">
-      保存修改
-    </button>
-
     <button class="btn-blue full" onclick="openMoveTableModal()">
   移动桌位
 </button>
@@ -322,7 +317,7 @@
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.8.5";
+  import { renderNav } from "./js/nav.js?v=2.8.6";
 
   try {
     renderNav("booking");
@@ -330,7 +325,7 @@
     console.error("预约页面导航加载失败", error);
   }
 
-  import("./js/booking.js?v=2.8.5")
+  import("./js/booking.js?v=2.8.6")
     .catch(error => {
       console.error("booking.js 加载失败", error);
 

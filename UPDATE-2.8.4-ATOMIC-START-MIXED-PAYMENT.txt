@@ -1,4 +1,4 @@
-Chiptune Table Timer v2.8.5
+Chiptune Table Timer v2.8.6
 
 本次修改：
 1. 开始桌位改为 Firestore Transaction 原子操作。
@@ -18,4 +18,4 @@ Chiptune Table Timer v2.8.5
 
 重要说明：
 - 跨设备同步速度仍取决于网络和 Firestore 服务延迟，但关键操作已使用服务器原子事务，延迟期间也不会产生重复开始或重复账单。
-- 首次部署后建议在手机与 iPad 上各刷新一次页面，确保浏览器加载 v2.8.5 文件。
+- 首次部署后建议在手机与 iPad 上各刷新一次页面，确保浏览器加载 v2.8.6 文件。
