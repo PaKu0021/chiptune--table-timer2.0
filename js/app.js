@@ -1,11 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.9.2";
+import { db } from "./firebase.js?v=2.9.3";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.2";
-/*import { formatTime } from "./common.js?v=2.9.2";*/
-import { resetTable, formatTime } from "./common.js?v=2.9.2";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.2";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.2";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.3";
+/*import { formatTime } from "./common.js?v=2.9.3";*/
+import { resetTable, formatTime } from "./common.js?v=2.9.3";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.3";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.3";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -1096,7 +1096,7 @@ ${t.start ? `
 <button class="btn-ghost" style="${t.type==="booking" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="toggleType(${i},'booking')">预约</button>
 </div>
 
-<input placeholder="提前分钟" id="pre-${i}">
+<input type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="提前分钟" id="pre-${i}" value="${Math.max(0,Math.floor(Number(t.preMinutes || 0)))}" oninput="updatePreMinutes(${i},this.value)">
 
 <div class="action-row" style="grid-template-columns:1fr auto;align-items:stretch;">
   <button class="btn-main"
@@ -1363,6 +1363,19 @@ function formatConflictMessage(table,conflict){
   return `${table?.name || "该桌"}无法开始：与预约 ${b.date || ""} ${b.startTime || "-"}-${b.endTime || "-"} 冲突${who ? `（${who}）` : ""}。请更换桌位、调整预约或选择不会重叠的套餐。`;
 }
 
+
+function normalizePreMinutes(value){
+  const n = Number(value);
+  if(!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(1440,Math.floor(n));
+}
+
+function updatePreMinutes(i,value){
+  const t = state?.tables?.[i];
+  if(!t || t.start) return;
+  t.preMinutes = normalizePreMinutes(value);
+}
+
 async function start(i){
   const t = state.tables[i];
   if(!t || t.start || t.startLocked) return;
@@ -1376,7 +1389,9 @@ async function start(i){
   const before = JSON.parse(JSON.stringify(t));
   t.startLocked = true;
   ensureVisitAndRecordId(t);
-  const pre = Number(document.getElementById("pre-"+i)?.value || 0);
+  const preInput = document.getElementById("pre-"+i)?.value;
+  const pre = normalizePreMinutes(preInput ?? t.preMinutes);
+  t.preMinutes = pre;
   const startTime = Date.now() - pre * 60000;
   const plannedEndAt = getPlannedTimerEndAt(t,startTime);
   const localConflict = findTimerBookingConflict(i,startTime,plannedEndAt,t.bookingId);
@@ -3164,6 +3179,7 @@ window.setPackage = setPackage;
 window.setWalkin = setWalkin;
 window.setBooking = setBooking;
 window.start = start;
+window.updatePreMinutes = updatePreMinutes;
 window.toggleStartLock = toggleStartLock;
 window.pause = pause;
 window.resume = resume;

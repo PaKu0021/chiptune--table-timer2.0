@@ -27,6 +27,7 @@ export function resetTable(name){
 
     start:null,
     extra:0,
+    preMinutes:0,
 
     packageIndex:0,
     customPackage:{
