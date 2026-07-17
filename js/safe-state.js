@@ -1215,6 +1215,20 @@ export function subscribeAllRecords({
   let deleteUnsubscribe = null;
   let sharedDeletedIds = new Set();
 
+  // 同一台设备的计时器写入账单后，首页/今日账单/老板模式立即接收，
+  // 不等待 Firestore 再回传一次。
+  const recordBroadcastHandler = event=>{
+    const record = event?.detail?.record;
+    if(stopped || !record?.id || sharedDeletedIds.has(String(record.id))) return;
+    cloudRecords = mergeRecordLists(cloudRecords,[record]);
+    loadLocalRecords().then(local=>{
+      if(!stopped) onChange?.(mergeRecordLists(cloudRecords,local));
+    }).catch(()=>{
+      if(!stopped) onChange?.(mergeRecordLists(cloudRecords,[record]));
+    });
+  };
+  window.addEventListener("chiptune-record-broadcast",recordBroadcastHandler);
+
   const readMeta = ()=>{
     try{
       return JSON.parse(localStorage.getItem(RECORD_HISTORY_SYNC_META) || "null") || {};
@@ -1524,5 +1538,6 @@ export function subscribeAllRecords({
     incrementalUnsubscribe?.();
     deleteUnsubscribe?.();
     window.removeEventListener("online",onlineHandler);
+    window.removeEventListener("chiptune-record-broadcast",recordBroadcastHandler);
   };
 }

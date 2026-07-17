@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.9.0";
+import { db } from "./firebase.js?v=2.9.1";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.9.0";
-import { resetTable } from "./common.js?v=2.9.0";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.0";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.0";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.1";
+import { resetTable } from "./common.js?v=2.9.1";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.1";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.1";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -1048,7 +1048,7 @@ onclick="openAssignTableModal(${b.id})">
 
 `<button class="btn-success"
 onclick="openCheckInSelectModal(${b.id})">
-到店开始
+进入计时器
 </button>`
 }
 
@@ -2660,122 +2660,79 @@ async function confirmCheckInSelected(){
     .map(Number);
 
   const mode = document.getElementById("checkInMode").value;
-
   let indexes = allIndexes;
 
   if(mode === "partial"){
     indexes = [...document.querySelectorAll(".checkin-table-check:checked")]
       .map(el=>Number(el.value));
-
     if(indexes.length === 0){
-      alert("请至少选择一张桌开始计时");
+      alert("请至少选择一张桌进入计时器");
       return;
     }
   }
 
-  const busy = indexes.filter(idx=>{
-  const t = state.tables[idx];
-  if(!t?.start) return false;
-
-  return String(t.bookingId || "") !== String(b.id || "");
-});
-
-if(busy.length){
-  alert("以下桌位正在使用中，不能开始：\n" + busy.map(i=>state.tables[i].name).join("、"));
-  return;
-}
-
-const startIndexes = indexes.filter(idx=>{
-  const t = state.tables[idx];
-  return !t?.start;
-});
-
-if(startIndexes.length === 0){
-  alert("这些桌位已经开始计时了");
-  return;
-}
-
-const group = getGroupById(b.groupId);
-
-if(group){
-  group.tableIndexes = Array.from(new Set([
-    ...group.tableIndexes,
-    ...startIndexes
-  ]));
-}
-
-const now = Date.now();
-const hasGroupPrepayments = Array.isArray(group?.payments) && group.payments.some(p=>p?.referenceOnly && Number(p.amountJPY || 0) > 0);
-const groupPrepaymentAllocations = allocateGroupPrepayments(group, allIndexes, b.packageIndex || 0);
-
-for(const idx of startIndexes){
-  const oldName = state.tables[idx]?.name || `${idx + 1}号桌`;
-
-  const t = {
-    ...resetTable(oldName),
-    type:"booking",
-    bookingId:b.id,
-    groupId:b.groupId,
-    groupColor:b.groupColor || b.color || getNextBookingColor(),
-    groupName:b.groupName || "预约组",
-    activeColor:b.groupColor || b.color || getNextBookingColor(),
-    customerKey:getCustomerKey(b.name, b.phone),
-    pay:b.pay || "",
-    currency:"日元",
-    packageIndex:Number(b.packageIndex || 0),
-    customer:{
-      name:b.name || "",
-      phoneLast4:String(b.phone || "").slice(-4)
-    },
-    start:now,
-    pausedAt:null,
-    extra:0,
-    alerted:false,
-    alerting:false,
-    lastAction:"start"
-  };
-
-  state.tables[idx] = t;
-
-  const allocatedLines = groupPrepaymentAllocations.get(idx) || [];
-  await createOrUpdateTableRecord(state.tables[idx], {
-    customerType:"booking",
-    checkoutMethod:"预约到店开始计时",
-    prepaidLines:hasGroupPrepayments ? allocatedLines : null
-  });
-}
-
-
-  if(!b.checkedInTableIndexes){
-    b.checkedInTableIndexes = [];
+  const busy = indexes.filter(idx=>state.tables[idx]?.start);
+  if(busy.length){
+    alert("以下桌位正在使用中，不能转入计时器：\n" + busy.map(i=>state.tables[i].name).join("、"));
+    return;
   }
 
-  b.checkedInTableIndexes = Array.from(new Set([
-    ...b.checkedInTableIndexes.map(Number),
+  const now = Date.now();
+  for(const idx of indexes){
+    const oldName = state.tables[idx]?.name || `${idx + 1}号桌`;
+    const previous = state.tables[idx] || resetTable(oldName);
+    state.tables[idx] = {
+      ...resetTable(oldName),
+      ...previous,
+      name:oldName,
+      type:"booking",
+      bookingId:b.id,
+      groupId:b.groupId,
+      groupColor:b.groupColor || b.color || getNextBookingColor(),
+      groupName:b.groupName || "预约组",
+      activeColor:b.groupColor || b.color || getNextBookingColor(),
+      customerKey:getCustomerKey(b.name,b.phone),
+      pay:"",
+      currency:"日元",
+      payTiming:"prepaid",
+      paidJPY:0,
+      paidRMB:0,
+      paidAt:null,
+      packageIndex:Number(b.packageIndex || 0),
+      customer:{
+        name:b.name || "",
+        phoneLast4:String(b.phone || "").slice(-4)
+      },
+      start:null,
+      pausedAt:null,
+      extra:0,
+      recordId:"",
+      visitId:"",
+      startLocked:false,
+      alerted:false,
+      alerting:false,
+      lastAction:"booking_arrived"
+    };
+  }
+
+  b.arrived = true;
+  b.arrivedAt = b.arrivedAt || now;
+  b.arrivedTimeText = b.arrivedTimeText || new Date(now).toLocaleString();
+  b.arrivedTableIndexes = Array.from(new Set([
+    ...(b.arrivedTableIndexes || []).map(Number),
     ...indexes
   ]));
 
-  b.checkedIn = b.checkedInTableIndexes.length >= allIndexes.length;
-  b.checkInTime = b.checkInTime || now;
-  b.checkInTimeText = b.checkInTimeText || new Date(now).toLocaleString();
+  // 这里只登记“已到店并送入计时器”，不产生账单、不计营业额。
+  // 套餐费必须在计时器选择付款方式后点击“开始”才正式写入。
+  emergencySaveState({db,ref,state,action:"booking_arrived_to_timer"});
+  save("booking_arrived_to_timer").catch(err=>console.warn("预约到店状态后台同步失败",err));
 
-  addCustomerVisit({
-    name:b.name,
-    phone:b.phone,
-    packageIndex:b.packageIndex,
-    tableIndexes:indexes,
-    startTime:b.startTime,
-    endTime:b.endTime
-  });
-
-await save("booking_checkin");
-
-alert("已写入计时器数据，请去计时器页面查看");
-
-closeCheckInSelectModal();
-closeBookingAction();  
+  closeCheckInSelectModal();
+  closeBookingAction();
   renderBookingGrid();
   renderList();
+  location.href = "./app.html";
 }
 
 function cancelBooking(){
