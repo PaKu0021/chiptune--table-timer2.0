@@ -1,4 +1,4 @@
-import { RMB_PER_JPY } from "./business-day.js?v=2.8.7";
+import { RMB_PER_JPY } from "./business-day.js?v=2.8.8";
 
 
 const raw = sessionStorage.getItem("cashier_print_data");

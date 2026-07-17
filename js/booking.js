@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.8.7";
+import { db } from "./firebase.js?v=2.8.8";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.8.7";
-import { resetTable } from "./common.js?v=2.8.7";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.8.7";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.7";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.8.8";
+import { resetTable } from "./common.js?v=2.8.8";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.8.8";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.8";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -113,6 +113,13 @@ function getNextBookingColor(){
 
 async function makeGroupId(){
   return allocateGroupId(db, state?.groups || []);
+}
+
+function makeFastBookingGroupId(bookingId = Date.now()){
+  const d = new Date();
+  const dateKey = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+  const suffix = `${Number(bookingId).toString(36)}_${Math.random().toString(36).slice(2,7)}`;
+  return `${dateKey}_BK_${suffix}`;
 }
 
 function getGroupById(groupId){
@@ -2051,11 +2058,12 @@ t.packageIndex = packageIndex;
     const packageIndex =
       findPackageIndexByDuration(startTime,endTime);
 
-    const groupId = await makeGroupId();
+    const bookingId = Date.now();
+    const groupId = makeFastBookingGroupId(bookingId);
     const groupColor = getNextBookingColor();
 
     const booking = {
-      id:Date.now(),
+      id:bookingId,
       groupId,
       groupColor,
       groupName:"预约组",
@@ -2089,15 +2097,20 @@ t.packageIndex = packageIndex;
     state.bookings.push(booking);
 
     /*
-     * 先保存到本机。
-     * saveStateSafely 会负责后续云端同步。
+     * saveStateSafely 会同步写入 localStorage 并立即广播。
+     * 预约窗口无需等待 IndexedDB 或 Firestore 上传完成，登记后马上关闭。
      */
-    await save("create_booking");
+    const saveTask = save("create_booking");
 
     completed = true;
     closeBookingModal();
     renderBookingGrid();
     renderList();
+
+    saveTask.catch(error=>{
+      console.error("预约后台同步失败，将由本地队列继续重试", error);
+      setSyncStatus("pending", "● 预约已保存在本机 · 云端上传将自动重试");
+    });
 
   }catch(error){
     console.error("创建预约失败",error);
@@ -2396,11 +2409,8 @@ function drawRunningTables(){
 
     if(bookingLocked) return;
 
-if(t.type === "walkin"){
-  openMoveRunningTableModal(tableIndex);
-}else{
-  openRunningTablePay(tableIndex);
-}
+// 预约页只负责登记与排桌。到店后的付款、换桌、续时和结账统一进入计时器处理。
+window.location.href = `app.html#table-${tableIndex + 1}`;
 
   };
 }      
@@ -2458,76 +2468,6 @@ function startRunningTimeTextTimer(){
   },1000);
 }
 
-function openRunningTablePay(tableIndex){
-  const t = state.tables[tableIndex];
-  if(!t || !t.start) return;
-
-  runningPayTableIndex = tableIndex;
-
-  document.getElementById("runningPayInfo").innerHTML = `
-    ${t.name}<br>
-    当前付款方式：${t.pay || "未记录"}
-  `;
-
-  document.getElementById("runningPaySelect").value = t.pay || "";
-
-  document.getElementById("runningPayModalBg").style.display = "block";
-}
-
-function closeRunningTablePay(){
-  document.getElementById("runningPayModalBg").style.display = "none";
-  runningPayTableIndex = null;
-}
-
-async function confirmRunningTablePay(){
-  if(runningPayTableIndex === null) return;
-
-  const t = state.tables[runningPayTableIndex];
-  const value = document.getElementById("runningPaySelect").value;
-
-  if(!value){
-    alert("请选择付款方式");
-    return;
-  }
-
-  t.pay = value;
-
-if(t.recordId){
-  const snap = await getDoc(doc(db, "records", t.recordId));
-
-  if(snap.exists()){
-    const r = {
-      id: snap.id,
-      ...snap.data()
-    };
-
-    r.payments = normalizeBookingPayments(r);
-    const target = [...r.payments].reverse().find(p=>Number(p.amountJPY || 0) !== 0);
-    if(target){
-      target.pay = value;
-      target.currency = currencyForPaymentMethod(value);
-      target.amountRMB = jpyToRmb(target.amountJPY || 0);
-      target.updatedAt = Date.now();
-    }
-    r.pay = [...new Set(r.payments.filter(p=>Number(p.amountJPY||0)!==0).map(p=>p.pay||"未记录"))].join("+") || value;
-    r.currency = currencyForPaymentMethod(value);
-    t.currency = currencyForPaymentMethod(value);
-
-    await saveRecordSafely({db,ref,record:r});
-  }
-}
-  save();
-  closeRunningTablePay();
-  renderBookingGrid();
-
-  alert(`${t.name} 已设置付款方式：${value}`);
-}
-
-
-
-
-
-
 function getBookingById(id){
   return state.bookings.find(b=>Number(b.id) === Number(id));
 }
@@ -2536,7 +2476,6 @@ function getBookingDetailDraft(){
   return {
     name: document.getElementById("detailName")?.value.trim() || "",
     phone: document.getElementById("detailPhone")?.value.trim() || "",
-    pay: document.getElementById("detailPay")?.value || "",
     packageIndex: Number(document.getElementById("detailPackage")?.value || 0)
   };
 }
@@ -2545,7 +2484,6 @@ function getBookingDetailSnapshot(booking){
   return JSON.stringify({
     name: booking?.name || "",
     phone: booking?.phone || "",
-    pay: booking?.pay || "",
     packageIndex: Number(booking?.packageIndex || 0)
   });
 }
@@ -2569,7 +2507,6 @@ function openBookingAction(id){
 
   document.getElementById("detailName").value = b.name || "";
   document.getElementById("detailPhone").value = b.phone || "";
-  document.getElementById("detailPay").value = b.pay || "";
 
   const indexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
@@ -2604,7 +2541,6 @@ async function saveBookingDetail(options = {}){
 
   b.name = draft.name;
   b.phone = draft.phone;
-  b.pay = draft.pay;
   b.packageIndex = draft.packageIndex;
 
   indexes.forEach(idx=>{
@@ -2616,8 +2552,6 @@ async function saveBookingDetail(options = {}){
       phoneLast4:String(draft.phone || "").slice(-4)
     };
 
-    // 这里只更新下一笔付款方式，不修改历史 payments。
-    t.pay = draft.pay || t.pay || "";
     t.packageIndex = draft.packageIndex;
     t.type = "booking";
   });
@@ -3134,9 +3068,6 @@ window.openMoveTableModal = openMoveTableModal;
 window.closeMoveTableModal = closeMoveTableModal;
 window.confirmMoveTable = confirmMoveTable;
 window.startMoveDrag = startMoveDrag;
-window.openRunningTablePay = openRunningTablePay;
-window.closeRunningTablePay = closeRunningTablePay;
-window.confirmRunningTablePay = confirmRunningTablePay;
 window.openMoveRunningTableModal = openMoveRunningTableModal;
 window.openAssignTableModal=openAssignTableModal;
 window.assignBookingTable=assignBookingTable;
