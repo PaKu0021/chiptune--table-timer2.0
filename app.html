@@ -116,7 +116,6 @@
     </select>
 
     <input id="batchGroupName" placeholder="组名称（例：王小姐一组）">
-    <input id="batchGroupPeopleCount" type="number" min="1" value="1" placeholder="组内人数">
     <select id="batchGroupPaymentMode">
       <option value="split">分开 / 自由组合付款</option>
       <option value="unified">统一付款</option>
@@ -219,8 +218,6 @@
     <h2 id="groupManagerTitle">创建新组</h2>
     <label>组名称</label>
     <input id="groupManagerName" placeholder="例：王小姐一组">
-    <label>组内人数</label>
-    <input id="groupManagerPeople" type="number" min="1" value="1">
     <label>付款安排</label>
     <select id="groupManagerPaymentMode">
       <option value="split">分开 / 自由组合付款</option>
@@ -235,7 +232,7 @@
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.8.9";
+  import { renderNav } from "./js/nav.js?v=2.9.0";
 
   try {
     renderNav("app");
@@ -243,7 +240,7 @@
     console.error("导航加载失败", error);
   }
 
-  import("./js/app.js?v=2.8.9").catch(error => {
+  import("./js/app.js?v=2.9.0").catch(error => {
     alert(
       "计时系统加载失败：\n\n" +
       error.name + "\n" +
