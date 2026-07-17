@@ -1,4 +1,4 @@
-Chiptune v2.9.3
+Chiptune v2.9.4
 
 提前分钟修复：
 - 预约和 Walk-in 都保留数字输入框。
