@@ -193,6 +193,27 @@
   </div>
 </div>
 
+
+<div id="refundModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>退款</h2>
+    <div id="refundInfo"></div>
+    <label>退款金额（日元）</label>
+    <input id="refundAmount" type="number" min="1" step="1" placeholder="请输入退款金额">
+    <label>退款方式</label>
+    <select id="refundPay">
+      <option value="">请选择退款方式</option>
+      <option value="现金">现金</option>
+      <option value="PayPay">PayPay</option>
+      <option value="微信">微信</option>
+      <option value="支付宝">支付宝</option>
+    </select>
+    <label>备注</label>
+    <input id="refundNote" placeholder="例：顾客取消加时、设备故障">
+    <button class="btn-danger full" onclick="confirmRefund()">确认退款</button>
+    <button class="btn-ghost full" onclick="closeRefund()">取消</button>
+  </div>
+</div>
 <div id="groupManagerModalBg" class="modal-bg">
   <div class="modal">
     <h2 id="groupManagerTitle">创建新组</h2>
@@ -214,7 +235,7 @@
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.8.8";
+  import { renderNav } from "./js/nav.js?v=2.8.9";
 
   try {
     renderNav("app");
@@ -222,7 +243,7 @@
     console.error("导航加载失败", error);
   }
 
-  import("./js/app.js?v=2.8.8").catch(error => {
+  import("./js/app.js?v=2.8.9").catch(error => {
     alert(
       "计时系统加载失败：\n\n" +
       error.name + "\n" +
