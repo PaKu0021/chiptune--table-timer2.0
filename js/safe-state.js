@@ -970,7 +970,7 @@ export async function saveRecordSafely({db,ref,record}){
 
 
 
-export async function atomicStartTable({db,ref,tableIndex,tablePatch,record}){
+export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,timerStartAt,timerEndAt,excludeBookingId=null}){
   if(!navigator.onLine){
     throw new Error("当前离线，无法执行跨设备安全开始");
   }
@@ -984,6 +984,37 @@ export async function atomicStartTable({db,ref,tableIndex,tablePatch,record}){
     if(existing.start){
       result = {startedByThisDevice:false,state:latest,table:clone(existing)};
       return;
+    }
+
+    const parseBookingDateTime = (dateText,timeText)=>{
+      const date = String(dateText || "").trim();
+      const time = String(timeText || "").trim();
+      if(!date || !/^\d{2}:\d{2}$/.test(time)) return NaN;
+      const [y,m,d] = date.split("-").map(Number);
+      const [hh,mm] = time.split(":").map(Number);
+      if(!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return NaN;
+      return new Date(y,m-1,d,hh,mm,0,0).getTime();
+    };
+
+    const proposedStart = Number(timerStartAt || tablePatch?.start || Date.now());
+    const proposedEnd = Number(timerEndAt || proposedStart);
+    const conflict = (Array.isArray(latest.bookings) ? latest.bookings : []).find(b=>{
+      if(b?.cancelled || b?.checkedIn) return false;
+      if(Number(b?.id) === Number(excludeBookingId)) return false;
+      const indexes = (Array.isArray(b?.tableIndexes) ? b.tableIndexes : [b?.tableIndex])
+        .filter(v=>v !== undefined && v !== null && v !== "")
+        .map(Number);
+      if(!indexes.includes(Number(tableIndex))) return false;
+      const bookingStart = parseBookingDateTime(b.date,b.startTime);
+      const bookingEnd = parseBookingDateTime(b.date,b.endTime);
+      if(!Number.isFinite(bookingStart) || !Number.isFinite(bookingEnd)) return false;
+      return proposedStart < bookingEnd && proposedEnd > bookingStart;
+    });
+
+    if(conflict){
+      const err = new Error(`${tablePatch?.name || `${Number(tableIndex)+1}号桌`}无法开始：与预约 ${conflict.date || ""} ${conflict.startTime || "-"}-${conflict.endTime || "-"} 冲突。请更换桌位、调整预约或选择不会重叠的套餐。`);
+      err.code = "booking-conflict";
+      throw err;
     }
 
     const nextTable = {...existing,...clone(tablePatch)};

@@ -1,11 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.8.6";
+import { db } from "./firebase.js?v=2.8.7";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.8.6";
-/*import { formatTime } from "./common.js?v=2.8.6";*/
-import { resetTable, formatTime } from "./common.js?v=2.8.6";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.8.6";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.6";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.8.7";
+/*import { formatTime } from "./common.js?v=2.8.7";*/
+import { resetTable, formatTime } from "./common.js?v=2.8.7";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.8.7";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.7";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -1308,6 +1308,58 @@ function toggleStartLock(i){
   emergencySaveState({db,ref,state,action:t.startLocked ? "lock_start" : "unlock_start"});
 }
 
+
+function parseBookingDateTime(dateText,timeText){
+  const date = String(dateText || "").trim();
+  const time = String(timeText || "").trim();
+  if(!date || !/^\d{2}:\d{2}$/.test(time)) return NaN;
+  const [y,m,d] = date.split("-").map(Number);
+  const [hh,mm] = time.split(":").map(Number);
+  if(!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return NaN;
+  return new Date(y,m-1,d,hh,mm,0,0).getTime();
+}
+
+function getPlannedTimerEndAt(table,startAt){
+  const pkg = getPackage(table);
+  if(!pkg?.unlimited){
+    return startAt + Math.max(0,Number(pkg?.minutes || 0))*60000 + Math.max(0,Number(table?.extra || 0));
+  }
+
+  const startDate = new Date(startAt);
+  const day = startDate.getDay();
+  const isWeekend = day === 0 || day === 6;
+  const hours = state.businessHours || {};
+  const closeHour = Number(isWeekend ? (hours.weekendClose ?? 22) : (hours.weekdayClose ?? 22));
+  const closeAt = new Date(startDate.getFullYear(),startDate.getMonth(),startDate.getDate(),closeHour,0,0,0).getTime();
+  return closeAt > startAt ? closeAt : startAt;
+}
+
+function findTimerBookingConflict(tableIndex,startAt,endAt,excludeBookingId=null,sourceState=state){
+  const bookings = Array.isArray(sourceState?.bookings) ? sourceState.bookings : [];
+  return bookings
+    .filter(b=>!b?.cancelled && !b?.checkedIn)
+    .filter(b=>Number(b?.id) !== Number(excludeBookingId))
+    .filter(b=>{
+      const indexes = (Array.isArray(b?.tableIndexes) ? b.tableIndexes : [b?.tableIndex])
+        .filter(v=>v !== undefined && v !== null && v !== "")
+        .map(Number);
+      return indexes.includes(Number(tableIndex));
+    })
+    .map(b=>({
+      booking:b,
+      startAt:parseBookingDateTime(b.date,b.startTime),
+      endAt:parseBookingDateTime(b.date,b.endTime)
+    }))
+    .filter(x=>Number.isFinite(x.startAt) && Number.isFinite(x.endAt))
+    .find(x=>startAt < x.endAt && endAt > x.startAt) || null;
+}
+
+function formatConflictMessage(table,conflict){
+  const b = conflict?.booking || {};
+  const who = [b.name,b.phone].filter(Boolean).join(" / ");
+  return `${table?.name || "该桌"}无法开始：与预约 ${b.date || ""} ${b.startTime || "-"}-${b.endTime || "-"} 冲突${who ? `（${who}）` : ""}。请更换桌位、调整预约或选择不会重叠的套餐。`;
+}
+
 async function start(i){
   const t = state.tables[i];
   if(!t || t.start || t.startLocked) return;
@@ -1323,6 +1375,14 @@ async function start(i){
   ensureVisitAndRecordId(t);
   const pre = Number(document.getElementById("pre-"+i)?.value || 0);
   const startTime = Date.now() - pre * 60000;
+  const plannedEndAt = getPlannedTimerEndAt(t,startTime);
+  const localConflict = findTimerBookingConflict(i,startTime,plannedEndAt,t.bookingId);
+  if(localConflict){
+    t.startLocked = false;
+    render();
+    alert(formatConflictMessage(t,localConflict));
+    return;
+  }
 
   stopAlertLoop(i);
   t.start = startTime;
@@ -1392,7 +1452,10 @@ async function start(i){
     const result = await atomicStartTable({
       db,ref,tableIndex:i,
       tablePatch:JSON.parse(JSON.stringify(t)),
-      record:initialRecord
+      record:initialRecord,
+      timerStartAt:startTime,
+      timerEndAt:plannedEndAt,
+      excludeBookingId:t.bookingId || null
     });
 
     if(!result?.startedByThisDevice){
