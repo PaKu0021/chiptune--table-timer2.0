@@ -1,11 +1,11 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.8.9";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.8.9";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=2.8.9";
-import { RMB_PER_JPY } from "./business-day.js?v=2.8.9";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.9.0";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.9.0";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=2.9.0";
+import { RMB_PER_JPY } from "./business-day.js?v=2.9.0";
 
 
-import { db } from "./firebase.js?v=2.8.9";
+import { db } from "./firebase.js?v=2.9.0";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -30,6 +30,13 @@ loadLocalRecords().then(localRecords=>{
   records = mergeRecordLists(records, localRecords);
   renderTodayBill();
 }).catch(err=>console.warn("读取本机账单失败",err));
+
+window.addEventListener("chiptune-record-broadcast",event=>{
+  const record = event.detail?.record;
+  if(!record?.id) return;
+  records = mergeRecordLists(records,[record]);
+  renderTodayBill();
+});
 
 
 let editingRecordId = null;
@@ -956,22 +963,17 @@ async function saveEditedGroup(){
   group.updatedAt = now;
 
   try{
-    // 每条账单先落本机，云端失败由队列稍后补传。
-    await Promise.all(changedRecords.map(r=>
-      Promise.race([
-        saveRecordSafely({db,ref,record:r}),
-        new Promise((_,reject)=>setTimeout(()=>reject(new Error("账单本机保存超时")),8000))
-      ]).catch(err=>{ console.warn("组账单保存进入后台重试",r.id,err); })
-    ));
-
-    await Promise.race([
-      saveStateSafely({db,ref,getState:()=>state,action:"today_bill_replace_group_tables"}),
-      new Promise((_,reject)=>setTimeout(()=>reject(new Error("组状态保存超时")),8000))
-    ]).catch(err=>console.warn("组状态将在后台继续同步",err));
+    // 先同步写入本机影子并立即关闭窗口；云端上传全部转入后台。
+    changedRecords.forEach(r=>emergencySaveRecord({db,ref,record:r}));
+    emergencySaveState({db,ref,state,action:"today_bill_replace_group_tables"});
 
     closeEditGroup();
     renderTodayBill();
-    alert("组桌位已更新");
+
+    Promise.all(changedRecords.map(r=>saveRecordSafely({db,ref,record:r})))
+      .catch(err=>console.warn("组账单后台同步失败，将自动重试",err));
+    saveStateSafely({db,ref,getState:()=>state,action:"today_bill_replace_group_tables"})
+      .catch(err=>console.warn("组状态后台同步失败，将自动重试",err));
   }finally{
     if(button){ button.disabled=false; button.textContent="保存组桌位"; }
   }

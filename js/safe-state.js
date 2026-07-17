@@ -61,6 +61,23 @@ const stateChannel =
     ? new BroadcastChannel("chiptune-state-sync-v1")
     : null;
 
+const recordChannel =
+  typeof BroadcastChannel !== "undefined"
+    ? new BroadcastChannel("chiptune-record-sync-v1")
+    : null;
+
+function broadcastRecord(record, action = "record_update"){
+  if(!record?.id) return;
+  const detail = {record:clone(record),action,sentAt:Date.now(),deviceId:getDeviceId()};
+  window.dispatchEvent(new CustomEvent("chiptune-record-broadcast",{detail}));
+  try{ recordChannel?.postMessage(detail); }catch(error){ console.warn("跨页面账单广播失败",error); }
+}
+
+recordChannel?.addEventListener("message",event=>{
+  if(!event.data?.record?.id) return;
+  window.dispatchEvent(new CustomEvent("chiptune-record-broadcast",{detail:event.data}));
+});
+
 function broadcastState(state, action = "state_update"){
   const detail = {
     state:clone(state),
@@ -954,6 +971,7 @@ export async function saveRecordSafely({db,ref,record}){
   const current = await loadLocalRecords();
   const merged = mergeRecordLists(current,[next]);
   writeShadow(RECORDS_SHADOW,merged);
+  broadcastRecord(next,"save_record");
   await writeLocalRecords(merged);
   await idbPut("recordQueue",{id:`record_${next.id}`,record:next,createdAt:Date.now()});
   const count = await pendingCount();
@@ -1041,7 +1059,10 @@ export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,time
   }
   if(result?.startedByThisDevice && record){
     const localRecords = await loadLocalRecords().catch(()=>[]);
-    await writeLocalRecords(mergeRecordLists(localRecords,[record]));
+    const mergedRecords = mergeRecordLists(localRecords,[record]);
+    writeShadow(RECORDS_SHADOW,mergedRecords);
+    broadcastRecord(record,"atomic_start_record");
+    await writeLocalRecords(mergedRecords);
   }
   return result;
 }
@@ -1098,6 +1119,7 @@ export function emergencySaveRecord({db,ref,record}){
   const merged = mergeRecordLists(Array.isArray(current) ? current : [], [next]);
   // localStorage is synchronous: once this returns, the emergency bill has a durable local shadow.
   writeShadow(RECORDS_SHADOW, merged);
+  broadcastRecord(next,"emergency_save_record");
 
   // IndexedDB and cloud queue run in background and must never block the UI.
   Promise.resolve().then(async()=>{

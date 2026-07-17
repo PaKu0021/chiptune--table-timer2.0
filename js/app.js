@@ -1,11 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.8.9";
+import { db } from "./firebase.js?v=2.9.0";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.8.9";
-/*import { formatTime } from "./common.js?v=2.8.9";*/
-import { resetTable, formatTime } from "./common.js?v=2.8.9";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.8.9";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.9";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.0";
+/*import { formatTime } from "./common.js?v=2.9.0";*/
+import { resetTable, formatTime } from "./common.js?v=2.9.0";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.0";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.0";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -2598,7 +2598,7 @@ const group = upsertGroup(state,{
   name:groupName,
   color:"#B7E4C7",
   tableIndexes:indexes,
-  peopleCount:Number(document.getElementById("batchGroupPeopleCount")?.value || indexes.length || 1),
+  peopleCount:Math.max(1,indexes.length),
   paymentMode
 });
 syncGroupReferences(state,group);
@@ -2996,7 +2996,6 @@ function openGroupManager(groupId=""){
   const group = editingGroupId ? getGroup(state,editingGroupId) : null;
   document.getElementById("groupManagerTitle").innerText = group ? `管理组 ${group.id}` : "创建新组";
   document.getElementById("groupManagerName").value = group?.name || "";
-  document.getElementById("groupManagerPeople").value = group?.peopleCount || 1;
   document.getElementById("groupManagerPaymentMode").value = group?.paymentMode || "split";
   const selected = new Set((group?.tableIndexes || []).map(Number));
   document.getElementById("groupManagerTables").innerHTML = state.tables.map((t,i)=>{
@@ -3074,7 +3073,7 @@ async function saveGroupManager(){
       ...(existing || {}),
       id,
       name:document.getElementById("groupManagerName").value.trim() || "未命名组",
-      peopleCount:Number(document.getElementById("groupManagerPeople").value || indexes.length || 1),
+      peopleCount:Math.max(1,indexes.length),
       paymentMode:document.getElementById("groupManagerPaymentMode").value || "split",
       color:existing?.color || "#B7E4C7",
       tableIndexes:indexes,
@@ -3084,11 +3083,14 @@ async function saveGroupManager(){
 
     // 组与桌位状态保存后，将同一批桌位现有账单的 groupId 一并更新。
     // 今日账单读取的是 records 集合，不能只修改 shop/main 中的桌位。
-    await save("manage_group");
-    await Promise.all([...affectedIndexes].map(index=>syncTableRecordGroup(index)));
-
+    // 本机立即完成，窗口不再等待每张账单上传。
+    emergencySaveState({db,ref,state,action:"manage_group"});
     closeGroupManager();
     render();
+
+    save("manage_group").catch(error=>console.warn("组状态后台同步失败",error));
+    Promise.all([...affectedIndexes].map(index=>syncTableRecordGroup(index)))
+      .catch(error=>console.warn("组内账单后台同步失败",error));
   }catch(error){
     console.error("保存组失败",error);
     alert(`保存组失败：${error?.message || error}`);

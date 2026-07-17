@@ -46,7 +46,7 @@ export async function allocateGroupId(db, groups = [], timestamp = Date.now()){
 
   // 某些现有 Firebase 规则只允许访问 shop/main，访问新集合时可能长时间重试。
   // 最多等待 3 秒，之后立即使用本机顺序编号，避免“保存组”按钮看起来没有反应。
-  const timeout = new Promise(resolve=>setTimeout(()=>resolve(localId),3000));
+  const timeout = new Promise(resolve=>setTimeout(()=>resolve(localId),300));
   const cloudAllocation = runTransaction(db, async transaction=>{
     const counterRef = doc(db,"groupCounters",counterId);
     const snap = await transaction.get(counterRef);
@@ -94,7 +94,7 @@ export function normalizeGroup(group = {}){
     color:String(group.color || group.groupColor || "#B7E4C7"),
     status:String(group.status || "active"),
     paymentMode:String(group.paymentMode || "split"),
-    peopleCount:Math.max(1,Number(group.peopleCount || group.partySize || tableIndexes.length || 1)),
+    peopleCount:Math.max(1,tableIndexes.length || Number(group.peopleCount || group.partySize || 1)),
     tableIndexes,
     bookingIds,
     memberIds,
