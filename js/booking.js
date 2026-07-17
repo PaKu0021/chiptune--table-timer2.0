@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.8.5";
+import { db } from "./firebase.js?v=2.8.6";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.8.5";
-import { resetTable } from "./common.js?v=2.8.5";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.8.5";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.8.6";
+import { resetTable } from "./common.js?v=2.8.6";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.8.6";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.8.6";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -53,6 +53,8 @@ window.addEventListener("storage", event=>{
 });
 
 let activeBookingId = null;
+let bookingDetailInitialSnapshot = null;
+let bookingDetailClosing = false;
 let bookingLocked = true;
 let currentBookingDate = getTodayDate();
 let calendarYear = new Date().getFullYear();
@@ -2530,108 +2532,135 @@ function getBookingById(id){
   return state.bookings.find(b=>Number(b.id) === Number(id));
 }
 
+function getBookingDetailDraft(){
+  return {
+    name: document.getElementById("detailName")?.value.trim() || "",
+    phone: document.getElementById("detailPhone")?.value.trim() || "",
+    pay: document.getElementById("detailPay")?.value || "",
+    packageIndex: Number(document.getElementById("detailPackage")?.value || 0)
+  };
+}
+
+function getBookingDetailSnapshot(booking){
+  return JSON.stringify({
+    name: booking?.name || "",
+    phone: booking?.phone || "",
+    pay: booking?.pay || "",
+    packageIndex: Number(booking?.packageIndex || 0)
+  });
+}
+
+function hasUnsavedBookingDetailChanges(){
+  if(!activeBookingId || bookingDetailInitialSnapshot === null) return false;
+  return JSON.stringify(getBookingDetailDraft()) !== bookingDetailInitialSnapshot;
+}
+
 function openBookingAction(id){
   const b = getBookingById(id);
   if(!b) return;
 
   activeBookingId = id;
-
-  const tableIndex = Number(
-    (b.tableIndexes || [b.tableIndex])[0] || 0
-  );
+  bookingDetailClosing = false;
 
   document.getElementById("bookingActionInfo").innerHTML = `
     时间：${b.startTime} - ${b.endTime}<br>
     状态：${b.checkedIn ? "已到店" : "未到店"}
   `;
 
-  document.getElementById("detailName").value =
-    b.name || "";
-
-  document.getElementById("detailPhone").value =
-    b.phone || "";
-
-  document.getElementById("detailPay").value =
-    b.pay || "";
-
-  const indexes = (b.tableIndexes || [b.tableIndex])
-  .filter(v=>v !== undefined && v !== null)
-  .map(Number);
-
-document.getElementById("detailTablesBox").innerHTML = `
-  <div style="font-weight:800;margin:8px 0;">
-    预约桌位：${indexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
-  </div>
-`;
-
-
-    document.getElementById("detailPackage").innerHTML =
-  (state.packages || []).map((p,i)=>`
-    <option value="${i}" ${Number(b.packageIndex || 0) === i ? "selected" : ""}>
-      ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
-    </option>
-  `).join("");
-
-  document.getElementById("bookingActionModalBg").style.display = "block";
-}
-
-
-async function saveBookingDetail(){
-  const b = getBookingById(activeBookingId);
-  if(!b) return;
-
-  const newName = document.getElementById("detailName").value.trim();
-  const newPhone = document.getElementById("detailPhone").value.trim();
-  const newPay = document.getElementById("detailPay").value;
-  const newPackageIndex = Number(document.getElementById("detailPackage").value || 0);
+  document.getElementById("detailName").value = b.name || "";
+  document.getElementById("detailPhone").value = b.phone || "";
+  document.getElementById("detailPay").value = b.pay || "";
 
   const indexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
 
-  b.name = newName;
-  b.phone = newPhone;
-  b.pay = newPay;
-  b.packageIndex = newPackageIndex;
+  document.getElementById("detailTablesBox").innerHTML = `
+    <div style="font-weight:800;margin:8px 0;">
+      预约桌位：${indexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
+    </div>
+  `;
+
+  document.getElementById("detailPackage").innerHTML =
+    (state.packages || []).map((p,i)=>`
+      <option value="${i}" ${Number(b.packageIndex || 0) === i ? "selected" : ""}>
+        ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
+      </option>
+    `).join("");
+
+  bookingDetailInitialSnapshot = getBookingDetailSnapshot(b);
+  document.getElementById("bookingActionModalBg").style.display = "block";
+}
+
+async function saveBookingDetail(options = {}){
+  const { closeModal = false, showAlert = false } = options;
+  const b = getBookingById(activeBookingId);
+  if(!b) return false;
+
+  const draft = getBookingDetailDraft();
+  const indexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+
+  b.name = draft.name;
+  b.phone = draft.phone;
+  b.pay = draft.pay;
+  b.packageIndex = draft.packageIndex;
 
   indexes.forEach(idx=>{
     const t = state.tables[idx];
     if(!t || !t.start) return;
 
     t.customer = {
-      name:newName,
-      phoneLast4:String(newPhone || "").slice(-4)
+      name:draft.name,
+      phoneLast4:String(draft.phone || "").slice(-4)
     };
 
-    t.pay = newPay || t.pay || "";
-    t.packageIndex = newPackageIndex;
+    // 这里只更新下一笔付款方式，不修改历史 payments。
+    t.pay = draft.pay || t.pay || "";
+    t.packageIndex = draft.packageIndex;
     t.type = "booking";
   });
 
-  await save();
-  closeBookingAction();
+  await save("booking_detail_update");
+  bookingDetailInitialSnapshot = getBookingDetailSnapshot(b);
   renderBookingGrid();
   renderList();
 
-  alert("修改成功");
+  if(closeModal) forceCloseBookingAction();
+  if(showAlert) alert("修改成功");
+  return true;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-function closeBookingAction(){
+function forceCloseBookingAction(){
   document.getElementById("bookingActionModalBg").style.display = "none";
   activeBookingId = null;
+  bookingDetailInitialSnapshot = null;
+  bookingDetailClosing = false;
+}
+
+async function closeBookingAction(){
+  if(bookingDetailClosing) return;
+
+  if(!hasUnsavedBookingDetailChanges()){
+    forceCloseBookingAction();
+    return;
+  }
+
+  bookingDetailClosing = true;
+  try{
+    if(confirm("预约信息已修改。\n\n点击“确定”保存修改；点击“取消”选择是否放弃修改。")){
+      await saveBookingDetail({ closeModal:true });
+      return;
+    }
+
+    if(confirm("确定放弃尚未保存的修改吗？")){
+      forceCloseBookingAction();
+      return;
+    }
+  }finally{
+    bookingDetailClosing = false;
+  }
 }
 
 function openCheckInSelectModal(id){
@@ -2675,8 +2704,17 @@ function closeCheckInSelectModal(){
   document.getElementById("checkInSelectModalBg").style.display = "none";
 }
 
-function checkInBooking(){
-  openCheckInSelectModal(activeBookingId);
+async function checkInBooking(){
+  const bookingId = activeBookingId;
+  if(!bookingId) return;
+
+  // 到店操作总是使用画面中的最新资料；有修改时先自动保存。
+  if(hasUnsavedBookingDetailChanges()){
+    const saved = await saveBookingDetail();
+    if(!saved) return;
+  }
+
+  openCheckInSelectModal(bookingId);
 }
 
 async function confirmCheckInSelected(){
