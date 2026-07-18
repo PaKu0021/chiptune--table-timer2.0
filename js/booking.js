@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.9.5";
+import { db } from "./firebase.js?v=2.9.6";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.5";
-import { resetTable } from "./common.js?v=2.9.5";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.5";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.6";
+import { resetTable } from "./common.js?v=2.9.6";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.6";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.6";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -262,6 +262,31 @@ try{
 
 
 async function save(action="booking_update"){
+  /*
+   * 创建/编辑预约只允许修改预约相关数据。
+   *
+   * 预约页可能在计时器刚开始后的极短时间内仍持有旧桌台快照。
+   * 如果直接保存整份 state，旧快照会把已经开始的桌位覆盖成“未开始”。
+   * 因此预约资料类操作保存前，先读取本机最新状态，并仅把预约、分组、
+   * 客户数据覆盖进去；桌台运行状态始终采用计时器写入的最新版本。
+   */
+  if(action === "create_booking" || action === "booking_detail_update"){
+    const latest = await loadLocalState();
+
+    if(latest){
+      const bookingData = Array.isArray(state?.bookings) ? state.bookings : [];
+      const groupData = Array.isArray(state?.groups) ? state.groups : [];
+      const customerData = state?.customers || {};
+
+      state = {
+        ...latest,
+        bookings:bookingData,
+        groups:groupData,
+        customers:customerData
+      };
+    }
+  }
+
   return saveStateSafely({db, ref, getState:()=>state, action});
 }
 

@@ -589,9 +589,25 @@ export async function reconcileCloudState(cloud){
 
       localValue.forEach((table,index)=>{
         const baseTable = baseTables[index];
+        const cloudTable = cloudTables[index];
 
         if(!same(table,baseTable)){
-          cloudTables[index] = clone(table);
+          /*
+           * 防止旧页面快照把其他页面刚开始的桌位覆盖回未开始。
+           *
+           * cloud 已经运行，而 local 和 base 都未运行，说明本机这次操作
+           * 并没有显式结束该桌，只是携带了开始前的旧快照，必须保留云端。
+           * 真正结账/强制结束时 base 原本是运行状态，因此仍可正常清空。
+           */
+          const staleStopOverwrite = Boolean(
+            cloudTable?.start &&
+            !table?.start &&
+            !baseTable?.start
+          );
+
+          if(!staleStopOverwrite){
+            cloudTables[index] = clone(table);
+          }
         }
       });
 
@@ -787,7 +803,20 @@ function mergeState(latest, local, base, keys){
       const latestTables = Array.isArray(merged.tables) ? clone(merged.tables) : [];
       const baseTables = Array.isArray(baseValue) ? baseValue : [];
       localValue.forEach((table,index)=>{
-        if(!same(table,baseTables[index])) latestTables[index] = clone(table);
+        const baseTable = baseTables[index];
+        const latestTable = latestTables[index];
+
+        if(!same(table,baseTable)){
+          const staleStopOverwrite = Boolean(
+            latestTable?.start &&
+            !table?.start &&
+            !baseTable?.start
+          );
+
+          if(!staleStopOverwrite){
+            latestTables[index] = clone(table);
+          }
+        }
       });
       merged.tables = latestTables;
     }else if(key === "bookings"){
