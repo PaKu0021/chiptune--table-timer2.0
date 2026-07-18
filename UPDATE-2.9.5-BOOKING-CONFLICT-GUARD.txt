@@ -1,4 +1,4 @@
-Chiptune Table Timer v2.9.5
+Chiptune Table Timer v2.9.6
 
 预约重叠防止：
 - 新建预约确认时，会再次检查所选日期、桌位和时间。
