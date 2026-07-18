@@ -32,6 +32,41 @@ const RECORD_HISTORY_SYNC_META = "chiptune_records_history_sync_v2";
 const RECORD_DELETES_COLLECTION = "recordDeletes";
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+
+function stateRevision(value){
+  const n = Number(value?._sync?.revision || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function stateUpdatedAt(value){
+  const n = Number(value?._sync?.updatedAt || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function hasRunningTable(value){
+  return Array.isArray(value?.tables) && value.tables.some(table=>Boolean(table?.start));
+}
+
+/*
+ * Firestore 持久化缓存有时会在事务成功后再次发出旧快照。
+ * revision 必须单调递增；同 revision 下也不能用缺少运行桌位的旧快照
+ * 覆盖本机已经确认的运行状态。
+ */
+function isStateOlder(candidate, reference){
+  if(!candidate || !reference) return false;
+  const candidateRevision = stateRevision(candidate);
+  const referenceRevision = stateRevision(reference);
+  if(candidateRevision !== referenceRevision){
+    return candidateRevision < referenceRevision;
+  }
+  const candidateUpdatedAt = stateUpdatedAt(candidate);
+  const referenceUpdatedAt = stateUpdatedAt(reference);
+  if(candidateUpdatedAt && referenceUpdatedAt && candidateUpdatedAt !== referenceUpdatedAt){
+    return candidateUpdatedAt < referenceUpdatedAt;
+  }
+  if(hasRunningTable(reference) && !hasRunningTable(candidate)) return true;
+  return false;
+}
 function withTimeout(promise, ms=8000, label="本地数据库操作"){
   return Promise.race([
     promise,
@@ -531,6 +566,16 @@ export async function reconcileCloudState(cloud){
    * 没有本机待上传修改时，云端就是最终状态。
    */
   if(!pendingItem){
+    /*
+     * 没有待上传项目时也不能盲信快照：Firestore 本地持久化缓存
+     * 可能在原子开始成功后重新发出更旧的 shop/main。
+     */
+    const reference = local || baseline;
+    if(reference && isStateOlder(cloud,reference)){
+      await writeLocalState(reference,baseline || reference);
+      return clone(reference);
+    }
+
     baseline = clone(cloud);
 
     await writeLocalState(
@@ -670,6 +715,9 @@ if(key === "customers"){
 }
 
 export function setStateBaseline(nextState){
+  if(!nextState) return;
+  // 绝不允许缓存或延迟到达的旧快照降低云端基线版本。
+  if(baseline && isStateOlder(nextState,baseline)) return;
   baseline = clone(nextState);
   const shadow = readShadow(STATE_SHADOW);
   if(shadow?.state) writeLocalState(shadow.state,nextState).catch(()=>{});

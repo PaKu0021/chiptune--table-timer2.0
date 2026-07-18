@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.9.8";
+import { db } from "./firebase.js?v=2.9.10";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.8";
-import { resetTable } from "./common.js?v=2.9.8";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.8";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.8";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.10";
+import { resetTable } from "./common.js?v=2.9.10";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.10";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.10";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -983,6 +983,57 @@ function toggleBookingLock(){
   renderBookingGrid();
 }
 
+function getBookingTableIndexes(booking){
+  return (Array.isArray(booking?.tableIndexes) ? booking.tableIndexes : [booking?.tableIndex])
+    .filter(v=>v !== undefined && v !== null && v !== "")
+    .map(Number)
+    .filter(Number.isFinite);
+}
+
+// 预约状态不能只依赖 checkedIn 布尔值。
+// 计时器、结账和旧版本数据可能只更新了桌位或 finishedTableIndexes，
+// 因此预约页每次渲染都根据当前桌位状态重新推导“未到店 / 已到店 / 已离店”。
+function getBookingVisitStatus(booking){
+  const indexes = getBookingTableIndexes(booking);
+  const runningIndexes = indexes.filter(index=>{
+    const table = state.tables?.[index];
+    if(!table?.start) return false;
+    if(table.bookingId !== undefined && table.bookingId !== null && table.bookingId !== ""){
+      return Number(table.bookingId) === Number(booking.id);
+    }
+    return table.type === "booking"
+      && (!booking.name || table.customer?.name === booking.name)
+      && (!booking.phone || String(table.customer?.phoneLast4 || "") === String(booking.phone || "").slice(-4));
+  });
+
+  const finished = new Set(
+    (Array.isArray(booking.finishedTableIndexes) ? booking.finishedTableIndexes : [])
+      .map(Number)
+      .filter(Number.isFinite)
+  );
+
+  if(runningIndexes.length > 0){
+    booking.checkedIn = true;
+    booking.completed = false;
+    booking.checkedOut = false;
+    booking.checkedInTableIndexes = Array.from(new Set([
+      ...(Array.isArray(booking.checkedInTableIndexes) ? booking.checkedInTableIndexes : []).map(Number),
+      ...runningIndexes
+    ])).filter(Number.isFinite);
+    return {key:"arrived", text:"已到店", className:"booking-list-done"};
+  }
+
+  const allFinished = indexes.length > 0 && indexes.every(index=>finished.has(index));
+  if(booking.completed || booking.checkedOut || allFinished){
+    booking.checkedIn = false;
+    booking.completed = true;
+    booking.checkedOut = true;
+    return {key:"finished", text:"已离店", className:"booking-list-finished"};
+  }
+
+  return {key:"waiting", text:"未到店", className:"booking-list-wait"};
+}
+
 function renderList(){
   const box = document.getElementById("list");
   const summary = document.getElementById("bookingSummary");
@@ -991,11 +1042,13 @@ function renderList(){
   if(!box) return;
 
   const bookings = (state.bookings || [])
-    .filter(b=>(b.date || getTodayDate()) === currentBookingDate)
+    .filter(b=>!b?.cancelled && (b.date || getTodayDate()) === currentBookingDate)
     .sort((a,b)=>String(a.startTime || "99:99").localeCompare(String(b.startTime || "99:99")));
 
-  const checked = bookings.filter(b=>b.checkedIn).length;
-  const waiting = bookings.filter(b=>!b.checkedIn).length;
+  const visitStatuses = new Map(bookings.map(b=>[String(b.id), getBookingVisitStatus(b)]));
+  const checked = bookings.filter(b=>visitStatuses.get(String(b.id))?.key === "arrived").length;
+  const finished = bookings.filter(b=>visitStatuses.get(String(b.id))?.key === "finished").length;
+  const waiting = bookings.filter(b=>visitStatuses.get(String(b.id))?.key === "waiting").length;
 
   const tableTotal = bookings.reduce((sum,b)=>{
     return sum + (b.tableIndexes || [b.tableIndex])
@@ -1005,7 +1058,7 @@ function renderList(){
 
   if(summary){
     summary.innerHTML =
-      `未到店：${waiting}组｜已到店：${checked}组｜预约桌数：${tableTotal}桌`;
+      `未到店：${waiting}组｜已到店：${checked}组｜已离店：${finished}组｜预约桌数：${tableTotal}桌`;
   }
 
   if(btn){
@@ -1020,6 +1073,7 @@ function renderList(){
   }
 
   box.innerHTML = bookings.map(b=>{
+    const visitStatus = visitStatuses.get(String(b.id)) || getBookingVisitStatus(b);
     const tables = (b.tableIndexes || [b.tableIndex])
       .filter(v=>v !== undefined && v !== null)
       .map(idx=>state.tables[Number(idx)]?.name)
@@ -1027,7 +1081,7 @@ function renderList(){
       .join("、");
 
     return `
-      <div class="booking-list-item ${b.checkedIn ? "booking-list-done" : "booking-list-wait"}">
+      <div class="booking-list-item ${visitStatus.className}">
         <div class="booking-list-time">
           ${b.startTime || "-"} - ${b.endTime || "-"}
         </div>
@@ -1053,7 +1107,7 @@ tables || "<span style='color:red'>未分配</span>"
 
 ｜
 
-${b.checkedIn ? "已到店" : "未到店"}
+${visitStatus.text}
 
 </div>
         ${bookingLocked ? "" : `
@@ -2577,7 +2631,7 @@ function openBookingAction(id){
 
   document.getElementById("bookingActionInfo").innerHTML = `
     时间：${b.startTime} - ${b.endTime}<br>
-    状态：${b.checkedIn ? "已到店" : "未到店"}
+    状态：${getBookingVisitStatus(b).text}
   `;
 
   document.getElementById("detailName").value = b.name || "";

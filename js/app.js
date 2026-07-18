@@ -1,11 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.9.8";
+import { db } from "./firebase.js?v=2.9.10";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.8";
-/*import { formatTime } from "./common.js?v=2.9.8";*/
-import { resetTable, formatTime } from "./common.js?v=2.9.8";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.8";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.8";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.10";
+/*import { formatTime } from "./common.js?v=2.9.10";*/
+import { resetTable, formatTime } from "./common.js?v=2.9.10";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.10";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.10";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -395,7 +395,7 @@ onSnapshot(
        * 这里传原始云端数据，
        * 不要传本机合并后的 state。
        */
-      if(!snap.metadata.hasPendingWrites){
+      if(!snap.metadata.fromCache && !snap.metadata.hasPendingWrites){
         setStateBaseline(
           snap.data()
         );
@@ -493,14 +493,6 @@ function calcPriceByTotalMinutes(totalMinutes){
 
   return 5500 + (hours - 6) * 800;
 }
-
-/*
-function getOriginalJPY(t){
-  const p = getPackage(t);
-  if(p.unlimited) return Number(p.price || 0);
-  return Number(p.price || 0) + (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0);
-}
-*/
 
 function getOriginalJPY(t){
   const p = getPackage(t);
@@ -687,6 +679,57 @@ async function getTableRecord(t){
     console.warn("读取云端账单失败，继续使用本机数据", err);
     return null;
   }
+}
+
+function getBookingIndexes(booking){
+  return (Array.isArray(booking?.tableIndexes) ? booking.tableIndexes : [booking?.tableIndex])
+    .filter(v=>v !== undefined && v !== null && v !== "")
+    .map(Number)
+    .filter(Number.isFinite);
+}
+
+function markBookingTableStarted(booking, tableIndex, startedAt){
+  if(!booking) return;
+  const index = Number(tableIndex);
+  booking.checkedIn = true;
+  booking.completed = false;
+  booking.checkedOut = false;
+  booking.checkInTime = booking.checkInTime || startedAt;
+  booking.checkInTimeText = booking.checkInTimeText || new Date(startedAt).toLocaleString();
+  booking.checkedInTableIndexes = Array.from(new Set([
+    ...(Array.isArray(booking.checkedInTableIndexes) ? booking.checkedInTableIndexes : []).map(Number),
+    index
+  ])).filter(Number.isFinite);
+  if(Array.isArray(booking.finishedTableIndexes)){
+    booking.finishedTableIndexes = booking.finishedTableIndexes.map(Number).filter(i=>i !== index);
+  }
+  booking.updatedAt = Date.now();
+}
+
+function markBookingTableFinished(booking, tableIndex, finishedAt=Date.now()){
+  if(!booking) return;
+  const index = Number(tableIndex);
+  booking.finishedTableIndexes = Array.from(new Set([
+    ...(Array.isArray(booking.finishedTableIndexes) ? booking.finishedTableIndexes : []).map(Number),
+    index
+  ])).filter(Number.isFinite);
+  booking.checkedInTableIndexes = (Array.isArray(booking.checkedInTableIndexes) ? booking.checkedInTableIndexes : [])
+    .map(Number)
+    .filter(i=>i !== index);
+
+  const indexes = getBookingIndexes(booking);
+  const finished = new Set(booking.finishedTableIndexes);
+  const allFinished = indexes.length > 0 && indexes.every(i=>finished.has(i));
+  if(allFinished){
+    booking.checkedIn = false;
+    booking.completed = true;
+    booking.checkedOut = true;
+    booking.checkOutTime = finishedAt;
+    booking.checkOutTimeText = new Date(finishedAt).toLocaleString();
+  }else{
+    booking.checkedIn = booking.checkedInTableIndexes.length > 0;
+  }
+  booking.updatedAt = Date.now();
 }
 
 function makeCustomerKey(name, phoneLast4){
@@ -1553,15 +1596,13 @@ async function start(i){
 
     // 预约签到仅由成功开始的一台设备执行。
     if(current?.type === "booking" && Array.isArray(state.bookings)){
-      const booking = state.bookings.find(b=>{
-        const raw = Array.isArray(b.tableIndexes) ? b.tableIndexes : [b.tableIndex];
-        return raw.filter(v=>v!==undefined && v!==null && v!=="").map(Number).includes(i)
-          && !b.checkedIn && (!b.name || b.name === current.customer?.name);
-      });
+      // 优先使用桌位保存的 bookingId 精确定位，避免姓名重复、旧 checkedIn 值
+      // 或多桌预约导致签到状态没有写回。
+      const booking = state.bookings.find(b=>Number(b.id) === Number(current.bookingId))
+        || state.bookings.find(b=>getBookingIndexes(b).includes(i)
+          && (!b.name || b.name === current.customer?.name));
       if(booking){
-        booking.checkedIn = true;
-        booking.checkInTime = startTime;
-        booking.checkInTimeText = new Date(startTime).toLocaleString();
+        markBookingTableStarted(booking,i,startTime);
       }
     }
 
@@ -1873,15 +1914,7 @@ async function confirmCheckout(){
     if(t.bookingId){
       const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
       if(b){
-        if(!Array.isArray(b.finishedTableIndexes)) b.finishedTableIndexes = [];
-        b.finishedTableIndexes = Array.from(new Set([
-          ...b.finishedTableIndexes.map(Number), originalIndex
-        ]));
-        if(Array.isArray(b.checkedInTableIndexes)){
-          b.checkedInTableIndexes = b.checkedInTableIndexes
-            .map(Number)
-            .filter(i=>i !== originalIndex);
-        }
+        markBookingTableFinished(b,originalIndex,record.closedAt);
       }
     }
 
@@ -2059,11 +2092,7 @@ async function confirmForceEnd(){
     if(t.bookingId){
       const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
       if(b){
-        if(!Array.isArray(b.finishedTableIndexes)) b.finishedTableIndexes = [];
-        b.finishedTableIndexes = Array.from(new Set([...b.finishedTableIndexes.map(Number),i]));
-        if(Array.isArray(b.checkedInTableIndexes)){
-          b.checkedInTableIndexes = b.checkedInTableIndexes.map(Number).filter(x=>x !== i);
-        }
+        markBookingTableFinished(b,i,now);
       }
     }
 
@@ -2153,20 +2182,7 @@ async function autoCloseOldTables(){
         const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
 
         if(b){
-          if(!Array.isArray(b.finishedTableIndexes)){
-            b.finishedTableIndexes = [];
-          }
-
-          b.finishedTableIndexes = Array.from(new Set([
-            ...b.finishedTableIndexes.map(Number),
-            i
-          ]));
-
-          if(Array.isArray(b.checkedInTableIndexes)){
-            b.checkedInTableIndexes = b.checkedInTableIndexes
-              .map(Number)
-              .filter(idx=>idx !== i);
-          }
+          markBookingTableFinished(b,i,now);
         }
       }
 
