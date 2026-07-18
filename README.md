@@ -1,6 +1,6 @@
-## 当前修正版：2.8.0
+## 当前修正版：2.9.9
 
-详见 `UPDATE-2.8.0-PAYMENT-INTEGRITY.txt`。
+详见 `UPDATE-2.9.9-BOOKING-VISIT-STATUS.txt`。
 
 # chiptune--table-timer2.0
 ## 2026-07 安全保存改造
