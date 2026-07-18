@@ -1,4 +1,4 @@
-import { db } from "./firebase.js?v=2.9.4";
+import { db } from "./firebase.js?v=2.9.5";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const ref = doc(db, "shop", "main");

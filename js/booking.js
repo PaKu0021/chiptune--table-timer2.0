@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.9.4";
+import { db } from "./firebase.js?v=2.9.5";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.4";
-import { resetTable } from "./common.js?v=2.9.4";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.4";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.4";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.5";
+import { resetTable } from "./common.js?v=2.9.5";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.5";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.5";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -1092,13 +1092,14 @@ function cancelBookingById(id){
 
 function hasBookingConflict(targetIndex, booking, excludeBookingId){
   const target = Number(targetIndex);
-
-  const startA = timeToMinutes(booking.startTime);
-  const endA = timeToMinutes(booking.endTime);
+  const targetDate = booking?.date || currentBookingDate;
+  const startA = timeToMinutes(booking?.startTime);
+  const endA = timeToMinutes(booking?.endTime);
 
   return (state.bookings || []).some(b=>{
     if(Number(b.id) === Number(excludeBookingId)) return false;
-    if((b.date || currentBookingDate) !== currentBookingDate) return false;
+    if(b?.cancelled) return false;
+    if((b.date || currentBookingDate) !== targetDate) return false;
 
     const indexes = (b.tableIndexes || [b.tableIndex])
       .filter(v=>v !== undefined && v !== null)
@@ -1109,6 +1110,29 @@ function hasBookingConflict(targetIndex, booking, excludeBookingId){
     const startB = timeToMinutes(b.startTime);
     const endB = timeToMinutes(b.endTime);
 
+    // 首尾刚好相接不算重叠，例如 12:00-13:00 与 13:00-14:00 可以连续预约。
+    return startA < endB && endA > startB;
+  });
+}
+
+function findBookingConflicts({date, tableIndexes, startTime, endTime, excludeBookingId = null}){
+  const targets = new Set((tableIndexes || []).map(Number));
+  const startA = timeToMinutes(startTime);
+  const endA = timeToMinutes(endTime);
+
+  return (state.bookings || []).filter(b=>{
+    if(Number(b.id) === Number(excludeBookingId)) return false;
+    if(b?.cancelled) return false;
+    if((b.date || currentBookingDate) !== date) return false;
+
+    const indexes = (b.tableIndexes || [b.tableIndex])
+      .filter(v=>v !== undefined && v !== null)
+      .map(Number);
+
+    if(!indexes.some(index=>targets.has(index))) return false;
+
+    const startB = timeToMinutes(b.startTime);
+    const endB = timeToMinutes(b.endTime);
     return startA < endB && endA > startB;
   });
 }
@@ -2052,6 +2076,32 @@ t.packageIndex = packageIndex;
       renderList();
 
       alert("Walk-in 已开始计时");
+      return;
+    }
+
+    const conflicts = findBookingConflicts({
+      date:currentBookingDate,
+      tableIndexes,
+      startTime,
+      endTime
+    });
+
+    if(conflicts.length){
+      const conflictLines = conflicts.map(existing=>{
+        const occupiedIndexes = (existing.tableIndexes || [existing.tableIndex])
+          .filter(v=>v !== undefined && v !== null)
+          .map(Number)
+          .filter(index=>tableIndexes.includes(index));
+        const tableNames = occupiedIndexes
+          .map(index=>state.tables[index]?.name || `${index + 1}号桌`)
+          .join("、");
+        return `${tableNames}｜${existing.startTime} - ${existing.endTime}｜${existing.name || "已有预约"}`;
+      });
+
+      alert(
+        "创建预约失败：所选桌位和时间已存在预约，不能重叠。\n\n" +
+        conflictLines.join("\n")
+      );
       return;
     }
 
