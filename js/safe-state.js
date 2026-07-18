@@ -793,7 +793,7 @@ function mergeCustomerChanges(
   return latest;
 }
 
-function mergeState(latest, local, base, keys){
+function mergeState(latest, local, base, keys, action=""){
   const merged = clone(latest || {});
   const changed = keys?.length ? keys : changedKeys(local,base);
   for(const key of changed){
@@ -807,10 +807,18 @@ function mergeState(latest, local, base, keys){
         const latestTable = latestTables[index];
 
         if(!same(table,baseTable)){
+          const explicitStopActions = new Set([
+            "checkout_complete",
+            "emergency_force_end_table",
+            "force_end_table",
+            "checkout_table",
+            "batch_checkout",
+            "clear_finished_table"
+          ]);
           const staleStopOverwrite = Boolean(
             latestTable?.start &&
             !table?.start &&
-            !baseTable?.start
+            !explicitStopActions.has(String(action || ""))
           );
 
           if(!staleStopOverwrite){
@@ -854,7 +862,7 @@ async function flushOne({db,ref}, item){
   await runTransaction(db,async tx=>{
     const snap = await tx.get(ref);
     const latest = snap.exists() ? snap.data() : {};
-    result = mergeState(latest,item.state,item.base,item.changed);
+    result = mergeState(latest,item.state,item.base,item.changed,item.action);
     tx.set(ref,result.merged);
   });
   await idbDelete("queue",item.id);

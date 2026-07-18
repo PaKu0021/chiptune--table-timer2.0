@@ -1,6 +1,6 @@
-import { db } from "./firebase.js?v=2.9.7";
+import { db } from "./firebase.js?v=2.9.8";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { loadLocalState } from "./safe-state.js?v=2.9.7";
+import { loadLocalState } from "./safe-state.js?v=2.9.8";
 
 const ref = doc(db, "shop", "main");
 const gridEl = document.getElementById("printGrid");
@@ -46,6 +46,17 @@ function getBusinessHours(state){
     open: isWeekend ? Number(h.weekendOpen || 10) : Number(h.weekdayOpen || 12),
     close: isWeekend ? Number(h.weekendClose || 22) : Number(h.weekdayClose || 22)
   };
+}
+
+
+function darkenColor(hex, amount = 35){
+  const value = String(hex || "#B7E4C7").replace("#", "");
+  const full = value.length === 3 ? value.split("").map(ch=>ch+ch).join("") : value.padEnd(6,"0").slice(0,6);
+  const num = Number.parseInt(full,16);
+  if(!Number.isFinite(num)) return "#8bab95";
+  const clamp = value=>Math.max(0,Math.min(255,value));
+  const r=clamp((num>>16)-amount), g=clamp(((num>>8)&255)-amount), b=clamp((num&255)-amount);
+  return `#${[r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("")}`;
 }
 
 function normalizeTableIndexes(booking){
@@ -104,8 +115,17 @@ function renderState(state){
         ? `${customer}${phone ? `<br><small>${phone}</small>` : ""}`
         : "";
 
+      const bookingColor = booking
+        ? (booking.checkedIn
+            ? darkenColor(booking.color || booking.groupColor || "#B7E4C7",35)
+            : (booking.color || booking.groupColor || "#B7E4C7"))
+        : "";
+      const cellStyle = bookingColor
+        ? ` style="background:${bookingColor};color:#332d24;"`
+        : "";
+
       html += `
-        <td class="${booking ? (booking.checkedIn ? "print-checked" : "print-booked") : ""}">
+        <td class="${booking ? (booking.checkedIn ? "print-checked" : "print-booked") : ""}"${cellStyle}>
           ${label}
         </td>
       `;

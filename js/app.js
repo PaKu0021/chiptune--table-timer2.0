@@ -1,11 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.9.6";
+import { db } from "./firebase.js?v=2.9.8";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.6";
-/*import { formatTime } from "./common.js?v=2.9.6";*/
-import { resetTable, formatTime } from "./common.js?v=2.9.6";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.6";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.6";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.8";
+/*import { formatTime } from "./common.js?v=2.9.8";*/
+import { resetTable, formatTime } from "./common.js?v=2.9.8";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.8";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.8";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -1532,6 +1532,10 @@ async function start(i){
       return;
     }
 
+    // 事务返回的服务器状态必须成为当前页面的新基线。
+    // 不能继续拿开始前的旧整份 state 做后续保存，否则返回首页时可能被旧快照覆盖。
+    state = JSON.parse(JSON.stringify(result.state));
+
     // 服务器成功锁定后再建立组，避免双设备同时生成两组。
     const current = state.tables[i];
     if(current && !current.groupId){
@@ -1561,8 +1565,16 @@ async function start(i){
       }
     }
 
-    emergencySaveState({db,ref,state,action:"start_table_post_transaction"});
+    // 开始后的预约签到、组资料必须真正落盘完成后才允许显示“已同步”。
+    // 用户立刻返回首页时，首页因此能够读到同一份运行状态。
+    await saveStateSafely({
+      db,
+      ref,
+      getState:()=>state,
+      action:"start_table_post_transaction"
+    });
     await createOrUpdateRecord(state.tables[i]);
+    await flushPending({db,ref});
     setSyncStatus("synced","● 已同步");
     render();
   }catch(error){
