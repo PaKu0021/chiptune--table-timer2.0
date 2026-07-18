@@ -1490,3 +1490,6 @@ button.selected-pop{
   color:#b42318;
   background:#fff4f2;
 }
+
+/* v2.9.10 预约已离店状态 */
+.booking-list-finished{opacity:.72;background:#f1eee8;border-color:#cfc7ba;}
