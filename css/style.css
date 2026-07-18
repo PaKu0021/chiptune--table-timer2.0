@@ -1474,3 +1474,19 @@ button.selected-pop{
   border-radius:16px;
   touch-action:pan-y;
 }
+
+
+.print-loading,
+.print-error{
+  margin-top:24px;
+  padding:18px 20px;
+  border:1px solid #d8cbb8;
+  border-radius:14px;
+  background:#fff;
+  font-weight:700;
+}
+
+.print-error{
+  color:#b42318;
+  background:#fff4f2;
+}
