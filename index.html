@@ -76,8 +76,8 @@
 
 <script type="module">
 import { db } from "./js/firebase.js";
-import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending, subscribeAllRecords, emergencySaveRecord, emergencySaveState } from "./js/safe-state.js?v=2.9.14";
-import { getCurrentBusinessDate, getRecordBusinessDate } from "./js/business-day.js?v=2.9.14";
+import { loadLocalState, reconcileCloudState, loadLocalRecords, mergeRecordLists, installConnectionGuard, flushPending, subscribeAllRecords, emergencySaveRecord, emergencySaveState } from "./js/safe-state.js?v=2.9.15";
+import { getCurrentBusinessDate, getRecordBusinessDate } from "./js/business-day.js?v=2.9.15";
 import { doc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
