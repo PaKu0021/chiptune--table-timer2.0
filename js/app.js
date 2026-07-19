@@ -1,11 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.9.12";
+import { db } from "./firebase.js?v=2.9.13";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.12";
-/*import { formatTime } from "./common.js?v=2.9.12";*/
-import { resetTable, formatTime } from "./common.js?v=2.9.12";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.12";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.12";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime } from "./safe-state.js?v=2.9.13";
+/*import { formatTime } from "./common.js?v=2.9.13";*/
+import { resetTable, formatTime } from "./common.js?v=2.9.13";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.13";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.13";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -1454,14 +1454,29 @@ async function start(i){
     }
 
     render();
-    setSyncStatus("pending","● 正在同步新的开始时间…");
-    emergencySaveState({db,ref,state,action:"adjust_start_time"});
+    setSyncStatus("pending","● 正在原子同步新的开始时间…");
     try{
-      await createOrUpdateRecord(t,{syncStartTime:true});
-      setSyncStatus("synced","● 开始时间已更新");
+      const result = await atomicAdjustStartTime({
+        db, ref, tableIndex:i,
+        tablePatch:JSON.parse(JSON.stringify(t)),
+        recordId:t.recordId,
+        recordPatch:{
+          timestamp:newStartTime,
+          startAt:newStartTime,
+          startedTime:new Date(newStartTime).toLocaleString(),
+          businessDate:getBusinessDateKey(newStartTime),
+          time:new Date(newStartTime).toLocaleString(),
+          tableName:t.name,
+          updatedAt:Date.now(),
+          localUpdatedAt:Date.now()
+        }
+      });
+      state = JSON.parse(JSON.stringify(result.state));
+      setSyncStatus("synced","● 开始时间与账单已同时更新");
     }catch(error){
-      console.error("更新开始时间失败",error);
-      setSyncStatus("error","● 开始时间已保存在本机，等待云端同步");
+      console.error("原子更新开始时间失败",error);
+      setSyncStatus("error","● 开始时间更新失败，未修改云端数据");
+      alert(error?.message || "开始时间更新失败，请确认网络后重试");
     }
     render();
     return;
@@ -1550,6 +1565,7 @@ async function start(i){
   render();
   setSyncStatus("pending","● 正在由服务器锁定桌位…");
 
+  let serverStartCommitted = false;
   try{
     const result = await atomicStartTable({
       db,ref,tableIndex:i,
@@ -1559,6 +1575,8 @@ async function start(i){
       timerEndAt:plannedEndAt,
       excludeBookingId:t.bookingId || null
     });
+
+    serverStartCommitted = Boolean(result?.startedByThisDevice);
 
     if(!result?.startedByThisDevice){
       setSyncStatus("synced","● 该桌已由另一台设备开始，已同步最新状态");
@@ -1619,11 +1637,17 @@ async function start(i){
       alert(`已按真实时间开始计时。\n预计结束 ${plannedEndText}，与后续预约 ${b.startTime || "-"}-${b.endTime || "-"} 重叠。\n预约时间未被修改，请根据现场情况安排。`);
     }
   }catch(error){
-    console.error("原子开始失败",error);
-    state.tables[i] = before;
-    render();
-    setSyncStatus("error","● 开始失败，未产生账单");
-    alert(error?.message || "开始失败，请确认网络后重试");
+    console.error("开始流程失败",error);
+    if(!serverStartCommitted){
+      state.tables[i] = before;
+      render();
+      setSyncStatus("error","● 开始失败，未产生账单");
+      alert(error?.message || "开始失败，请确认网络后重试");
+    }else{
+      render();
+      setSyncStatus("pending","● 桌位已在云端开始，本机保存失败，将自动重试");
+      alert("桌位已经成功开始并产生账单，但本机缓存保存失败。请不要重复点击开始，系统会继续同步。");
+    }
   }
 }
 
@@ -2673,52 +2697,111 @@ async function confirmBatchStart(){
     alert("请选择付款方式");
     return;
   }
+  if(!navigator.onLine){
+    alert("当前离线，无法安全批量开始。请恢复网络后再操作。");
+    return;
+  }
 
   const indexes = [...document.querySelectorAll(".batch-table-check:checked")]
     .map(el=>Number(el.value));
-
   if(indexes.length === 0){
     alert("请选择至少一张桌");
     return;
   }
 
-const groupId = await allocateGroupId(db,state.groups || []);
-const groupName = document.getElementById("batchGroupName")?.value.trim() || `现场组`;
-const paymentMode = document.getElementById("batchGroupPaymentMode")?.value || "split";
-const group = upsertGroup(state,{
-  id:groupId,
-  name:groupName,
-  color:"#B7E4C7",
-  tableIndexes:indexes,
-  peopleCount:Math.max(1,indexes.length),
-  paymentMode
-});
-syncGroupReferences(state,group);
+  const now = Date.now();
+  const groupId = await allocateGroupId(db,state.groups || []);
+  const groupName = document.getElementById("batchGroupName")?.value.trim() || `现场组`;
+  const paymentMode = document.getElementById("batchGroupPaymentMode")?.value || "split";
+  const group = {
+    id:groupId,
+    name:groupName,
+    color:"#B7E4C7",
+    tableIndexes:indexes,
+    peopleCount:Math.max(1,indexes.length),
+    paymentMode,
+    createdAt:now,
+    updatedAt:now
+  };
 
-for(const i of indexes){
-  const t = state.tables[i];
-  if(!t || t.start) continue;
+  const entries = [];
+  for(const i of indexes){
+    const source = state.tables[i];
+    if(!source || source.start){
+      alert(`${source?.name || `${i+1}号桌`}已经开始，批量开始已取消。`);
+      return;
+    }
 
-  t.packageIndex = packageIndex;
-  t.pay = pay;
-  t.start = Date.now();
-  t.pausedAt = null;
-  t.alerted = false;
-  t.alerting = false;
-  t.lastAction = "start";
-  t.paidJPY = Number(getPackage(t).price || 0);
-  t.paidRMB = getRMB(t.paidJPY);
-  t.paidAt = Date.now();
-  t.payTiming = "prepaid";
+    const t = JSON.parse(JSON.stringify(source));
+    t.packageIndex = packageIndex;
+    t.pay = pay;
+    t.payTiming = "prepaid";
+    t.groupId = groupId;
+    t.startLocked = true;
+    ensureVisitAndRecordId(t);
+    t.start = now;
+    t.pausedAt = null;
+    t.alerted = false;
+    t.alerting = false;
+    t.lastAction = "batch_start";
 
-  await createOrUpdateRecord(t);
+    const pkg = getPackage(t);
+    t.paidJPY = Number(pkg.price || 0);
+    t.paidRMB = getRMB(t.paidJPY);
+    t.paidAt = now;
+
+    const payments = t.paidJPY > 0 ? [makePaymentLine({
+      reason:"套餐预付款",
+      pay:t.pay || "未记录",
+      amountJPY:t.paidJPY,
+      note:"批量开始时收取"
+    })] : [];
+
+    const record = {
+      id:t.recordId, visitId:t.visitId, timestamp:now, startAt:now,
+      startedTime:new Date(now).toLocaleString(), businessDate:getBusinessDateKey(now),
+      time:new Date(now).toLocaleString(), tableName:t.name,
+      customerName:t.customer?.name || "", phoneLast4:t.customer?.phoneLast4 || "",
+      customerType:t.type || "walkin", packageName:pkg.name,
+      packageMinutes:pkg.unlimited ? "不限时" : pkg.minutes,
+      packagePrice:Number(pkg.price || 0), extraMinutes:0, extensionAmount:0,
+      originalJPY:Number(pkg.price || 0), payments,
+      paidJPY:sumPaymentsJPY(payments),
+      dueJPY:Math.max(0,Number(pkg.price || 0)-sumPaymentsJPY(payments)),
+      totalJPY:sumPaymentsJPY(payments),
+      totalRMB:payments.reduce((sum,line)=>sum+Number(line.amountRMB || 0),0),
+      pay:getPaymentSummary(payments), currency:getCurrencySummary(payments),
+      payTiming:"prepaid", paidStatus:"已结清", status:"进行中", closed:false,
+      receiptImage:"", receiptFileName:"", groupId, updatedAt:now, localUpdatedAt:now
+    };
+    entries.push({tableIndex:i,tablePatch:t,record});
+  }
+
+  setSyncStatus("pending","● 正在由服务器批量锁定桌位…");
+  try{
+    const result = await atomicBatchStartTables({db,ref,entries,group});
+    state = JSON.parse(JSON.stringify(result.state));
+    for(const i of indexes){
+      const t = state.tables[i];
+      if(t?.type === "booking" && Array.isArray(state.bookings)){
+        const booking = state.bookings.find(b=>Number(b.id) === Number(t.bookingId))
+          || state.bookings.find(b=>getBookingIndexes(b).includes(i) && (!b.name || b.name === t.customer?.name));
+        if(booking) markBookingTableStarted(booking,i,now);
+      }
+    }
+    ensureGroups(state);
+    const savedGroup = upsertGroup(state,group);
+    syncGroupReferences(state,savedGroup);
+    await saveStateSafely({db,ref,getState:()=>state,action:"batch_start_finalize"});
+    closeBatchStart();
+    render();
+    setSyncStatus("synced",`● 已安全批量开始 ${indexes.length} 桌`);
+  }catch(error){
+    console.error("批量开始失败",error);
+    setSyncStatus("error","● 批量开始失败，未写入任何桌位");
+    alert("批量开始失败：\n" + (error?.message || error));
+  }
 }
-  save();
-  closeBatchStart();
-  render();
-}
-
-
 
 
 

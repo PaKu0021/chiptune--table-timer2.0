@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.9.12";
+import { db } from "./firebase.js?v=2.9.13";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.12";
-import { resetTable } from "./common.js?v=2.9.12";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.12";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.12";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.13";
+import { resetTable } from "./common.js?v=2.9.13";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.13";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.13";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -1326,19 +1326,23 @@ moveRunningFromIndex = null;
     <div id="moveToTableBox" class="move-drag-grid">
       ${state.tables.map((t,i)=>{
         const isSameBookingTable = bookingIndexes.includes(i);
-        const occupied = !!t.start && !isSameBookingTable;
-        const conflict = hasBookingConflict(i, b, b.id) && !isSameBookingTable;
-
-        let disabled = occupied || conflict;
+        const conflictBooking = (state.bookings || []).find(other=>{
+          if(Number(other?.id) === Number(b.id) || other?.cancelled) return false;
+          if((other.date || currentBookingDate) !== (b.date || currentBookingDate)) return false;
+          const indexes = (other.tableIndexes || [other.tableIndex]).map(Number);
+          if(!indexes.includes(i)) return false;
+          return timeToMinutes(b.startTime) < timeToMinutes(other.endTime) && timeToMinutes(b.endTime) > timeToMinutes(other.startTime);
+        });
+        const runningName = t.start ? (t.customer?.name || "使用中") : "";
+        const swapName = runningName || conflictBooking?.name || "";
+        const disabled = isSameBookingTable;
         let sub = "可移动";
-
-        if(occupied) sub = "使用中";
-        else if(conflict) sub = "已有预约";
-        else if(isSameBookingTable) sub = "当前预约桌";
+        if(isSameBookingTable) sub = "当前预约桌";
+        else if(swapName) sub = `交换：${swapName}`;
 
         return `
           <button
-            class="move-table-btn move-to-btn ${disabled ? "disabled" : ""}"
+            class="move-table-btn move-to-btn ${disabled ? "disabled" : ""} ${swapName ? "swap-target" : ""}"
             data-index="${i}"
             id="move-to-${i}"
             ${disabled ? "disabled" : ""}
@@ -1534,103 +1538,105 @@ function drawMoveLines(pointerX = null, pointerY = null){
 }
 
 async function confirmMoveTable(){
-
   if(moveMode === "running"){
-  await confirmMoveRunningTable();
-  return;
-}
+    await confirmMoveRunningTable();
+    return;
+  }
 
   const b = getBookingById(moveBookingId);
   if(!b) return;
-
   if(movePairs.length === 0){
-    alert("请先拖线选择要移动的桌位");
+    alert("请先拖线选择要调整的桌位");
     return;
   }
 
   const bookingIndexes = (b.tableIndexes || [b.tableIndex])
-    .filter(v=>v !== undefined && v !== null)
-    .map(Number);
-
+    .filter(v=>v !== undefined && v !== null).map(Number);
+  const fromSet = new Set();
+  const toSet = new Set();
   for(const pair of movePairs){
-    if(!bookingIndexes.includes(pair.from)){
-      alert("有原桌位不属于这个预约");
-      return;
-    }
-
-    if(pair.from === pair.to){
-      alert("新桌位不能和原桌位一样");
-      return;
-    }
-
-    const toTable = state.tables[pair.to];
-
-    if(toTable?.start){
-      alert(`${toTable.name} 正在使用中，不能移动`);
-      return;
-    }
-
-    if(hasBookingConflict(pair.to, b, b.id)){
-      alert(`${toTable.name} 在这个时间段已有预约，不能移动`);
-      return;
-    }
+    pair.from = Number(pair.from); pair.to = Number(pair.to);
+    if(!bookingIndexes.includes(pair.from)) return alert("有原桌位不属于这个预约");
+    if(pair.from === pair.to) return alert("新桌位不能和原桌位一样");
+    if(fromSet.has(pair.from) || toSet.has(pair.to)) return alert("同一张桌不能重复连接");
+    fromSet.add(pair.from); toSet.add(pair.to);
   }
 
-  movePairs.forEach(pair=>{
-    const fromTable = state.tables[pair.from];
-    const toTable = state.tables[pair.to];
-
-    if(fromTable?.start){
-      const oldFromName = fromTable.name;
-      const oldToName = toTable.name;
-
-      state.tables[pair.to] = {
-        ...fromTable,
-        name: oldToName
-      };
-
-      state.tables[pair.from] = resetTable(oldFromName);
+  const affectedBookings = new Map();
+  const selectedStart = timeToMinutes(b.startTime);
+  const selectedEnd = timeToMinutes(b.endTime);
+  for(const pair of movePairs){
+    const targetTable = state.tables[pair.to];
+    let other = null;
+    if(targetTable?.bookingId){
+      other = (state.bookings || []).find(x=>Number(x.id) === Number(targetTable.bookingId));
     }
-  });
-
-  b.tableIndexes = bookingIndexes.map(i=>{
-    const pair = movePairs.find(p=>p.from === i);
-    return pair ? pair.to : i;
-  });
-
-  const group = getGroupById(b.groupId);
-
-if(group){
-  group.tableIndexes = [...b.tableIndexes]
-    .map(Number)
-    .filter(Number.isFinite);
-
-  group.tableIndexes = Array.from(
-    new Set(group.tableIndexes)
-  );
-
-  group.updatedAt = Date.now();
-}
-
-  if(b.checkedInTableIndexes){
-    b.checkedInTableIndexes = b.checkedInTableIndexes
-      .map(Number)
-      .map(i=>{
-        const pair = movePairs.find(p=>p.from === i);
-        return pair ? pair.to : i;
+    if(!other){
+      other = (state.bookings || []).find(x=>{
+        if(Number(x?.id) === Number(b.id) || x?.cancelled) return false;
+        if((x.date || currentBookingDate) !== (b.date || currentBookingDate)) return false;
+        const indexes = (x.tableIndexes || [x.tableIndex]).map(Number);
+        return indexes.includes(pair.to) && selectedStart < timeToMinutes(x.endTime) && selectedEnd > timeToMinutes(x.startTime);
       });
+    }
+    if(other) affectedBookings.set(String(other.id),other);
   }
 
+  const hasSwap = movePairs.some(pair=>{
+    const t = state.tables[pair.to];
+    if(t?.start) return true;
+    return [...affectedBookings.values()].some(x=>(x.tableIndexes || [x.tableIndex]).map(Number).includes(pair.to));
+  });
+  const summary = movePairs.map(p=>`${state.tables[p.from]?.name || p.from+1} → ${state.tables[p.to]?.name || p.to+1}`).join("、");
+  if(!confirm(`${hasSwap ? "确认交换/调整桌位" : "确认移动桌位"}？\n${summary}\n\n计时、账单、预约和分组会一起跟随客人移动。`)) return;
+
+  const oldTables = state.tables.map(t=>JSON.parse(JSON.stringify(t)));
+  const bidirectional = new Map();
+  movePairs.forEach(({from,to})=>{ bidirectional.set(from,to); bidirectional.set(to,from); });
+  const oneWaySelected = new Map(movePairs.map(({from,to})=>[from,to]));
+
+  // 逐对交换完整桌位对象，桌名保留在物理桌位上。
+  for(const {from,to} of movePairs){
+    const fromName = oldTables[from]?.name || `${from+1}号桌`;
+    const toName = oldTables[to]?.name || `${to+1}号桌`;
+    state.tables[to] = {...oldTables[from],name:toName,lastAction:"swap_table",movedAt:Date.now()};
+    state.tables[from] = {...oldTables[to],name:fromName,lastAction:"swap_table",movedAt:Date.now()};
+  }
+
+  const remapArray = (arr,map)=>Array.from(new Set((arr || []).map(Number).map(i=>map.has(i)?map.get(i):i)));
+  b.tableIndexes = remapArray(bookingIndexes,oneWaySelected);
+  if(b.checkedInTableIndexes) b.checkedInTableIndexes = remapArray(b.checkedInTableIndexes,oneWaySelected);
+  if(b.finishedTableIndexes) b.finishedTableIndexes = remapArray(b.finishedTableIndexes,oneWaySelected);
   delete b.tableIndex;
 
-  await save("move_booking_table");
+  // 目标桌位原本所属的预约反向换到原桌位。
+  for(const other of affectedBookings.values()){
+    other.tableIndexes = remapArray(other.tableIndexes || [other.tableIndex],bidirectional);
+    if(other.checkedInTableIndexes) other.checkedInTableIndexes = remapArray(other.checkedInTableIndexes,bidirectional);
+    if(other.finishedTableIndexes) other.finishedTableIndexes = remapArray(other.finishedTableIndexes,bidirectional);
+    delete other.tableIndex;
+    other.updatedAt = Date.now();
+  }
+
+  // 所有涉及到的运行分组随完整桌位对象一起交换。
+  const involvedGroupIds = new Set();
+  movePairs.forEach(({from,to})=>{
+    [oldTables[from]?.groupId,oldTables[to]?.groupId].filter(Boolean).forEach(id=>involvedGroupIds.add(String(id)));
+  });
+  [b,...affectedBookings.values()].forEach(x=>x?.groupId && involvedGroupIds.add(String(x.groupId)));
+  for(const group of state.groups || []){
+    if(involvedGroupIds.has(String(group?.id))){
+      group.tableIndexes = remapArray(group.tableIndexes,bidirectional);
+      group.updatedAt = Date.now();
+    }
+  }
+
+  await save(hasSwap ? "swap_booking_tables" : "move_booking_table");
   closeMoveTableModal();
   renderBookingGrid();
   renderList();
-
-  alert("桌位已移动");
+  alert(hasSwap ? "桌位已交换" : "桌位已移动");
 }
-
 async function confirmMoveRunningTable(){
   if(moveRunningFromIndex === null){
     alert("没有选择要移动的桌位");

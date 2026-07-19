@@ -317,7 +317,20 @@ export async function loadLocalState(){
 async function writeLocalState(state, cloudBaseline=baseline){
   const box = {state:clone(state),cloudBaseline:clone(cloudBaseline),savedAt:Date.now(),deviceId:getDeviceId()};
   writeShadow(STATE_SHADOW,box);
-  await idbPut("kv",box,STATE_KEY);
+  let lastError = null;
+  for(let attempt=1; attempt<=3; attempt++){
+    try{
+      await idbPut("kv",box,STATE_KEY);
+      return;
+    }catch(error){
+      lastError = error;
+      console.warn(`IndexedDB状态保存失败，第 ${attempt} 次`,error);
+      if(attempt < 3) await new Promise(resolve=>setTimeout(resolve,150 * attempt));
+    }
+  }
+  // localStorage shadow 已经成功写入，因此不丢失当前状态；让调用方继续排队上传云端。
+  console.warn("IndexedDB连续失败，已降级使用localStorage应急副本",lastError);
+  setSyncStatus("pending","● IndexedDB暂不可用 · 已保存应急副本并继续同步");
 }
 
 export async function loadLocalRecords(){
@@ -1226,6 +1239,103 @@ export function emergencySaveState({db,ref,state,action="emergency_state_update"
     }
   });
   return local;
+}
+
+
+export async function atomicBatchStartTables({db,ref,entries,group=null}){
+  if(!navigator.onLine) throw new Error("当前离线，无法执行跨设备安全批量开始");
+  const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  if(!list.length) throw new Error("没有可开始的桌位");
+
+  let result = null;
+  await runTransaction(db, async tx=>{
+    const snap = await tx.get(ref);
+    const latest = snap.exists() ? clone(snap.data()) : {};
+    const tables = Array.isArray(latest.tables) ? clone(latest.tables) : [];
+
+    for(const entry of list){
+      const tableIndex = Number(entry.tableIndex);
+      const existing = tables[tableIndex] || {};
+      if(existing.start){
+        const err = new Error(`${existing.name || `${tableIndex+1}号桌`}已经开始，批量开始已取消。`);
+        err.code = "table-already-started";
+        throw err;
+      }
+    }
+    for(const entry of list){
+      const tableIndex = Number(entry.tableIndex);
+      tables[tableIndex] = {...(tables[tableIndex] || {}),...clone(entry.tablePatch)};
+    }
+    latest.tables = tables;
+    if(group){
+      const groups = Array.isArray(latest.groups) ? clone(latest.groups) : [];
+      const idx = groups.findIndex(g=>String(g?.id) === String(group.id));
+      if(idx >= 0) groups[idx] = {...groups[idx],...clone(group)};
+      else groups.push(clone(group));
+      latest.groups = groups;
+    }
+    latest._sync = {revision:Number(latest?._sync?.revision || 0)+1,updatedAt:Date.now(),deviceId:getDeviceId(),action:"atomic_batch_start_tables"};
+    tx.set(ref,latest);
+    for(const entry of list){
+      if(entry.record?.id) tx.set(doc(db,"records",String(entry.record.id)),clone(entry.record));
+    }
+    result = {state:latest,startedIndexes:list.map(x=>Number(x.tableIndex))};
+  });
+
+  if(result?.state){
+    baseline = clone(result.state);
+    await writeLocalState(result.state,result.state);
+    writeShadow(STATE_SHADOW,{state:clone(result.state),cloudBaseline:clone(result.state),savedAt:Date.now(),deviceId:getDeviceId()});
+    broadcastState(result.state,"atomic_batch_start_tables");
+  }
+  if(result){
+    const records = list.map(x=>x.record).filter(Boolean);
+    const localRecords = await loadLocalRecords().catch(()=>[]);
+    const mergedRecords = mergeRecordLists(localRecords,records);
+    writeShadow(RECORDS_SHADOW,mergedRecords);
+    await writeLocalRecords(mergedRecords);
+  }
+  return result;
+}
+
+
+export async function atomicAdjustStartTime({db,ref,tableIndex,tablePatch,recordId,recordPatch}){
+  if(!navigator.onLine) throw new Error("当前离线，无法安全修改开始时间");
+  let result = null;
+  await runTransaction(db, async tx=>{
+    const snap = await tx.get(ref);
+    if(!snap.exists()) throw new Error("云端桌位数据不存在");
+    const latest = clone(snap.data());
+    const tables = Array.isArray(latest.tables) ? clone(latest.tables) : [];
+    const index = Number(tableIndex);
+    const existing = tables[index];
+    if(!existing?.start) throw new Error("该桌当前未开始，无法修改开始时间");
+    if(recordId && existing.recordId && String(existing.recordId) !== String(recordId)){
+      throw new Error("账单已被其他设备更新，请刷新后重试");
+    }
+    tables[index] = {...existing,...clone(tablePatch)};
+    latest.tables = tables;
+    latest._sync = {revision:Number(latest?._sync?.revision || 0)+1,updatedAt:Date.now(),deviceId:getDeviceId(),action:"atomic_adjust_start_time"};
+    tx.set(ref,latest);
+    if(recordId){
+      tx.set(doc(db,"records",String(recordId)),clone(recordPatch || {}),{merge:true});
+    }
+    result = {state:latest};
+  });
+  if(result?.state){
+    baseline = clone(result.state);
+    await writeLocalState(result.state,result.state);
+    writeShadow(STATE_SHADOW,{state:clone(result.state),cloudBaseline:clone(result.state),savedAt:Date.now(),deviceId:getDeviceId()});
+    broadcastState(result.state,"atomic_adjust_start_time");
+  }
+  if(recordId && recordPatch){
+    const localRecords = await loadLocalRecords().catch(()=>[]);
+    const old = localRecords.find(r=>String(r.id)===String(recordId)) || {id:String(recordId)};
+    const mergedRecords = mergeRecordLists(localRecords,[{...old,...clone(recordPatch),id:String(recordId)}]);
+    writeShadow(RECORDS_SHADOW,mergedRecords);
+    await writeLocalRecords(mergedRecords);
+  }
+  return result;
 }
 
 export async function atomicAdjustTableExtra({db,ref,tableIndex,deltaMs,action,getState}){
