@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.9.14";
+import { db } from "./firebase.js?v=2.9.15";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.14";
-import { resetTable } from "./common.js?v=2.9.14";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.14";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.14";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.15";
+import { resetTable } from "./common.js?v=2.9.15";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.15";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.15";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -2501,6 +2501,7 @@ function drawExistingBookings(){
         if(!cell) continue;
 
         cell.classList.add(b.checkedIn ? "checked-in-booking" : "booked");
+        cell.dataset.bookingId = String(b.id);
         cell.style.background = bgColor;
         cell.style.color = "#332d24";
 
@@ -2583,29 +2584,41 @@ function drawRunningTables(){
     if(startRow === -1) return;
 
     const bgColor = darkenColor(t.groupColor || getRunningColor(t), 35);
+    const runningBookingId = t.bookingId === undefined || t.bookingId === null
+      ? ""
+      : String(t.bookingId);
+    const drawableRows = [];
 
     for(let row=startRow; row<=endRow; row++){
       const cell = document.querySelector(
         `.slot-cell[data-table="${tableIndex}"][data-row="${row}"]`
       );
 
-    if(cell){
-  cell.style.background = bgColor;
+      if(!cell) continue;
 
-  cell.onclick = (e)=>{
-    e.preventDefault();
-    e.stopPropagation();
+      // 后续预约的颜色和点击入口优先保留。正在使用的色块只能覆盖空白格，
+      // 或覆盖属于当前正在使用预约本身的格子。
+      const cellBookingId = cell.dataset.bookingId || "";
+      const occupiedByOtherBooking = cellBookingId && cellBookingId !== runningBookingId;
+      if(occupiedByOtherBooking) continue;
 
-    if(bookingLocked) return;
+      drawableRows.push(row);
+      cell.style.background = bgColor;
 
-// 预约页只负责登记与排桌。到店后的付款、换桌、续时和结账统一进入计时器处理。
-window.location.href = `app.html#table-${tableIndex + 1}`;
+      cell.onclick = (e)=>{
+        e.preventDefault();
+        e.stopPropagation();
 
-  };
-}      
+        if(bookingLocked) return;
+
+        // 预约页只负责登记与排桌。到店后的付款、换桌、续时和结账统一进入计时器处理。
+        window.location.href = `app.html#table-${tableIndex + 1}`;
+      };
     }
 
-    const middleRow = Math.floor((startRow + endRow) / 2);
+    if(drawableRows.length === 0) return;
+
+    const middleRow = drawableRows[Math.floor(drawableRows.length / 2)];
 
 const middleCell = document.querySelector(
   `.slot-cell[data-table="${tableIndex}"][data-row="${middleRow}"]`
