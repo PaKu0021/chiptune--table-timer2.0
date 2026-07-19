@@ -1,11 +1,11 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.9.15";
-import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.9.15";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=2.9.15";
-import { RMB_PER_JPY } from "./business-day.js?v=2.9.15";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.9.16";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=2.9.16";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=2.9.16";
+import { RMB_PER_JPY } from "./business-day.js?v=2.9.16";
 
 
-import { db } from "./firebase.js?v=2.9.15";
+import { db } from "./firebase.js?v=2.9.16";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
@@ -994,8 +994,7 @@ function openEditRecord(recordId){
     ${r.tableName || ""}｜${r.customerName || "-"} ${r.phoneLast4 || ""}
   `;
 
-  document.getElementById("editPay").value = r.pay || "现金";
-  document.getElementById("editTotalJPY").value = toJPY(r);
+  renderEditPayments(normalizePayments(r));
   document.getElementById("editBusinessDate").value =
   getRecordBusinessDate(r) || r.businessDate || "";
 
@@ -1019,38 +1018,78 @@ function closeEditRecord(){
   document.getElementById("editRecordModalBg").style.display = "none";
 }
 
+function editPaymentRowHTML(payment = {}, index = -1){
+  const pay = payment.pay || "现金";
+  const amountJPY = Number(payment.amountJPY || 0);
+  const amountRMB = Number(payment.amountRMB || 0);
+  const note = payment.note || "";
+  return `
+    <div class="edit-payment-row" data-original-index="${index}" style="border:1px solid #e7dfd2;border-radius:12px;padding:10px;margin-bottom:9px;background:#fff;">
+      <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:8px;align-items:end;">
+        <div><label style="margin-top:0;">方式</label><select class="edit-payment-pay">
+          ${["现金","PayPay","微信","支付宝"].map(x=>`<option value="${x}" ${x===pay?'selected':''}>${x}</option>`).join('')}
+        </select></div>
+        <div><label style="margin-top:0;">日元金额</label><input class="edit-payment-jpy" type="number" value="${amountJPY}"></div>
+        <div><label style="margin-top:0;">人民币金额</label><input class="edit-payment-rmb" type="number" value="${amountRMB}"></div>
+        <button type="button" class="btn-ghost" style="height:46px;padding:0 14px;" onclick="removeEditPaymentRow(this)">删除</button>
+      </div>
+      <label>该笔备注</label>
+      <input class="edit-payment-note" value="${String(note).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" placeholder="例如：补收、退款、代付">
+    </div>`;
+}
+
+function renderEditPayments(payments){
+  const list = Array.isArray(payments) && payments.length ? payments : [{pay:"现金",amountJPY:0,amountRMB:0,note:""}];
+  document.getElementById("editPaymentsList").innerHTML = list.map((p,i)=>editPaymentRowHTML(p,i)).join("");
+}
+
+function addEditPaymentRow(){
+  document.getElementById("editPaymentsList").insertAdjacentHTML("beforeend", editPaymentRowHTML({pay:"现金",amountJPY:0,amountRMB:0,note:""},-1));
+}
+
+function removeEditPaymentRow(button){
+  const rows = document.querySelectorAll("#editPaymentsList .edit-payment-row");
+  if(rows.length <= 1){ alert("账单至少需要保留一条付款记录"); return; }
+  button.closest(".edit-payment-row")?.remove();
+}
+
 async function saveEditedRecord(){
   const r = records.find(x=>x.id === editingRecordId);
+  if(!r){ alert("找不到这条账单"); return; }
 
-  if(!r){
-    alert("找不到这条账单");
-    return;
-  }
+  const originalPayments = normalizePayments(r).map(p=>({...p}));
+  const rows = [...document.querySelectorAll("#editPaymentsList .edit-payment-row")];
+  if(!rows.length){ alert("请至少保留一条付款记录"); return; }
 
-  const pay = document.getElementById("editPay").value;
-  const targetTotalJPY = Number(document.getElementById("editTotalJPY").value || 0);
+  const now = Date.now();
+  const payments = rows.map((row, rowIndex)=>{
+    const originalIndex = Number(row.dataset.originalIndex ?? -1);
+    const old = originalIndex >= 0 ? (originalPayments[originalIndex] || {}) : {};
+    const pay = row.querySelector(".edit-payment-pay").value;
+    const amountJPY = Number(row.querySelector(".edit-payment-jpy").value || 0);
+    const amountRMB = Number(row.querySelector(".edit-payment-rmb").value || 0);
+    const paymentNote = row.querySelector(".edit-payment-note").value.trim();
+    return {
+      ...old,
+      operationId: old.operationId || `manual_edit_${now}_${rowIndex}_${Math.random().toString(36).slice(2,7)}`,
+      type: amountJPY < 0 || amountRMB < 0 ? "退款" : "收入",
+      reason: old.reason || "手动编辑付款记录",
+      pay,
+      currency: paymentCurrency(pay),
+      amountJPY,
+      amountRMB,
+      note: paymentNote,
+      time: old.time || new Date(now).toLocaleString(),
+      timestamp: old.timestamp || now,
+      editedAt: now
+    };
+  });
+
   const groupPaid = document.getElementById("editGroupPaid").value === "yes";
   const groupPayerName = document.getElementById("editGroupPayerName").value.trim();
   const groupPaymentId = document.getElementById("editGroupPaymentId").value.trim();
   const note = document.getElementById("editPaymentNote").value.trim();
   const businessDate = document.getElementById("editBusinessDate").value;
-
-  // payments[] 是真实资金流水。编辑账单时绝不重建或覆盖已有明细。
-  // 总额发生变化时，仅追加一笔差额修正；总额不变时完全保留原付款方式。
-  const payments = normalizePayments(r).map(p=>({...p}));
-  const currentTotalJPY = payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
-  const differenceJPY = targetTotalJPY - currentTotalJPY;
-
-  if(differenceJPY !== 0){
-    payments.push(makeManualAdjustment({
-      amountJPY:differenceJPY,
-      pay,
-      note,
-      reason:groupPaid
-        ? (differenceJPY < 0 ? "一人代付/手动退款修正" : "一人代付/手动补收修正")
-        : (differenceJPY < 0 ? "手动退款修正" : "手动补收修正")
-    }));
-  }
 
   r.payments = payments;
   r.totalJPY = payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
@@ -1061,13 +1100,12 @@ async function saveEditedRecord(){
   r.currency = summarizeCurrencies(payments);
   r.businessDate = businessDate || getRecordBusinessDate(r);
   r.businessDateManual = Boolean(businessDate);
-
   r.paymentNote = note;
-  r.editedAt = Date.now();
-  r.editedTime = new Date().toLocaleString();
+  r.editedAt = now;
+  r.editedTime = new Date(now).toLocaleString();
 
   if(groupPaid){
-    r.groupPaymentId = groupPaymentId || ("manual_group_" + dateKey(Date.now()));
+    r.groupPaymentId = groupPaymentId || ("manual_group_" + dateKey(now));
     r.groupPayerName = groupPayerName;
     r.groupPaymentNote = note;
   }else{
@@ -1077,12 +1115,13 @@ async function saveEditedRecord(){
   }
 
   await saveRecordSafely({db, ref, record:r});
-
   closeEditRecord();
-  alert(differenceJPY === 0
-    ? "账单资料已修改，原付款明细保持不变"
-    : "账单已修改，差额已作为独立付款明细记录");
+  renderTodayBill();
+  alert("付款记录已修改");
 }
+
+window.addEditPaymentRow = addEditPaymentRow;
+window.removeEditPaymentRow = removeEditPaymentRow;
 
 window.toggleTodayTimeSort = toggleTodayTimeSort;
 window.confirmExtension = confirmExtension;
