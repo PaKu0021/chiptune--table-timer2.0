@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=2.9.13";
+import { db } from "./firebase.js?v=2.9.14";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.13";
-import { resetTable } from "./common.js?v=2.9.13";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.13";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.13";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=2.9.14";
+import { resetTable } from "./common.js?v=2.9.14";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=2.9.14";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.14";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -1293,6 +1293,8 @@ moveRunningFromIndex = null;
   const bookingIndexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
+  const bookingVisitStatus = getBookingVisitStatus(b);
+  const reservationOnly = bookingVisitStatus.key === "waiting";
 
   document.getElementById("moveTableInfo").innerHTML = `
     客人：${b.name || "-"} ${String(b.phone || "").slice(-4) || ""}<br>
@@ -1306,7 +1308,9 @@ moveRunningFromIndex = null;
     <div class="move-row-title">按住要移动的桌位，拖到下面目标桌位</div>
     <div id="moveFromTableBox" class="move-drag-grid">
       ${bookingIndexes.map(i=>{
-        const running = state.tables[i]?.start ? "已开始" : "未开始";
+        const running = reservationOnly
+          ? (state.tables[i]?.start ? "当前桌使用中（不随预约移动）" : "预约桌位")
+          : (state.tables[i]?.start ? "已开始" : "未开始");
 
         return `
           <button
@@ -1333,12 +1337,15 @@ moveRunningFromIndex = null;
           if(!indexes.includes(i)) return false;
           return timeToMinutes(b.startTime) < timeToMinutes(other.endTime) && timeToMinutes(b.endTime) > timeToMinutes(other.startTime);
         });
-        const runningName = t.start ? (t.customer?.name || "使用中") : "";
-        const swapName = runningName || conflictBooking?.name || "";
+        // 未到店预约只调整预约表，不移动当前正在使用的客人。
+        // 因此目标桌当前是否使用中，不影响未来预约的移动或交换。
+        const runningName = !reservationOnly && t.start ? (t.customer?.name || "使用中") : "";
+        const swapName = conflictBooking?.name || runningName || "";
         const disabled = isSameBookingTable;
-        let sub = "可移动";
+        let sub = reservationOnly ? "可调整预约" : "可移动";
         if(isSameBookingTable) sub = "当前预约桌";
-        else if(swapName) sub = `交换：${swapName}`;
+        else if(swapName) sub = `交换预约：${swapName}`;
+        else if(reservationOnly && t.start) sub = "可调整（当前有人使用）";
 
         return `
           <button
@@ -1580,6 +1587,53 @@ async function confirmMoveTable(){
       });
     }
     if(other) affectedBookings.set(String(other.id),other);
+  }
+
+  const visitStatus = getBookingVisitStatus(b);
+  const reservationOnly = visitStatus.key === "waiting";
+
+  // 未到店预约的桌位调整，只修改预约安排。
+  // 当前正在使用的桌位、计时、账单和付款全部留在原物理桌位。
+  if(reservationOnly){
+    const hasReservationSwap = affectedBookings.size > 0;
+    const summary = movePairs.map(p=>`${state.tables[p.from]?.name || p.from+1} → ${state.tables[p.to]?.name || p.to+1}`).join("、");
+    const confirmText = hasReservationSwap
+      ? `确认交换预约桌位？\n${summary}\n\n只交换预约表中的桌位，不会移动当前正在使用的客人、计时或账单。`
+      : `确认调整预约桌位？\n${summary}\n\n只修改预约表，不会影响当前正在使用的客人。`;
+    if(!confirm(confirmText)) return;
+
+    const oneWaySelected = new Map(movePairs.map(({from,to})=>[from,to]));
+    const bidirectional = new Map();
+    movePairs.forEach(({from,to})=>{ bidirectional.set(from,to); bidirectional.set(to,from); });
+    const remapArray = (arr,map)=>Array.from(new Set((arr || []).map(Number).map(i=>map.has(i)?map.get(i):i)));
+
+    b.tableIndexes = remapArray(bookingIndexes,oneWaySelected);
+    delete b.tableIndex;
+    b.updatedAt = Date.now();
+
+    // 与目标桌同时间段的另一条预约反向换回原桌位。
+    for(const other of affectedBookings.values()){
+      other.tableIndexes = remapArray(other.tableIndexes || [other.tableIndex],bidirectional);
+      delete other.tableIndex;
+      other.updatedAt = Date.now();
+    }
+
+    // 若预约已建立分组，仅同步预约分组的桌位编号；不碰运行桌位对象。
+    const bookingGroupIds = new Set([b,...affectedBookings.values()]
+      .map(x=>x?.groupId).filter(Boolean).map(String));
+    for(const group of state.groups || []){
+      if(bookingGroupIds.has(String(group?.id)) && !group?.startedAt){
+        group.tableIndexes = remapArray(group.tableIndexes,bidirectional);
+        group.updatedAt = Date.now();
+      }
+    }
+
+    await save(hasReservationSwap ? "swap_future_booking_tables" : "move_future_booking_tables");
+    closeMoveTableModal();
+    renderBookingGrid();
+    renderList();
+    alert(hasReservationSwap ? "预约桌位已交换" : "预约桌位已调整");
+    return;
   }
 
   const hasSwap = movePairs.some(pair=>{
