@@ -1,11 +1,11 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.9.10";
+import { db } from "./firebase.js?v=2.9.12";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.10";
-/*import { formatTime } from "./common.js?v=2.9.10";*/
-import { resetTable, formatTime } from "./common.js?v=2.9.10";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.10";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.10";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable } from "./safe-state.js?v=2.9.12";
+/*import { formatTime } from "./common.js?v=2.9.12";*/
+import { resetTable, formatTime } from "./common.js?v=2.9.12";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=2.9.12";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=2.9.12";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -1440,11 +1440,8 @@ async function start(i){
     const pre = normalizePreMinutes(preInput ?? t.preMinutes);
     const newStartTime = Date.now() - pre * 60000;
     const plannedEndAt = getPlannedTimerEndAt(t,newStartTime);
-    const conflict = findTimerBookingConflict(i,newStartTime,plannedEndAt,t.bookingId);
-    if(conflict){
-      alert(formatConflictMessage(t,conflict));
-      return;
-    }
+    // 实际计时与预约排期完全分离：调整真实开始时间时不修改预约，
+    // 即使预计结束时间与后续预约重叠，也允许保存。
 
     t.preMinutes = pre;
     t.start = newStartTime;
@@ -1484,13 +1481,8 @@ async function start(i){
   t.preMinutes = pre;
   const startTime = Date.now() - pre * 60000;
   const plannedEndAt = getPlannedTimerEndAt(t,startTime);
-  const localConflict = findTimerBookingConflict(i,startTime,plannedEndAt,t.bookingId);
-  if(localConflict){
-    t.startLocked = false;
-    render();
-    alert(formatConflictMessage(t,localConflict));
-    return;
-  }
+  // 点击开始始终以当前真实时间（或店员明确补录的时间）开始。
+  // 后续预约只用于提示，不阻止开始，也不会被移动或覆盖。
 
   stopAlertLoop(i);
   t.start = startTime;
@@ -1618,6 +1610,14 @@ async function start(i){
     await flushPending({db,ref});
     setSyncStatus("synced","● 已同步");
     render();
+
+    // 仅提醒实际计时可能与后续预约重叠；不截断计时，也不改预约时间。
+    const overlap = findTimerBookingConflict(i,startTime,plannedEndAt,current?.bookingId || null,state);
+    if(overlap){
+      const b = overlap.booking || {};
+      const plannedEndText = new Date(plannedEndAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+      alert(`已按真实时间开始计时。\n预计结束 ${plannedEndText}，与后续预约 ${b.startTime || "-"}-${b.endTime || "-"} 重叠。\n预约时间未被修改，请根据现场情况安排。`);
+    }
   }catch(error){
     console.error("原子开始失败",error);
     state.tables[i] = before;
