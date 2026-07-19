@@ -129,7 +129,7 @@
 
 
     <button class="btn-blue full" onclick="openMoveTableModal()">
-  移动桌位
+  调整桌位
 </button>
 
     <button class="btn-success full"
@@ -175,14 +175,14 @@
 
 <div id="moveTableModalBg" class="modal-bg">
   <div class="modal move-modal">
-    <h2>移动桌位</h2>
+    <h2>调整桌位</h2>
 
     <div id="moveTableInfo" style="margin-bottom:12px;font-weight:800;"></div>
 
     <div id="moveLineArea" class="move-line-area"></div>
 
     <button class="btn-main full" onclick="confirmMoveTable()">
-      确认移动
+      确认调整
     </button>
 
     <button class="btn-ghost full" onclick="closeMoveTableModal()">
@@ -281,7 +281,7 @@
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.9.12";
+  import { renderNav } from "./js/nav.js?v=2.9.13";
 
   try {
     renderNav("booking");
@@ -289,7 +289,7 @@
     console.error("预约页面导航加载失败", error);
   }
 
-  import("./js/booking.js?v=2.9.12")
+  import("./js/booking.js?v=2.9.13")
     .catch(error => {
       console.error("booking.js 加载失败", error);
 

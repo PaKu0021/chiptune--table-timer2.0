@@ -1,4 +1,4 @@
-## 当前修正版：2.9.12
+## 当前修正版：2.9.13
 
 详见 `UPDATE-2.9.9-BOOKING-VISIT-STATUS.txt`。
 
