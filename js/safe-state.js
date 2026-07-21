@@ -1001,7 +1001,7 @@ function operationRef(db, operationId){ return doc(db,OP_COLLECTION,String(opera
 function entityRef(db,type,id){
   const collectionName=entityCollectionName(type);
   if(!collectionName) throw new Error(`未知实体类型：${type}`);
-  return doc(db,collectionName,String(id));
+  return doc(db,collectionName,safeEntityDocId(id));
 }
 function recordRefV4(db,recordId){ return doc(db,"records",String(recordId)); }
 function paymentRefV4(db,recordId,paymentId){ return doc(db,"records",String(recordId),"payments",String(paymentId)); }
@@ -1010,7 +1010,11 @@ function entityCollectionName(type){
 }
 function entityDocId(type,id,index){
   if(type === "table") return `table_${String(Number(index)+1).padStart(2,"0")}`;
-  return String(id || "");
+  return safeEntityDocId(id);
+}
+function safeEntityDocId(id){
+  const text = String(id || "");
+  return text.includes("/") ? encodeURIComponent(text) : text;
 }
 function shallowPatch(next,base){
   const patch={};
