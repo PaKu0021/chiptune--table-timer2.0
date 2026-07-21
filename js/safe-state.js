@@ -1025,6 +1025,14 @@ function shallowPatch(next,base){
   }
   return patch;
 }
+function applyPatchObject(base,patch){
+  const next=clone(base||{});
+  for(const [key,value] of Object.entries(patch||{})){
+    if(value === undefined) delete next[key];
+    else next[key]=clone(value);
+  }
+  return next;
+}
 function arrayMapById(list,prefix){
   const map=new Map();
   (Array.isArray(list)?list:[]).forEach((v,i)=>map.set(itemId(v,i,prefix),v));
@@ -1152,7 +1160,7 @@ async function flushEntityOperation({db,ref},item){
     }
     const next=item.deleted
       ? {...clone(remote),deleted:true,deletedAt:serverTimestamp(),deletedBy:item.deviceId}
-      : {...clone(remote),...clone(item.patch),deleted:false};
+      : {...applyPatchObject(remote,item.patch),deleted:false};
     const version=remoteVersion+1;
     const entityWrite={...next,version,updatedAt:serverTimestamp(),updatedBy:item.deviceId,lastOperationId:item.id,_entitySync:{version,deviceId:item.deviceId,operationId:item.id}};
     tx.set(targetRef,entityWrite,{merge:false});
@@ -1242,7 +1250,7 @@ async function flushRecordV3({db},item){
       const conflict=remoteVersion!==Number(item.expectedVersion||0)?hasPatchConflict(nextRecord,item.baseRecord,item.patch):null;
       if(conflict){ const err=new Error(`账单已在其他设备修改：${conflict}`); err.code="sync-conflict"; throw err; }
       const version=remoteVersion+1;
-      nextRecord={...nextRecord,...clone(item.patch),deleted:false,version,updatedAt:serverTimestamp(),updatedBy:item.deviceId,lastOperationId:item.id};
+      nextRecord={...applyPatchObject(nextRecord,item.patch),deleted:false,version,updatedAt:serverTimestamp(),updatedBy:item.deviceId,lastOperationId:item.id};
       tx.set(canonicalRef,nextRecord,{merge:false});
       tx.set(canonicalRef,{...nextRecord,payments:Array.isArray(legacy.payments)?legacy.payments:[]},{merge:false});
     }else{
@@ -1405,7 +1413,7 @@ export function saveStateSafely({
         await flushPending({db,ref});
       }catch(err){
         console.warn("云端同步失败，将自动重试",err);
-        setSyncStatus("pending","● 已保存本机 · 云端同步失败，将重试");
+        setSyncStatus("error",`● 云端同步失败：${err?.code || err?.message || err}`);
       }
     }
     return local;
@@ -1428,7 +1436,7 @@ export async function saveRecordSafely({db,ref,record}){
   await enqueueRecordOperations(next,previous);
   const count=await pendingCount();
   setSyncStatus(navigator.onLine?"pending":"offline",navigator.onLine?`● 已保存本机 · ${count} 项等待上传`:`● 已保存本机 · 离线 · ${count} 项待上传`);
-  if(navigator.onLine){ clearTimeout(flushTimer); flushTimer=setTimeout(()=>flushPending({db,ref}).catch(err=>{ console.warn("账单同步失败，将自动重试",err); setSyncStatus("pending","● 账单已保存本机 · 云端同步失败，将重试"); }),0); }
+  if(navigator.onLine){ clearTimeout(flushTimer); flushTimer=setTimeout(()=>flushPending({db,ref}).catch(err=>{ console.warn("账单同步失败，将自动重试",err); setSyncStatus("error",`● 账单同步失败：${err?.code || err?.message || err}`); }),0); }
   return next;
 }
 
@@ -1595,7 +1603,7 @@ export function emergencySaveRecord({db,ref,record}){
         clearTimeout(flushTimer);
         flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
           console.warn("紧急账单云端同步失败，将自动重试",err);
-          setSyncStatus("pending","● 账单已保存本机 · 云端同步失败，将重试");
+          setSyncStatus("error",`● 账单同步失败：${err?.code || err?.message || err}`);
         }),0);
       }
     }catch(err){
@@ -1624,7 +1632,7 @@ export function emergencySaveState({db,ref,state,action="emergency_state_update"
         clearTimeout(flushTimer);
         flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
           console.warn("紧急状态云端同步失败，将自动重试",err);
-          setSyncStatus("pending","● 已保存本机 · 云端同步失败，将重试");
+          setSyncStatus("error",`● 云端同步失败：${err?.code || err?.message || err}`);
         }),0);
       }
     }catch(err){
