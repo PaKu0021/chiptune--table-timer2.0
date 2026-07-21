@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 当前程序没有 Firebase Authentication。以下规则保证 v4 可运行，
+    // 但任何知道项目配置的人理论上都能访问数据。正式安全版必须接入员工登录。
+    match /tables/{id} { allow read, create, update: if true; allow delete: if false; }
+    match /bookings/{id} { allow read, create, update: if true; allow delete: if false; }
+    match /groups/{id} { allow read, create, update: if true; allow delete: if false; }
+    match /customers/{id} { allow read, create, update: if true; allow delete: if false; }
+    match /records/{recordId} {
+      allow read, create, update: if true;
+      allow delete: if false;
+      match /payments/{paymentId} {
+        allow read, create, update: if true;
+        allow delete: if false;
+      }
+    }
+    match /operationLogs/{operationId} {
+      allow read, create: if true;
+      allow update, delete: if false;
+    }
+    match /syncConflicts/{conflictId} {
+      allow read, create, update: if true;
+      allow delete: if false;
+    }
+    match /shop/{id} { allow read, create, update: if true; allow delete: if false; }
+    match /settings/{id} { allow read, create, update: if true; allow delete: if false; }
+    match /recordDeletes/{id} { allow read, create, update: if true; allow delete: if false; }
+  }
+}
