@@ -674,7 +674,7 @@ async function getTableRecord(t){
   if(!navigator.onLine) return null;
   try{
     const snap = await getDoc(doc(db, "records", t.recordId));
-    return snap.exists() ? snap.data() : null;
+    return snap.exists() ? {id:snap.id,...snap.data()} : null;
   }catch(err){
     console.warn("读取云端账单失败，继续使用本机数据", err);
     return null;

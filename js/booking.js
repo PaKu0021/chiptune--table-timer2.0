@@ -533,7 +533,7 @@ async function createOrUpdateTableRecord(t, {
   if(t.recordId){
     const snap = await getDoc(doc(db, "records", t.recordId));
     if(snap.exists()){
-      record = snap.data();
+      record = {id:snap.id,...snap.data()};
     }
   }
 

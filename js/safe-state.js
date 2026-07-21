@@ -416,13 +416,13 @@ export async function loadLocalRecords(){
   try{
     const value = await idbGet("kv",RECORDS_KEY);
     if(Array.isArray(value)){
-      return clone(value.filter(r=>!deleted.has(String(r.id))));
+      return clone(value.filter(r=>!r?.deleted && !deleted.has(String(r.id))));
     }
   }catch(err){ console.warn("IndexedDB账单读取失败，尝试轻量备份",err); }
 
   const shadow = readShadow(RECORDS_SHADOW);
   if(Array.isArray(shadow)){
-    return clone(shadow.filter(r=>!deleted.has(String(r.id))));
+    return clone(shadow.filter(r=>!r?.deleted && !deleted.has(String(r.id))));
   }
   return [];
 }
@@ -453,11 +453,11 @@ export function mergeRecordLists(cloudRecords=[], localRecords=[]){
   const deleted = getDeletedRecordIds();
   const map = new Map();
   for(const r of cloudRecords || []){
-    if(!deleted.has(String(r.id))) map.set(String(r.id),clone(r));
+    if(!r?.deleted && !deleted.has(String(r.id))) map.set(String(r.id),clone(r));
   }
   for(const r of localRecords || []){
     const key = String(r.id);
-    if(deleted.has(key)) continue;
+    if(r?.deleted || deleted.has(key)) continue;
     const cloud = map.get(key);
     if(!cloud || Number(r.localUpdatedAt || r.updatedAt || r.timestamp || 0) >= Number(cloud.localUpdatedAt || cloud.updatedAt || cloud.timestamp || 0)) map.set(key,clone(r));
   }
@@ -575,7 +575,7 @@ export async function migrateLegacyRecordsOnce({db,ref,onProgress}={}){
     let recordsCollectionSucceeded = false;
     try{
       const snap = await withTimeout(getDocs(collection(db,"records")),12000,"云端 records 读取");
-      cloudFound.push(...snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.id!=="init"));
+      cloudFound.push(...snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.id!=="init" && !r.deleted));
       notes.push(`云端 records：${snap.size} 条`);
       recordsCollectionSucceeded = true;
     }catch(err){ notes.push(`云端 records 暂未完成：${err?.message || err}`); }
@@ -1187,8 +1187,10 @@ async function enqueueRecordOperations(next,previous){
   const {payments:_nextPayments,...nextMeta}=normalized;
   const {payments:_prevPayments,...prevMeta}=prev;
   const recordPatch=shallowPatch(nextMeta,prevMeta);
-  const recordOpId=crypto.randomUUID?crypto.randomUUID():`record_${recordId}_${now}`;
-  await idbPut("recordQueue",{id:recordOpId,syncV4:true,type:"record_patch",recordId,patch:recordPatch,baseRecord:clone(prev),expectedVersion:Number(prev.version||prev?._recordSync?.version||0),createdAt:now,deviceId});
+  if(Object.keys(recordPatch).length){
+    const recordOpId=crypto.randomUUID?crypto.randomUUID():`record_${recordId}_${now}`;
+    await idbPut("recordQueue",{id:recordOpId,syncV4:true,type:"record_patch",recordId,patch:recordPatch,baseRecord:clone(prev),expectedVersion:Number(prev.version||prev?._recordSync?.version||0),createdAt:now,deviceId});
+  }
   const pm=new Map(prev.payments.map(x=>[String(x.id),x]));
   const nm=new Map(normalized.payments.map(x=>[String(x.id),x]));
   for(const [id,payment] of nm){
@@ -1219,6 +1221,13 @@ async function flushRecordV3({db},item){
       nextRecord={...nextRecord,deleted:true,deletedAt:serverTimestamp(),deletedBy:item.deviceId,version,updatedAt:serverTimestamp(),lastOperationId:item.id};
       tx.set(canonicalRef,nextRecord,{merge:false});
       tx.set(canonicalRef,{...nextRecord,payments:Array.isArray(legacy.payments)?legacy.payments:[]},{merge:false});
+      tx.set(doc(db,RECORD_DELETES_COLLECTION,String(item.recordId)),{
+        recordId:String(item.recordId),
+        deleted:true,
+        deletedAt:serverTimestamp(),
+        deletedBy:item.deviceId,
+        operationId:item.id
+      },{merge:true});
     }else if(item.type==="record_patch"){
       const remoteVersion=Number(canonical.version||0);
       const conflict=remoteVersion!==Number(item.expectedVersion||0)?hasPatchConflict(nextRecord,item.baseRecord,item.patch):null;
@@ -1444,6 +1453,7 @@ export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,time
   const recordRef = doc(db,"records",String(record.id));
   let committedTable = null;
   let startedByThisDevice = false;
+  let operationId = "";
 
   // 只锁定当前桌位文档，不再在事务中读取和重写整份 shop/main。
   // 这样其他设备修改预约、账单或其他桌位时，不会迫使本事务不断重试。
@@ -1457,7 +1467,7 @@ export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,time
       return;
     }
 
-    const operationId = `atomic_start_${record?.id || index}_${Date.now()}`;
+    operationId = `atomic_start_${record?.id || index}_${Date.now()}`;
     const version = Number(remote.version || remote?._entitySync?.version || 0) + 1;
     committedTable = {
       ...clone(remote),
@@ -1498,6 +1508,7 @@ export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,time
   broadcastState(nextState,"atomic_start_table");
 
   if(startedByThisDevice && record){
+    await mirrorRecordEntity(db,record,operationId || `atomic_start_record_${record.id}_${Date.now()}`);
     const localRecords = await loadLocalRecords().catch(()=>[]);
     const mergedRecords = mergeRecordLists(localRecords,[record]);
     writeShadow(RECORDS_SHADOW,mergedRecords);
@@ -1557,7 +1568,9 @@ export function emergencySaveRecord({db,ref,record}){
   const next = clone(record);
   next.localUpdatedAt = Date.now();
   const current = readShadow(RECORDS_SHADOW);
-  const merged = mergeRecordLists(Array.isArray(current) ? current : [], [next]);
+  const currentRecords = Array.isArray(current) ? current : [];
+  const previous = currentRecords.find(r=>String(r.id)===String(next.id)) || {id:String(next.id),payments:[]};
+  const merged = mergeRecordLists(currentRecords, [next]);
   // localStorage is synchronous: once this returns, the emergency bill has a durable local shadow.
   writeShadow(RECORDS_SHADOW, merged);
   broadcastRecord(next,"emergency_save_record");
@@ -1566,7 +1579,6 @@ export function emergencySaveRecord({db,ref,record}){
   Promise.resolve().then(async()=>{
     try{
       await writeLocalRecords(merged);
-      const previous=(await loadLocalRecords().catch(()=>[])).find(r=>String(r.id)===String(next.id)) || {id:String(next.id),payments:[]};
       await enqueueRecordOperations(next,previous);
       if(navigator.onLine){
         clearTimeout(flushTimer);
@@ -1698,7 +1710,7 @@ export async function atomicAdjustStartTime({db,ref,tableIndex,tablePatch,record
   if(result?.state){
     const opId=`adjust_start_${recordId||tableIndex}_${Date.now()}`;
     await mirrorTableEntity(db,Number(tableIndex),result.state.tables?.[Number(tableIndex)]||tablePatch,opId);
-    if(recordId){ const legacy=await getDoc(doc(db,"records",String(recordId))); await mirrorRecordEntity(db,legacy.exists()?legacy.data():{id:String(recordId),...(recordPatch||{})},opId); }
+    if(recordId){ const legacy=await getDoc(doc(db,"records",String(recordId))); await mirrorRecordEntity(db,legacy.exists()?{id:String(recordId),...legacy.data()}:{id:String(recordId),...(recordPatch||{})},opId); }
     baseline = clone(result.state);
     await writeLocalState(result.state,result.state);
     writeShadow(STATE_SHADOW,{state:clone(result.state),cloudBaseline:clone(result.state),savedAt:Date.now(),deviceId:getDeviceId()});
@@ -1856,7 +1868,7 @@ export function subscribeAllRecords({
       async snap=>{
         const list = snap.docs
           .map(d=>({id:d.id,...d.data()}))
-          .filter(r=>r.id!=="init");
+          .filter(r=>r.id!=="init" && !r.deleted);
 
         mergeCloud(list);
         const merged = await emit({persist:!snap.metadata.fromCache});
@@ -1974,7 +1986,7 @@ export function subscribeAllRecords({
         const docs = snap.docs;
         const list = docs
           .map(d=>({id:d.id,...d.data()}))
-          .filter(r=>r.id!=="init");
+          .filter(r=>r.id!=="init" && !r.deleted);
 
         fullServerRecords = mergeRecordLists(fullServerRecords,list);
         mergeCloud(list);
