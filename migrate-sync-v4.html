@@ -1,1 +1,57 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chiptune 同步结构迁移 v4</title><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:760px;margin:40px auto;padding:20px}button{font-size:18px;padding:12px 20px}pre{height:420px;overflow:auto;background:#111;color:#eee;padding:16px;white-space:pre-wrap}.warn{background:#fff3cd;padding:14px;border-radius:8px}</style></head><body><h1>Firestore 同步结构迁移 v4</h1><div class="warn">执行前：停止营业操作、关闭其他设备页面、导出 Firestore 备份。此工具只复制数据，不删除旧结构。</div><p>将 <code>shop/main</code> 和 <code>records</code> 复制到 <code>shops/main/*</code> 独立实体集合。</p><button id="migrateBtn">开始迁移</button><pre id="log"></pre><script type="module" src="./js/migrate-sync-v4.js?v=4.0.0"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Chiptune v4 数据迁移与验证</title>
+  <style>
+    :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1d1d1f;background:#f5f5f7}
+    body{max-width:860px;margin:0 auto;padding:24px 16px 48px}
+    h1{font-size:28px;margin:0 0 14px}
+    .card{background:#fff;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+    .warn{background:#fff4d6;border:1px solid #f1d58a}
+    .success{background:#eaf8ee;border:1px solid #a9ddb6}
+    .error{background:#fff0f0;border:1px solid #efb2b2}
+    button{font-size:18px;font-weight:700;padding:13px 20px;border:0;border-radius:12px;background:#1677ff;color:#fff;min-width:180px}
+    button:disabled{opacity:.45}
+    .actions{display:flex;gap:12px;flex-wrap:wrap}
+    .secondary{background:#666}
+    progress{width:100%;height:18px;margin:10px 0}
+    table{width:100%;border-collapse:collapse;font-size:15px}
+    th,td{text-align:left;padding:9px 7px;border-bottom:1px solid #eee}
+    th{color:#666;font-weight:600}
+    .status{font-weight:700;font-size:18px}
+    pre{height:300px;overflow:auto;background:#111;color:#eee;padding:14px;border-radius:12px;white-space:pre-wrap;font-size:13px}
+    code{background:#eee;padding:2px 5px;border-radius:5px}
+  </style>
+</head>
+<body>
+  <h1>Chiptune v4 数据迁移与验证</h1>
+  <div class="card warn">
+    <strong>执行前：</strong>暂停营业操作，并关闭其他设备上的旧程序页面。此工具不会删除旧数据，也不会用旧数据覆盖已经存在的新实体文档。
+  </div>
+
+  <div class="card">
+    <div id="status" class="status">尚未开始</div>
+    <progress id="progress" max="100" value="0"></progress>
+    <div id="progressText">0%</div>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>类型</th><th>源数据</th><th>新建</th><th>已存在/跳过</th><th>失败</th><th>验证</th></tr></thead>
+      <tbody id="statsBody"></tbody>
+    </table>
+  </div>
+
+  <div class="card actions">
+    <button id="migrateBtn">开始/继续迁移</button>
+    <button id="verifyBtn" class="secondary">只检查迁移状态</button>
+  </div>
+
+  <div id="resultCard" class="card" hidden></div>
+  <pre id="log"></pre>
+
+  <script type="module" src="./js/migrate-sync-v4.js?v=4.0.1"></script>
+</body>
+</html>
