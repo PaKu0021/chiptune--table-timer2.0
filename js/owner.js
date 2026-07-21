@@ -1,9 +1,9 @@
-import { db } from "./firebase.js?v=4.0.3";
-import { RMB_PER_JPY } from "./business-day.js?v=4.0.3";
+﻿import { db } from "./firebase.js?v=4.0.4";
+import { RMB_PER_JPY } from "./business-day.js?v=4.0.4";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=4.0.3";
-import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=4.0.3";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=4.0.4";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=4.0.4";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
@@ -152,6 +152,235 @@ function normalizePayments(r){
   }
 
   return [];
+}
+
+function currencyForManualPay(pay){
+  return ["微信","支付宝"].includes(String(pay || "")) ? "人民币" : "日元";
+}
+
+function manualDateTimeMs(dateText,timeText){
+  if(!dateText) return Date.now();
+  const time = timeText || "12:00";
+  const d = new Date(`${dateText}T${time}:00`);
+  return Number.isNaN(d.getTime()) ? Date.now() : d.getTime();
+}
+
+function openManualRecordModal(){
+  const bg = document.getElementById("manualRecordModalBg");
+  if(!bg) return;
+
+  const businessDate = document.getElementById("manualBusinessDate");
+  if(businessDate) businessDate.value = getCurrentBusinessDate();
+
+  const tableSelect = document.getElementById("manualTableName");
+  if(tableSelect){
+    const tables = Array.isArray(state?.tables) && state.tables.length
+      ? state.tables
+      : Array.from({length:12},(_,i)=>({name:`${i+1}号桌`}));
+    tableSelect.innerHTML = tables.map((table,index)=>`
+      <option value="${table?.name || `${index+1}号桌`}">${table?.name || `${index+1}号桌`}</option>
+    `).join("");
+  }
+
+  const packageSelect = document.getElementById("manualPackageIndex");
+  if(packageSelect){
+    const packages = Array.isArray(state?.packages) && state.packages.length
+      ? state.packages
+      : [{name:"1小时",minutes:60,price:1500,extensionPrice:900}];
+    packageSelect.innerHTML = packages.map((p,index)=>`
+      <option value="${index}">${p.name || "套餐"}｜${p.unlimited ? "不限时" : `${Number(p.minutes || 0)}分钟`}｜¥${Number(p.price || 0).toLocaleString()}</option>
+    `).join("");
+  }
+
+  document.getElementById("manualCustomerType").value = "walkin";
+  document.getElementById("manualCustomerName").value = "";
+  document.getElementById("manualPhoneLast4").value = "";
+  document.getElementById("manualStartTime").value = "";
+  document.getElementById("manualEndTime").value = "";
+  document.getElementById("manualExtraMinutes").value = "0";
+  document.getElementById("manualRecordNote").value = "";
+  document.getElementById("manualPaymentLines").innerHTML = "";
+  addManualPaymentLine("套餐预付款");
+  updateManualRecordSummary();
+  bg.style.display = "block";
+}
+
+function closeManualRecordModal(){
+  const bg = document.getElementById("manualRecordModalBg");
+  if(bg) bg.style.display = "none";
+}
+
+function addManualPaymentLine(reason="加时补收"){
+  const box = document.getElementById("manualPaymentLines");
+  if(!box) return;
+  const row = document.createElement("div");
+  row.className = "manual-payment-line";
+  row.style.cssText = "display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin:8px 0;";
+  row.innerHTML = `
+    <label><small>项目</small><input class="manual-payment-reason" value="${reason}"></label>
+    <label><small>付款方式</small><select class="manual-payment-pay"><option>现金</option><option>PayPay</option><option>微信</option><option>支付宝</option><option>未记录</option></select></label>
+    <label><small>日元金额</small><input class="manual-payment-jpy" type="number" step="1" value="0" oninput="updateManualRecordSummary()"></label>
+    <label><small>人民币金额</small><input class="manual-payment-rmb" type="number" step="1" value="0" oninput="updateManualRecordSummary()"></label>
+    <button class="btn-danger" type="button" onclick="this.closest('.manual-payment-line').remove();updateManualRecordSummary();">删除</button>
+  `;
+  box.appendChild(row);
+}
+
+function fillManualPaymentFromPackage(){
+  const packageIndex = Number(document.getElementById("manualPackageIndex")?.value || 0);
+  const p = state?.packages?.[packageIndex] || {};
+  let row = document.querySelector("#manualPaymentLines .manual-payment-line");
+  if(!row){
+    addManualPaymentLine("套餐预付款");
+    row = document.querySelector("#manualPaymentLines .manual-payment-line");
+  }
+  if(row){
+    row.querySelector(".manual-payment-reason").value = "套餐预付款";
+    row.querySelector(".manual-payment-jpy").value = Number(p.price || 0);
+    row.querySelector(".manual-payment-rmb").value = 0;
+  }
+  updateManualRecordSummary();
+}
+
+function readManualPayments(){
+  const now = Date.now();
+  return [...document.querySelectorAll("#manualPaymentLines .manual-payment-line")]
+    .map((row,index)=>{
+      const pay = row.querySelector(".manual-payment-pay")?.value || "未记录";
+      const amountJPY = Number(row.querySelector(".manual-payment-jpy")?.value || 0);
+      const amountRMB = Number(row.querySelector(".manual-payment-rmb")?.value || 0);
+      const currency = amountRMB !== 0 || currencyForManualPay(pay) === "人民币" ? "人民币" : "日元";
+      return {
+        id:`manual_pay_${now}_${index}_${Math.random().toString(36).slice(2,7)}`,
+        operationId:`manual_op_${now}_${index}_${Math.random().toString(36).slice(2,7)}`,
+        type:amountJPY < 0 || amountRMB < 0 ? "退款" : "收入",
+        reason:row.querySelector(".manual-payment-reason")?.value.trim() || "补录付款",
+        pay,
+        currency,
+        amountJPY,
+        amountRMB,
+        note:document.getElementById("manualRecordNote")?.value.trim() || "",
+        time:new Date(now).toLocaleString(),
+        timestamp:now,
+        source:"manual-owner-entry"
+      };
+    })
+    .filter(payment=>Number(payment.amountJPY || 0) !== 0 || Number(payment.amountRMB || 0) !== 0);
+}
+
+function updateManualRecordSummary(){
+  const payments = readManualPayments();
+  const totalJPY = payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+  const totalRMB = payments.reduce((sum,p)=>sum + Number(p.amountRMB || 0),0);
+  const el = document.getElementById("manualRecordSummary");
+  if(el){
+    el.textContent = `合计：日元 ¥${totalJPY.toLocaleString()}｜人民币 ¥${totalRMB.toLocaleString()}`;
+  }
+}
+
+async function saveManualRecord(){
+  const button = document.querySelector('#manualRecordModalBg .btn-main.full');
+  const originalText = button?.textContent || "保存补录账单";
+  try{
+    const businessDate = document.getElementById("manualBusinessDate")?.value || getCurrentBusinessDate();
+    const tableName = document.getElementById("manualTableName")?.value || "";
+    const customerType = document.getElementById("manualCustomerType")?.value || "walkin";
+    const customerName = document.getElementById("manualCustomerName")?.value.trim() || "";
+    const phoneLast4 = String(document.getElementById("manualPhoneLast4")?.value || "").slice(-4);
+    const packageIndex = Number(document.getElementById("manualPackageIndex")?.value || 0);
+    const startTime = document.getElementById("manualStartTime")?.value || "";
+    const endTime = document.getElementById("manualEndTime")?.value || "";
+    const extraMinutes = Math.max(0,Number(document.getElementById("manualExtraMinutes")?.value || 0));
+    const note = document.getElementById("manualRecordNote")?.value.trim() || "";
+    const payments = readManualPayments();
+
+    if(!businessDate){
+      alert("请选择营业日");
+      return;
+    }
+    if(!tableName){
+      alert("请选择桌位");
+      return;
+    }
+    if(!payments.length){
+      alert("请至少填写一笔付款金额");
+      return;
+    }
+
+    if(button){
+      button.disabled = true;
+      button.textContent = "正在保存...";
+    }
+
+    const p = state?.packages?.[packageIndex] || {};
+    const startAt = manualDateTimeMs(businessDate,startTime || "12:00");
+    const closedAt = manualDateTimeMs(businessDate,endTime || startTime || "12:00");
+    const totalJPY = payments.reduce((sum,payment)=>sum + Number(payment.amountJPY || 0),0);
+    const totalRMB = payments.reduce((sum,payment)=>sum + Number(payment.amountRMB || 0),0);
+    const packagePrice = Number(p.price || 0);
+    const extensionAmount = Math.max(0,totalJPY - packagePrice);
+    const payMethods = [...new Set(payments.map(payment=>payment.pay || "未记录").filter(Boolean))];
+    const currencies = [...new Set(payments.map(payment=>payment.currency || currencyForManualPay(payment.pay)).filter(Boolean))];
+    const now = Date.now();
+    const recordId = `manual_${businessDate.replace(/-/g,"")}_${now}_${Math.random().toString(36).slice(2,7)}`;
+
+    const record = {
+      id:recordId,
+      manualEntry:true,
+      manualEntryAt:now,
+      manualEntryTime:new Date(now).toLocaleString(),
+      timestamp:startAt,
+      startAt,
+      closedAt,
+      time:new Date(startAt).toLocaleString(),
+      startedTime:new Date(startAt).toLocaleString(),
+      closedTime:new Date(closedAt).toLocaleString(),
+      businessDate,
+      businessDateManual:true,
+      tableName,
+      customerName,
+      phoneLast4,
+      customerType,
+      packageName:p.name || "补录套餐",
+      packageMinutes:p.unlimited ? "不限时" : Number(p.minutes || 0),
+      packagePrice,
+      extraMinutes,
+      extensionAmount,
+      originalJPY:Math.max(packagePrice + extensionAmount,totalJPY),
+      payments,
+      paidJPY:totalJPY,
+      totalJPY,
+      totalRMB,
+      dueJPY:0,
+      pay:payMethods.length === 1 ? payMethods[0] : "混合",
+      currency:currencies.length === 1 ? currencies[0] : "混合",
+      paidStatus:"已结清",
+      recordType:"manual",
+      status:"已补录",
+      closed:true,
+      checkoutMethod:"老板模式补录",
+      roundRule:"补录",
+      paymentNote:note,
+      receiptImage:"",
+      receiptFileName:"",
+      updatedAt:now,
+      localUpdatedAt:now
+    };
+
+    const saved = await saveRecordSafely({db,ref,record});
+    records = mergeRecordLists(records,[saved]);
+    closeManualRecordModal();
+    render();
+    alert("补录账单已保存");
+  }catch(err){
+    console.error("补录账单失败",err);
+    alert("补录账单失败：" + (err?.message || err));
+  }finally{
+    if(button){
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
 }
 
 function isRmbPayment(p, r){
@@ -1207,6 +1436,12 @@ window.saveTableCount = saveTableCount;
 window.exportCSV = exportCSV;
 window.openQrPage = openQrPage;
 window.openCashierPage = openCashierPage;
+window.openManualRecordModal = openManualRecordModal;
+window.closeManualRecordModal = closeManualRecordModal;
+window.addManualPaymentLine = addManualPaymentLine;
+window.fillManualPaymentFromPackage = fillManualPaymentFromPackage;
+window.updateManualRecordSummary = updateManualRecordSummary;
+window.saveManualRecord = saveManualRecord;
 window.uploadReceipt = uploadReceipt;
 window.confirmExtension = confirmExtension;
 window.toggleCustomerPanel = toggleCustomerPanel;

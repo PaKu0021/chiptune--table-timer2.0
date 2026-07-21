@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -55,6 +55,14 @@
   onclick="openCashierPage()"
 >
   查看收银记录
+</button>
+
+<button
+  id="btnManualRecord"
+  class="btn-main"
+  onclick="openManualRecordModal()"
+>
+  补录账单
 </button>
 </div>
   
@@ -235,12 +243,78 @@
 
 </div>
 
+<div class="modal-bg" id="manualRecordModalBg">
+  <div class="modal" style="max-width:860px;">
+    <h2>补录账单</h2>
+
+    <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:10px;">
+      <label>
+        <small>营业日</small>
+        <input id="manualBusinessDate" type="date">
+      </label>
+      <label>
+        <small>桌位</small>
+        <select id="manualTableName"></select>
+      </label>
+      <label>
+        <small>类型</small>
+        <select id="manualCustomerType">
+          <option value="walkin">Walk-in</option>
+          <option value="booking">预约</option>
+        </select>
+      </label>
+      <label>
+        <small>客人姓名</small>
+        <input id="manualCustomerName" placeholder="可空">
+      </label>
+      <label>
+        <small>手机尾号</small>
+        <input id="manualPhoneLast4" maxlength="4" placeholder="可空">
+      </label>
+      <label>
+        <small>套餐</small>
+        <select id="manualPackageIndex"></select>
+      </label>
+      <label>
+        <small>开始时间</small>
+        <input id="manualStartTime" type="time">
+      </label>
+      <label>
+        <small>结束时间</small>
+        <input id="manualEndTime" type="time">
+      </label>
+      <label>
+        <small>续时分钟</small>
+        <input id="manualExtraMinutes" type="number" min="0" step="30" value="0">
+      </label>
+    </div>
+
+    <h3 style="margin:16px 0 8px;">付款明细</h3>
+    <div id="manualPaymentLines"></div>
+    <div class="action-row" style="margin-top:8px;">
+      <button class="btn-ghost" type="button" onclick="addManualPaymentLine('套餐预付款')">添加套餐付款</button>
+      <button class="btn-ghost" type="button" onclick="addManualPaymentLine('加时补收')">添加加时付款</button>
+      <button class="btn-ghost" type="button" onclick="fillManualPaymentFromPackage()">按套餐填入</button>
+    </div>
+
+    <label style="display:block;margin-top:12px;">
+      <small>备注</small>
+      <input id="manualRecordNote" placeholder="例：7月21日网络异常后补录">
+    </label>
+
+    <div id="manualRecordSummary" style="font-weight:900;color:#8a8174;margin:12px 0;">合计：¥0</div>
+
+    <button class="btn-main full" onclick="saveManualRecord()">保存补录账单</button>
+    <button class="btn-ghost full" style="margin-top:10px;" onclick="closeManualRecordModal()">取消</button>
+  </div>
+</div>
+
 <script type="module">
   import { renderNav } from "./js/nav.js";
 
   window.addEventListener("DOMContentLoaded", async ()=>{
     renderNav("owner");
-    import("./js/owner.js?v=4.0.3").catch(e=>{
+    import("./js/owner.js?v=4.0.4").catch(e=>{
   console.error(e);
   alert(
     e.message +
