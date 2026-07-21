@@ -79,7 +79,7 @@
 
   <div class="panel">
     <h2>收入折线图</h2>
-    <canvas id="chart" width="1000" height="320"></canvas>
+    <canvas id="chart" role="img" aria-label="收入折线图"></canvas>
   </div>
 
   <div class="panel">
@@ -240,7 +240,7 @@
 
   window.addEventListener("DOMContentLoaded", async ()=>{
     renderNav("owner");
-    import("./js/owner.js?v=2.6.7").catch(e=>{
+    import("./js/owner.js?v=4.0.0").catch(e=>{
   console.error(e);
   alert(
     e.message +
@@ -254,5 +254,6 @@
   });
 </script>
 
+<p style="text-align:center;margin:24px"><a href="./migrate-sync-v3.html">Firestore v3 数据迁移工具</a></p>
 </body>
 </html>

@@ -58,6 +58,11 @@
   <option value="支付宝">支付宝</option>
 </select>
       
+      <select id="groupViewMode" onchange="setGroupViewMode(this.value)">
+        <option value="table">普通桌位排列</option>
+        <option value="group">按组排列</option>
+      </select>
+
       <select id="sortMode" onchange="render()">
         <option value="table">按桌号排序</option>
         <option value="remain">按剩余时间排序</option>
@@ -84,6 +89,10 @@
       批量结账
     </button>
 
+    <button class="btn-ghost" onclick="openGroupManager('')">
+      创建 / 重组
+    </button>
+
   </div>
 </div>
 
@@ -104,6 +113,12 @@
     <select id="batchPayTimingSelect">
     <option value="prepaid">先付款</option>
     <option value="postpaid">后付款</option>
+    </select>
+
+    <input id="batchGroupName" placeholder="组名称（例：王小姐一组）">
+    <select id="batchGroupPaymentMode">
+      <option value="split">分开 / 自由组合付款</option>
+      <option value="unified">统一付款</option>
     </select>
 
     <select id="batchPaySelect">
@@ -149,6 +164,11 @@
 
         <label>备注</label>
         <input id="groupPayNote" placeholder="例：2号桌代付全组费用">
+
+        <div style="font-weight:900;margin-top:14px;">自由付款明细（可选）</div>
+        <div id="groupPaymentLines"></div>
+        <button class="btn-ghost full" type="button" onclick="addGroupPaymentLine()">＋ 添加付款人</button>
+        <div style="font-size:13px;color:#777;margin-top:6px;">例如4人组可填写两笔：A付2人、B付2人。填写明细后，以明细合计为准。</div>
       </div>
     </div>
 
@@ -171,8 +191,48 @@
     <button class="btn-ghost full" onclick="closeCheckout()">取消</button>
   </div>
 </div>
+
+
+<div id="refundModalBg" class="modal-bg">
+  <div class="modal">
+    <h2>退款</h2>
+    <div id="refundInfo"></div>
+    <label>退款金额（日元）</label>
+    <input id="refundAmount" type="number" min="1" step="1" placeholder="请输入退款金额">
+    <label>退款方式</label>
+    <select id="refundPay">
+      <option value="">请选择退款方式</option>
+      <option value="现金">现金</option>
+      <option value="PayPay">PayPay</option>
+      <option value="微信">微信</option>
+      <option value="支付宝">支付宝</option>
+    </select>
+    <label>备注</label>
+    <input id="refundNote" placeholder="例：顾客取消加时、设备故障">
+    <button class="btn-danger full" onclick="confirmRefund()">确认退款</button>
+    <button class="btn-ghost full" onclick="closeRefund()">取消</button>
+  </div>
+</div>
+<div id="groupManagerModalBg" class="modal-bg">
+  <div class="modal">
+    <h2 id="groupManagerTitle">创建新组</h2>
+    <label>组名称</label>
+    <input id="groupManagerName" placeholder="例：王小姐一组">
+    <label>付款安排</label>
+    <select id="groupManagerPaymentMode">
+      <option value="split">分开 / 自由组合付款</option>
+      <option value="unified">统一付款</option>
+    </select>
+    <div style="font-weight:900;margin:14px 0 8px;">选择组内桌位</div>
+    <div id="groupManagerTables" class="table-grid"></div>
+    <button id="groupManagerSave" class="btn-main full" onclick="saveGroupManager()">保存组</button>
+    <button id="groupManagerDelete" class="btn-danger full" onclick="dissolveCurrentGroup()">拆散该组</button>
+    <button class="btn-ghost full" onclick="closeGroupManager()">取消</button>
+  </div>
+</div>
+
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.6.9";
+  import { renderNav } from "./js/nav.js?v=4.0.0";
 
   try {
     renderNav("app");
@@ -180,7 +240,7 @@
     console.error("导航加载失败", error);
   }
 
-  import("./js/app.js?v=2.6.9").catch(error => {
+  import("./js/app.js?v=4.0.0").catch(error => {
     alert(
       "计时系统加载失败：\n\n" +
       error.name + "\n" +

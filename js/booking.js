@@ -1,7 +1,9 @@
-import { db } from "./firebase.js?v=2.6.9";
+import { db } from "./firebase.js?v=4.0.0";
 import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=2.6.9";
-import { resetTable } from "./common.js?v=2.6.9";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=4.0.0";
+import { resetTable } from "./common.js?v=4.0.0";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=4.0.0";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.0";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -16,7 +18,43 @@ window.addEventListener("chiptune-online-change",e=>{
   if(e.detail?.online) flushPending({db,ref}).catch(err=>console.warn("自动同步失败",err));
 });
 
+// 预约页必须立即接收计时器、账单页等同一设备页面的本地状态变化。
+// 即使 Firestore 暂时同步失败，也不需要再靠“锁定/解锁”触发重绘。
+window.addEventListener("chiptune-state-broadcast", event=>{
+  const incoming = event.detail?.state;
+  if(!incoming) return;
+
+  state = incoming;
+  if(!Array.isArray(state.bookings)) state.bookings = [];
+  if(!Array.isArray(state.customers)) state.customers = [];
+  if(!Array.isArray(state.tables)) state.tables = [];
+  ensureGroups(state);
+
+  try{
+    renderBookingGridPreservingScroll();
+    renderList();
+  }catch(error){
+    console.warn("预约页即时刷新失败", error);
+  }
+});
+
+window.addEventListener("storage", event=>{
+  if(event.key !== "chiptune_state_shadow_v2" || !event.newValue) return;
+  try{
+    const box = JSON.parse(event.newValue);
+    if(!box?.state) return;
+    state = box.state;
+    ensureGroups(state);
+    renderBookingGridPreservingScroll();
+    renderList();
+  }catch(error){
+    console.warn("预约页读取跨页面备份失败", error);
+  }
+});
+
 let activeBookingId = null;
+let bookingDetailInitialSnapshot = null;
+let bookingDetailClosing = false;
 let bookingLocked = true;
 let currentBookingDate = getTodayDate();
 let calendarYear = new Date().getFullYear();
@@ -73,20 +111,19 @@ function getNextBookingColor(){
   ];
 }
 
-function makeGroupId(){
-  return "group_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
+async function makeGroupId(){
+  return allocateGroupId(db, state?.groups || []);
+}
+
+function makeFastBookingGroupId(bookingId = Date.now()){
+  const d = new Date();
+  const dateKey = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+  const suffix = `${Number(bookingId).toString(36)}_${Math.random().toString(36).slice(2,7)}`;
+  return `${dateKey}_BK_${suffix}`;
 }
 
 function getGroupById(groupId){
-  if(!state) return null;
-
-  if(!Array.isArray(state.groups)){
-    state.groups = [];
-  }
-
-  return state.groups.find(
-    g=>String(g?.id) === String(groupId)
-  ) || null;
+  return getGroup(state, groupId);
 }
 
 function createOrUpdateGroup({
@@ -94,79 +131,22 @@ function createOrUpdateGroup({
   groupName,
   groupColor,
   tableIndexes = [],
-  bookingId = null
+  bookingId = null,
+  peopleCount = null,
+  paymentMode = null
 }){
-  if(!Array.isArray(state.groups)){
-    state.groups = [];
-  }
-
-  let group = getGroupById(groupId);
-
-  if(!group){
-    group = {
-      id: groupId,
-      name: groupName || "未命名组",
-      color: groupColor || getNextBookingColor(),
-      tableIndexes: [],
-      bookingIds: [],
-      payments: [],
-      createdAt: Date.now()
-    };
-
-    state.groups.push(group);
-  }
-
-  group.name =
-    groupName ||
-    group.name ||
-    "未命名组";
-
-  group.color =
-    groupColor ||
-    group.color ||
-    getNextBookingColor();
-
-  if(!Array.isArray(group.tableIndexes)){
-    group.tableIndexes = [];
-  }
-
-  if(!Array.isArray(group.bookingIds)){
-    group.bookingIds = [];
-  }
-
-  if(!Array.isArray(group.payments)){
-    group.payments = [];
-  }
-
-  group.tableIndexes = Array.from(
-    new Set([
-      ...group.tableIndexes
-        .map(Number)
-        .filter(Number.isFinite),
-
-      ...tableIndexes
-        .map(Number)
-        .filter(Number.isFinite)
-    ])
-  );
-
-  if(
-    bookingId !== null &&
-    bookingId !== undefined
-  ){
-    group.bookingIds = Array.from(
-      new Set([
-        ...group.bookingIds
-          .map(String)
-          .filter(Boolean),
-
-        String(bookingId)
-      ])
-    );
-  }
-
-  group.updatedAt = Date.now();
-
+  const existing = getGroupById(groupId);
+  const group = upsertGroup(state, {
+    ...(existing || {}),
+    id:groupId,
+    name:groupName || existing?.name || "未命名组",
+    color:groupColor || existing?.color || getNextBookingColor(),
+    tableIndexes:Array.from(new Set([...(existing?.tableIndexes || []),...tableIndexes].map(Number).filter(Number.isFinite))),
+    bookingIds:Array.from(new Set([...(existing?.bookingIds || []),...(bookingId === null || bookingId === undefined ? [] : [String(bookingId)])])),
+    peopleCount:peopleCount || existing?.peopleCount || Math.max(1,tableIndexes.length),
+    paymentMode:paymentMode || existing?.paymentMode || "split",
+    updatedAt:Date.now()
+  });
   return group;
 }
 
@@ -196,19 +176,25 @@ onSnapshot(ref, { includeMetadataChanges:true }, async snap=>{
   if(!snap.exists()) return;
 
   state = await reconcileCloudState(snap.data());
-  if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
+  if(!snap.metadata.fromCache && !snap.metadata.hasPendingWrites) setStateBaseline(snap.data());
   if(snap.metadata.fromCache) setSyncStatus("cache");
 
   if(!state.bookings) state.bookings = [];
   if(!state.customers) state.customers = [];
-  if(!Array.isArray(state.groups)){
-  state.groups = [];
-}
+  ensureGroups(state);
   state.bookings.forEach(b=>{
-  if(!b.groupId) b.groupId = "group_" + b.id;
+  if(!b.groupId) b.groupId = `legacy_${b.id}`;
   if(!b.groupColor) b.groupColor = b.color || getNextBookingColor();
-  if(!b.groupName) b.groupName = b.name ? `${b.name}一组` : "未命名组";
+  if(!b.groupName) b.groupName = "预约组";
   if(!b.color) b.color = b.groupColor;
+  createOrUpdateGroup({
+    groupId:b.groupId,
+    groupName:b.groupName,
+    groupColor:b.groupColor,
+    tableIndexes:b.tableIndexes || [],
+    bookingId:b.id,
+    peopleCount:b.peopleCount || b.partySize || Math.max(1,(b.tableIndexes || []).length)
+  });
 });
   if(!Array.isArray(state.tables) || state.tables.length === 0){
     state.tables = Array.from({length:12},(_,i)=>({
@@ -276,6 +262,31 @@ try{
 
 
 async function save(action="booking_update"){
+  /*
+   * 创建/编辑预约只允许修改预约相关数据。
+   *
+   * 预约页可能在计时器刚开始后的极短时间内仍持有旧桌台快照。
+   * 如果直接保存整份 state，旧快照会把已经开始的桌位覆盖成“未开始”。
+   * 因此预约资料类操作保存前，先读取本机最新状态，并仅把预约、分组、
+   * 客户数据覆盖进去；桌台运行状态始终采用计时器写入的最新版本。
+   */
+  if(action === "create_booking" || action === "booking_detail_update"){
+    const latest = await loadLocalState();
+
+    if(latest){
+      const bookingData = Array.isArray(state?.bookings) ? state.bookings : [];
+      const groupData = Array.isArray(state?.groups) ? state.groups : [];
+      const customerData = state?.customers || {};
+
+      state = {
+        ...latest,
+        bookings:bookingData,
+        groups:groupData,
+        customers:customerData
+      };
+    }
+  }
+
   return saveStateSafely({db, ref, getState:()=>state, action});
 }
 
@@ -405,13 +416,116 @@ function addCustomerVisit({
   customer.lastVisitAt = now;
 }
 
+
+function normalizeBookingPayments(record){
+  if(Array.isArray(record?.payments)) return record.payments;
+  if(Number(record?.totalJPY || 0) > 0){
+    return [{
+      type:"收入",
+      reason:"历史套餐付款",
+      pay:record.pay || "未记录",
+      currency:currencyForPaymentMethod(record.pay),
+      amountJPY:Number(record.totalJPY || 0),
+      amountRMB:jpyToRmb(record.totalJPY || 0),
+      timestamp:Number(record.timestamp || Date.now()),
+      time:record.time || new Date().toLocaleString()
+    }];
+  }
+  return [];
+}
+
+function sumBookingPayments(payments){
+  return (payments || []).reduce((sum,p)=>sum + Number(p?.amountJPY || 0),0);
+}
+
+function allocateGroupPrepayments(group, tableIndexes, fallbackPackageIndex = 0){
+  const result = new Map(tableIndexes.map(i=>[Number(i),[]]));
+  const remainingCapacity = new Map();
+  tableIndexes.forEach(i=>{
+    const t = state.tables[Number(i)] || {};
+    const p = state.packages?.[Number(t.start ? (t.packageIndex || 0) : fallbackPackageIndex)] || {};
+    remainingCapacity.set(Number(i), Number(p.price || 0));
+  });
+
+  for(const payment of (group?.payments || []).filter(p=>p && p.referenceOnly)){
+    let remaining = Number(payment.amountJPY || 0);
+    if(remaining <= 0) continue;
+    for(const rawIndex of tableIndexes){
+      const index = Number(rawIndex);
+      const capacity = Number(remainingCapacity.get(index) || 0);
+      if(capacity <= 0) continue;
+      const amount = Math.min(capacity, remaining);
+      if(amount > 0){
+        result.get(index).push({
+          type:"收入",
+          reason:"整组套餐预付款",
+          pay:payment.pay || payment.method || "未记录",
+          currency:currencyForPaymentMethod(payment.pay || payment.method),
+          amountJPY:amount,
+          amountRMB:jpyToRmb(amount),
+          note:payment.note || "同组统一收款",
+          timestamp:Number(payment.createdAt || Date.now()),
+          time:payment.createdTime || new Date(payment.createdAt || Date.now()).toLocaleString(),
+          source:"group-prepayment",
+          groupPaymentId:payment.id
+        });
+        remainingCapacity.set(index, capacity - amount);
+        remaining -= amount;
+      }
+      if(remaining <= 0) break;
+    }
+  }
+  return result;
+}
+
+async function syncGroupPrepaymentsToRunningTables(booking, group){
+  const allIndexes = (booking.tableIndexes || [booking.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+  const allocations = allocateGroupPrepayments(group, allIndexes, booking.packageIndex || 0);
+
+  for(const index of allIndexes){
+    const t = state.tables[index];
+    if(!t?.start || !t.recordId) continue;
+    let record = null;
+    try{
+      const snap = await getDoc(doc(db,"records",t.recordId));
+      if(snap.exists()) record = {id:snap.id,...snap.data()};
+    }catch(err){
+      console.warn("读取组内账单失败",err);
+    }
+    if(!record) continue;
+    const existing = normalizeBookingPayments(record)
+      .filter(p=>p?.source !== "group-prepayment" && p?.reason !== "整组套餐预付款");
+    // 一旦使用整组收款，移除自动生成但没有付款依据的套餐行，避免重复。
+    const preserved = existing.filter(p=>
+      p?.reason !== "套餐预付款" &&
+      p?.reason !== "整组套餐预付款"
+    );
+    record.payments = [...(allocations.get(index) || []), ...preserved];
+    const paid = sumBookingPayments(record.payments);
+    const p = state.packages?.[Number(t.packageIndex || 0)] || {};
+    const original = Number(record.originalJPY || p.price || 0);
+    record.paidJPY = paid;
+    record.totalJPY = paid;
+    record.totalRMB = jpyToRmb(paid);
+    record.dueJPY = Math.max(0, original - paid);
+    record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+    record.pay = [...new Set(record.payments.filter(x=>Number(x.amountJPY||0)!==0).map(x=>x.pay||"未记录"))].join("+") || "未记录";
+    t.paidJPY = paid;
+    t.paidRMB = jpyToRmb(paid);
+    await saveRecordSafely({db,ref,record});
+  }
+}
+
 async function createOrUpdateTableRecord(t, {
   customerType = "walkin",
-  checkoutMethod = "开始计时"
+  checkoutMethod = "开始计时",
+  prepaidLines = null
 } = {}){
 
   const p = state.packages?.[Number(t.packageIndex || 0)] || {};
-  const paidJPY = Number(p.price || 0);
+  const packagePrice = Number(p.price || 0);
   const now = Date.now();
 
   let record = null;
@@ -449,29 +563,47 @@ async function createOrUpdateTableRecord(t, {
 
   record.packageName = p.name || "";
   record.packageMinutes = p.unlimited ? "不限时" : p.minutes;
-  record.packagePrice = paidJPY;
+  record.packagePrice = packagePrice;
 
   record.extraMinutes = Math.floor(Number(t.extra || 0) / 60000);
   record.extensionAmount = 0;
-  record.originalJPY = paidJPY;
+  record.originalJPY = packagePrice;
 
+  if(Array.isArray(prepaidLines)){
+    record.payments = prepaidLines;
+  }else if(!Array.isArray(record.payments) || record.payments.length === 0){
+    record.payments = t.pay ? [{
+      type:"收入",
+      reason:"套餐预付款",
+      pay:t.pay,
+      currency:currencyForPaymentMethod(t.pay),
+      amountJPY:packagePrice,
+      amountRMB:jpyToRmb(packagePrice),
+      note:"预约到店时已确认收款",
+      timestamp:now,
+      time:new Date(now).toLocaleString(),
+      source:"manual"
+    }] : [];
+  }
+
+  const paidJPY = sumBookingPayments(record.payments);
   record.paidJPY = paidJPY;
-  record.dueJPY = 0;
+  record.dueJPY = Math.max(0, packagePrice - paidJPY);
   record.totalJPY = paidJPY;
-  record.totalRMB = Math.floor(paidJPY * 0.044);
+  record.totalRMB = jpyToRmb(paidJPY);
 
-  record.pay = t.pay || "未记录";
-  record.currency = t.currency || "日元";
+  record.pay = [...new Set(record.payments.filter(x=>Number(x.amountJPY||0)!==0).map(x=>x.pay||"未记录"))].join("+") || "未记录";
+  record.currency = t.pay ? currencyForPaymentMethod(t.pay) : "日元";
   record.payTiming = "prepaid";
 
-  record.paidStatus = "已结清";
+  record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
   record.recordType = "prepaid";
   record.checkoutMethod = checkoutMethod;
   record.roundRule = "不抹零";
 
   t.paidJPY = paidJPY;
-  t.paidRMB = Math.floor(paidJPY * 0.044);
-  t.paidAt = now;
+  t.paidRMB = jpyToRmb(paidJPY);
+  t.paidAt = paidJPY > 0 ? now : null;
 
   await saveRecordSafely({db,ref,record});
 
@@ -756,6 +888,26 @@ updateBookingLockUI();
 startRunningTimeTextTimer();
 }
 
+function renderBookingGridPreservingScroll(){
+  const scroller =
+    document.querySelector(".booking-grid-wrap") ||
+    document.getElementById("bookingGrid");
+  const left = scroller ? scroller.scrollLeft : 0;
+  const top = scroller ? scroller.scrollTop : 0;
+
+  renderBookingGrid();
+
+  requestAnimationFrame(()=>{
+    const current =
+      document.querySelector(".booking-grid-wrap") ||
+      document.getElementById("bookingGrid");
+    if(current){
+      current.scrollLeft = left;
+      current.scrollTop = top;
+    }
+  });
+}
+
 function startBookingAutoRefresh(){
   if(bookingAutoRefreshTimer) return;
 
@@ -776,17 +928,20 @@ function startBookingAutoRefresh(){
     const left = scroller ? scroller.scrollLeft : 0;
     const top = scroller ? scroller.scrollTop : 0;
 
-    renderBookingGrid();
-    renderList();
+    loadLocalState().then(local=>{
+      if(local) state = local;
+      renderBookingGrid();
+      renderList();
 
-    requestAnimationFrame(()=>{
-      if(scroller){
-        scroller.scrollLeft = left;
-        scroller.scrollTop = top;
-      }
-    });
+      requestAnimationFrame(()=>{
+        if(scroller){
+          scroller.scrollLeft = left;
+          scroller.scrollTop = top;
+        }
+      });
+    }).catch(error=>console.warn("预约自动刷新读取本机状态失败", error));
 
-  },30000);
+  },5000);
 }
 
 document.addEventListener("visibilitychange",()=>{
@@ -828,6 +983,57 @@ function toggleBookingLock(){
   renderBookingGrid();
 }
 
+function getBookingTableIndexes(booking){
+  return (Array.isArray(booking?.tableIndexes) ? booking.tableIndexes : [booking?.tableIndex])
+    .filter(v=>v !== undefined && v !== null && v !== "")
+    .map(Number)
+    .filter(Number.isFinite);
+}
+
+// 预约状态不能只依赖 checkedIn 布尔值。
+// 计时器、结账和旧版本数据可能只更新了桌位或 finishedTableIndexes，
+// 因此预约页每次渲染都根据当前桌位状态重新推导“未到店 / 已到店 / 已离店”。
+function getBookingVisitStatus(booking){
+  const indexes = getBookingTableIndexes(booking);
+  const runningIndexes = indexes.filter(index=>{
+    const table = state.tables?.[index];
+    if(!table?.start) return false;
+    if(table.bookingId !== undefined && table.bookingId !== null && table.bookingId !== ""){
+      return Number(table.bookingId) === Number(booking.id);
+    }
+    return table.type === "booking"
+      && (!booking.name || table.customer?.name === booking.name)
+      && (!booking.phone || String(table.customer?.phoneLast4 || "") === String(booking.phone || "").slice(-4));
+  });
+
+  const finished = new Set(
+    (Array.isArray(booking.finishedTableIndexes) ? booking.finishedTableIndexes : [])
+      .map(Number)
+      .filter(Number.isFinite)
+  );
+
+  if(runningIndexes.length > 0){
+    booking.checkedIn = true;
+    booking.completed = false;
+    booking.checkedOut = false;
+    booking.checkedInTableIndexes = Array.from(new Set([
+      ...(Array.isArray(booking.checkedInTableIndexes) ? booking.checkedInTableIndexes : []).map(Number),
+      ...runningIndexes
+    ])).filter(Number.isFinite);
+    return {key:"arrived", text:"已到店", className:"booking-list-done"};
+  }
+
+  const allFinished = indexes.length > 0 && indexes.every(index=>finished.has(index));
+  if(booking.completed || booking.checkedOut || allFinished){
+    booking.checkedIn = false;
+    booking.completed = true;
+    booking.checkedOut = true;
+    return {key:"finished", text:"已离店", className:"booking-list-finished"};
+  }
+
+  return {key:"waiting", text:"未到店", className:"booking-list-wait"};
+}
+
 function renderList(){
   const box = document.getElementById("list");
   const summary = document.getElementById("bookingSummary");
@@ -836,11 +1042,13 @@ function renderList(){
   if(!box) return;
 
   const bookings = (state.bookings || [])
-    .filter(b=>(b.date || getTodayDate()) === currentBookingDate)
+    .filter(b=>!b?.cancelled && (b.date || getTodayDate()) === currentBookingDate)
     .sort((a,b)=>String(a.startTime || "99:99").localeCompare(String(b.startTime || "99:99")));
 
-  const checked = bookings.filter(b=>b.checkedIn).length;
-  const waiting = bookings.filter(b=>!b.checkedIn).length;
+  const visitStatuses = new Map(bookings.map(b=>[String(b.id), getBookingVisitStatus(b)]));
+  const checked = bookings.filter(b=>visitStatuses.get(String(b.id))?.key === "arrived").length;
+  const finished = bookings.filter(b=>visitStatuses.get(String(b.id))?.key === "finished").length;
+  const waiting = bookings.filter(b=>visitStatuses.get(String(b.id))?.key === "waiting").length;
 
   const tableTotal = bookings.reduce((sum,b)=>{
     return sum + (b.tableIndexes || [b.tableIndex])
@@ -850,7 +1058,7 @@ function renderList(){
 
   if(summary){
     summary.innerHTML =
-      `未到店：${waiting}组｜已到店：${checked}组｜预约桌数：${tableTotal}桌`;
+      `未到店：${waiting}组｜已到店：${checked}组｜已离店：${finished}组｜预约桌数：${tableTotal}桌`;
   }
 
   if(btn){
@@ -865,6 +1073,7 @@ function renderList(){
   }
 
   box.innerHTML = bookings.map(b=>{
+    const visitStatus = visitStatuses.get(String(b.id)) || getBookingVisitStatus(b);
     const tables = (b.tableIndexes || [b.tableIndex])
       .filter(v=>v !== undefined && v !== null)
       .map(idx=>state.tables[Number(idx)]?.name)
@@ -872,7 +1081,7 @@ function renderList(){
       .join("、");
 
     return `
-      <div class="booking-list-item ${b.checkedIn ? "booking-list-done" : "booking-list-wait"}">
+      <div class="booking-list-item ${visitStatus.className}">
         <div class="booking-list-time">
           ${b.startTime || "-"} - ${b.endTime || "-"}
         </div>
@@ -898,7 +1107,7 @@ tables || "<span style='color:red'>未分配</span>"
 
 ｜
 
-${b.checkedIn ? "已到店" : "未到店"}
+${visitStatus.text}
 
 </div>
         ${bookingLocked ? "" : `
@@ -918,7 +1127,7 @@ onclick="openAssignTableModal(${b.id})">
 
 `<button class="btn-success"
 onclick="openCheckInSelectModal(${b.id})">
-到店开始
+进入计时器
 </button>`
 }
 
@@ -962,13 +1171,14 @@ function cancelBookingById(id){
 
 function hasBookingConflict(targetIndex, booking, excludeBookingId){
   const target = Number(targetIndex);
-
-  const startA = timeToMinutes(booking.startTime);
-  const endA = timeToMinutes(booking.endTime);
+  const targetDate = booking?.date || currentBookingDate;
+  const startA = timeToMinutes(booking?.startTime);
+  const endA = timeToMinutes(booking?.endTime);
 
   return (state.bookings || []).some(b=>{
     if(Number(b.id) === Number(excludeBookingId)) return false;
-    if((b.date || currentBookingDate) !== currentBookingDate) return false;
+    if(b?.cancelled) return false;
+    if((b.date || currentBookingDate) !== targetDate) return false;
 
     const indexes = (b.tableIndexes || [b.tableIndex])
       .filter(v=>v !== undefined && v !== null)
@@ -979,6 +1189,29 @@ function hasBookingConflict(targetIndex, booking, excludeBookingId){
     const startB = timeToMinutes(b.startTime);
     const endB = timeToMinutes(b.endTime);
 
+    // 首尾刚好相接不算重叠，例如 12:00-13:00 与 13:00-14:00 可以连续预约。
+    return startA < endB && endA > startB;
+  });
+}
+
+function findBookingConflicts({date, tableIndexes, startTime, endTime, excludeBookingId = null}){
+  const targets = new Set((tableIndexes || []).map(Number));
+  const startA = timeToMinutes(startTime);
+  const endA = timeToMinutes(endTime);
+
+  return (state.bookings || []).filter(b=>{
+    if(Number(b.id) === Number(excludeBookingId)) return false;
+    if(b?.cancelled) return false;
+    if((b.date || currentBookingDate) !== date) return false;
+
+    const indexes = (b.tableIndexes || [b.tableIndex])
+      .filter(v=>v !== undefined && v !== null)
+      .map(Number);
+
+    if(!indexes.some(index=>targets.has(index))) return false;
+
+    const startB = timeToMinutes(b.startTime);
+    const endB = timeToMinutes(b.endTime);
     return startA < endB && endA > startB;
   });
 }
@@ -1060,6 +1293,8 @@ moveRunningFromIndex = null;
   const bookingIndexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
+  const bookingVisitStatus = getBookingVisitStatus(b);
+  const reservationOnly = bookingVisitStatus.key === "waiting";
 
   document.getElementById("moveTableInfo").innerHTML = `
     客人：${b.name || "-"} ${String(b.phone || "").slice(-4) || ""}<br>
@@ -1073,7 +1308,9 @@ moveRunningFromIndex = null;
     <div class="move-row-title">按住要移动的桌位，拖到下面目标桌位</div>
     <div id="moveFromTableBox" class="move-drag-grid">
       ${bookingIndexes.map(i=>{
-        const running = state.tables[i]?.start ? "已开始" : "未开始";
+        const running = reservationOnly
+          ? (state.tables[i]?.start ? "当前桌使用中（不随预约移动）" : "预约桌位")
+          : (state.tables[i]?.start ? "已开始" : "未开始");
 
         return `
           <button
@@ -1093,19 +1330,26 @@ moveRunningFromIndex = null;
     <div id="moveToTableBox" class="move-drag-grid">
       ${state.tables.map((t,i)=>{
         const isSameBookingTable = bookingIndexes.includes(i);
-        const occupied = !!t.start && !isSameBookingTable;
-        const conflict = hasBookingConflict(i, b, b.id) && !isSameBookingTable;
-
-        let disabled = occupied || conflict;
-        let sub = "可移动";
-
-        if(occupied) sub = "使用中";
-        else if(conflict) sub = "已有预约";
-        else if(isSameBookingTable) sub = "当前预约桌";
+        const conflictBooking = (state.bookings || []).find(other=>{
+          if(Number(other?.id) === Number(b.id) || other?.cancelled) return false;
+          if((other.date || currentBookingDate) !== (b.date || currentBookingDate)) return false;
+          const indexes = (other.tableIndexes || [other.tableIndex]).map(Number);
+          if(!indexes.includes(i)) return false;
+          return timeToMinutes(b.startTime) < timeToMinutes(other.endTime) && timeToMinutes(b.endTime) > timeToMinutes(other.startTime);
+        });
+        // 未到店预约只调整预约表，不移动当前正在使用的客人。
+        // 因此目标桌当前是否使用中，不影响未来预约的移动或交换。
+        const runningName = !reservationOnly && t.start ? (t.customer?.name || "使用中") : "";
+        const swapName = conflictBooking?.name || runningName || "";
+        const disabled = isSameBookingTable;
+        let sub = reservationOnly ? "可调整预约" : "可移动";
+        if(isSameBookingTable) sub = "当前预约桌";
+        else if(swapName) sub = `交换预约：${swapName}`;
+        else if(reservationOnly && t.start) sub = "可调整（当前有人使用）";
 
         return `
           <button
-            class="move-table-btn move-to-btn ${disabled ? "disabled" : ""}"
+            class="move-table-btn move-to-btn ${disabled ? "disabled" : ""} ${swapName ? "swap-target" : ""}"
             data-index="${i}"
             id="move-to-${i}"
             ${disabled ? "disabled" : ""}
@@ -1301,103 +1545,152 @@ function drawMoveLines(pointerX = null, pointerY = null){
 }
 
 async function confirmMoveTable(){
-
   if(moveMode === "running"){
-  await confirmMoveRunningTable();
-  return;
-}
+    await confirmMoveRunningTable();
+    return;
+  }
 
   const b = getBookingById(moveBookingId);
   if(!b) return;
-
   if(movePairs.length === 0){
-    alert("请先拖线选择要移动的桌位");
+    alert("请先拖线选择要调整的桌位");
     return;
   }
 
   const bookingIndexes = (b.tableIndexes || [b.tableIndex])
-    .filter(v=>v !== undefined && v !== null)
-    .map(Number);
-
+    .filter(v=>v !== undefined && v !== null).map(Number);
+  const fromSet = new Set();
+  const toSet = new Set();
   for(const pair of movePairs){
-    if(!bookingIndexes.includes(pair.from)){
-      alert("有原桌位不属于这个预约");
-      return;
-    }
-
-    if(pair.from === pair.to){
-      alert("新桌位不能和原桌位一样");
-      return;
-    }
-
-    const toTable = state.tables[pair.to];
-
-    if(toTable?.start){
-      alert(`${toTable.name} 正在使用中，不能移动`);
-      return;
-    }
-
-    if(hasBookingConflict(pair.to, b, b.id)){
-      alert(`${toTable.name} 在这个时间段已有预约，不能移动`);
-      return;
-    }
+    pair.from = Number(pair.from); pair.to = Number(pair.to);
+    if(!bookingIndexes.includes(pair.from)) return alert("有原桌位不属于这个预约");
+    if(pair.from === pair.to) return alert("新桌位不能和原桌位一样");
+    if(fromSet.has(pair.from) || toSet.has(pair.to)) return alert("同一张桌不能重复连接");
+    fromSet.add(pair.from); toSet.add(pair.to);
   }
 
-  movePairs.forEach(pair=>{
-    const fromTable = state.tables[pair.from];
-    const toTable = state.tables[pair.to];
-
-    if(fromTable?.start){
-      const oldFromName = fromTable.name;
-      const oldToName = toTable.name;
-
-      state.tables[pair.to] = {
-        ...fromTable,
-        name: oldToName
-      };
-
-      state.tables[pair.from] = resetTable(oldFromName);
+  const affectedBookings = new Map();
+  const selectedStart = timeToMinutes(b.startTime);
+  const selectedEnd = timeToMinutes(b.endTime);
+  for(const pair of movePairs){
+    const targetTable = state.tables[pair.to];
+    let other = null;
+    if(targetTable?.bookingId){
+      other = (state.bookings || []).find(x=>Number(x.id) === Number(targetTable.bookingId));
     }
-  });
-
-  b.tableIndexes = bookingIndexes.map(i=>{
-    const pair = movePairs.find(p=>p.from === i);
-    return pair ? pair.to : i;
-  });
-
-  const group = getGroupById(b.groupId);
-
-if(group){
-  group.tableIndexes = [...b.tableIndexes]
-    .map(Number)
-    .filter(Number.isFinite);
-
-  group.tableIndexes = Array.from(
-    new Set(group.tableIndexes)
-  );
-
-  group.updatedAt = Date.now();
-}
-
-  if(b.checkedInTableIndexes){
-    b.checkedInTableIndexes = b.checkedInTableIndexes
-      .map(Number)
-      .map(i=>{
-        const pair = movePairs.find(p=>p.from === i);
-        return pair ? pair.to : i;
+    if(!other){
+      other = (state.bookings || []).find(x=>{
+        if(Number(x?.id) === Number(b.id) || x?.cancelled) return false;
+        if((x.date || currentBookingDate) !== (b.date || currentBookingDate)) return false;
+        const indexes = (x.tableIndexes || [x.tableIndex]).map(Number);
+        return indexes.includes(pair.to) && selectedStart < timeToMinutes(x.endTime) && selectedEnd > timeToMinutes(x.startTime);
       });
+    }
+    if(other) affectedBookings.set(String(other.id),other);
   }
 
+  const visitStatus = getBookingVisitStatus(b);
+  const reservationOnly = visitStatus.key === "waiting";
+
+  // 未到店预约的桌位调整，只修改预约安排。
+  // 当前正在使用的桌位、计时、账单和付款全部留在原物理桌位。
+  if(reservationOnly){
+    const hasReservationSwap = affectedBookings.size > 0;
+    const summary = movePairs.map(p=>`${state.tables[p.from]?.name || p.from+1} → ${state.tables[p.to]?.name || p.to+1}`).join("、");
+    const confirmText = hasReservationSwap
+      ? `确认交换预约桌位？\n${summary}\n\n只交换预约表中的桌位，不会移动当前正在使用的客人、计时或账单。`
+      : `确认调整预约桌位？\n${summary}\n\n只修改预约表，不会影响当前正在使用的客人。`;
+    if(!confirm(confirmText)) return;
+
+    const oneWaySelected = new Map(movePairs.map(({from,to})=>[from,to]));
+    const bidirectional = new Map();
+    movePairs.forEach(({from,to})=>{ bidirectional.set(from,to); bidirectional.set(to,from); });
+    const remapArray = (arr,map)=>Array.from(new Set((arr || []).map(Number).map(i=>map.has(i)?map.get(i):i)));
+
+    b.tableIndexes = remapArray(bookingIndexes,oneWaySelected);
+    delete b.tableIndex;
+    b.updatedAt = Date.now();
+
+    // 与目标桌同时间段的另一条预约反向换回原桌位。
+    for(const other of affectedBookings.values()){
+      other.tableIndexes = remapArray(other.tableIndexes || [other.tableIndex],bidirectional);
+      delete other.tableIndex;
+      other.updatedAt = Date.now();
+    }
+
+    // 若预约已建立分组，仅同步预约分组的桌位编号；不碰运行桌位对象。
+    const bookingGroupIds = new Set([b,...affectedBookings.values()]
+      .map(x=>x?.groupId).filter(Boolean).map(String));
+    for(const group of state.groups || []){
+      if(bookingGroupIds.has(String(group?.id)) && !group?.startedAt){
+        group.tableIndexes = remapArray(group.tableIndexes,bidirectional);
+        group.updatedAt = Date.now();
+      }
+    }
+
+    await save(hasReservationSwap ? "swap_future_booking_tables" : "move_future_booking_tables");
+    closeMoveTableModal();
+    renderBookingGrid();
+    renderList();
+    alert(hasReservationSwap ? "预约桌位已交换" : "预约桌位已调整");
+    return;
+  }
+
+  const hasSwap = movePairs.some(pair=>{
+    const t = state.tables[pair.to];
+    if(t?.start) return true;
+    return [...affectedBookings.values()].some(x=>(x.tableIndexes || [x.tableIndex]).map(Number).includes(pair.to));
+  });
+  const summary = movePairs.map(p=>`${state.tables[p.from]?.name || p.from+1} → ${state.tables[p.to]?.name || p.to+1}`).join("、");
+  if(!confirm(`${hasSwap ? "确认交换/调整桌位" : "确认移动桌位"}？\n${summary}\n\n计时、账单、预约和分组会一起跟随客人移动。`)) return;
+
+  const oldTables = state.tables.map(t=>JSON.parse(JSON.stringify(t)));
+  const bidirectional = new Map();
+  movePairs.forEach(({from,to})=>{ bidirectional.set(from,to); bidirectional.set(to,from); });
+  const oneWaySelected = new Map(movePairs.map(({from,to})=>[from,to]));
+
+  // 逐对交换完整桌位对象，桌名保留在物理桌位上。
+  for(const {from,to} of movePairs){
+    const fromName = oldTables[from]?.name || `${from+1}号桌`;
+    const toName = oldTables[to]?.name || `${to+1}号桌`;
+    state.tables[to] = {...oldTables[from],name:toName,lastAction:"swap_table",movedAt:Date.now()};
+    state.tables[from] = {...oldTables[to],name:fromName,lastAction:"swap_table",movedAt:Date.now()};
+  }
+
+  const remapArray = (arr,map)=>Array.from(new Set((arr || []).map(Number).map(i=>map.has(i)?map.get(i):i)));
+  b.tableIndexes = remapArray(bookingIndexes,oneWaySelected);
+  if(b.checkedInTableIndexes) b.checkedInTableIndexes = remapArray(b.checkedInTableIndexes,oneWaySelected);
+  if(b.finishedTableIndexes) b.finishedTableIndexes = remapArray(b.finishedTableIndexes,oneWaySelected);
   delete b.tableIndex;
 
-  await save("move_booking_table");
+  // 目标桌位原本所属的预约反向换到原桌位。
+  for(const other of affectedBookings.values()){
+    other.tableIndexes = remapArray(other.tableIndexes || [other.tableIndex],bidirectional);
+    if(other.checkedInTableIndexes) other.checkedInTableIndexes = remapArray(other.checkedInTableIndexes,bidirectional);
+    if(other.finishedTableIndexes) other.finishedTableIndexes = remapArray(other.finishedTableIndexes,bidirectional);
+    delete other.tableIndex;
+    other.updatedAt = Date.now();
+  }
+
+  // 所有涉及到的运行分组随完整桌位对象一起交换。
+  const involvedGroupIds = new Set();
+  movePairs.forEach(({from,to})=>{
+    [oldTables[from]?.groupId,oldTables[to]?.groupId].filter(Boolean).forEach(id=>involvedGroupIds.add(String(id)));
+  });
+  [b,...affectedBookings.values()].forEach(x=>x?.groupId && involvedGroupIds.add(String(x.groupId)));
+  for(const group of state.groups || []){
+    if(involvedGroupIds.has(String(group?.id))){
+      group.tableIndexes = remapArray(group.tableIndexes,bidirectional);
+      group.updatedAt = Date.now();
+    }
+  }
+
+  await save(hasSwap ? "swap_booking_tables" : "move_booking_table");
   closeMoveTableModal();
   renderBookingGrid();
   renderList();
-
-  alert("桌位已移动");
+  alert(hasSwap ? "桌位已交换" : "桌位已移动");
 }
-
 async function confirmMoveRunningTable(){
   if(moveRunningFromIndex === null){
     alert("没有选择要移动的桌位");
@@ -1866,11 +2159,9 @@ async function confirmGridBooking(){
 const now = Date.now();
 const walkinColor = getNextBookingColor();
 
-const walkinGroupId = makeGroupId();
+const walkinGroupId = await makeGroupId();
 
-const walkinGroupName = name
-  ? `${name}一组`
-  : "Walk-in一组";
+const walkinGroupName = "Walk-in组";
 
 createOrUpdateGroup({
   groupId: walkinGroupId,
@@ -1927,19 +2218,44 @@ t.packageIndex = packageIndex;
       return;
     }
 
+    const conflicts = findBookingConflicts({
+      date:currentBookingDate,
+      tableIndexes,
+      startTime,
+      endTime
+    });
+
+    if(conflicts.length){
+      const conflictLines = conflicts.map(existing=>{
+        const occupiedIndexes = (existing.tableIndexes || [existing.tableIndex])
+          .filter(v=>v !== undefined && v !== null)
+          .map(Number)
+          .filter(index=>tableIndexes.includes(index));
+        const tableNames = occupiedIndexes
+          .map(index=>state.tables[index]?.name || `${index + 1}号桌`)
+          .join("、");
+        return `${tableNames}｜${existing.startTime} - ${existing.endTime}｜${existing.name || "已有预约"}`;
+      });
+
+      alert(
+        "创建预约失败：所选桌位和时间已存在预约，不能重叠。\n\n" +
+        conflictLines.join("\n")
+      );
+      return;
+    }
+
     const packageIndex =
       findPackageIndexByDuration(startTime,endTime);
 
-    const groupId = makeGroupId();
+    const bookingId = Date.now();
+    const groupId = makeFastBookingGroupId(bookingId);
     const groupColor = getNextBookingColor();
 
     const booking = {
-      id:Date.now(),
+      id:bookingId,
       groupId,
       groupColor,
-      groupName:name
-        ? `${name}一组`
-        : "未命名组",
+      groupName:"预约组",
       date:currentBookingDate,
       color:groupColor,
       name,
@@ -1970,15 +2286,20 @@ t.packageIndex = packageIndex;
     state.bookings.push(booking);
 
     /*
-     * 先保存到本机。
-     * saveStateSafely 会负责后续云端同步。
+     * saveStateSafely 会同步写入 localStorage 并立即广播。
+     * 预约窗口无需等待 IndexedDB 或 Firestore 上传完成，登记后马上关闭。
      */
-    await save("create_booking");
+    const saveTask = save("create_booking");
 
     completed = true;
     closeBookingModal();
     renderBookingGrid();
     renderList();
+
+    saveTask.catch(error=>{
+      console.error("预约后台同步失败，将由本地队列继续重试", error);
+      setSyncStatus("pending", "● 预约已保存在本机 · 云端上传将自动重试");
+    });
 
   }catch(error){
     console.error("创建预约失败",error);
@@ -2180,6 +2501,7 @@ function drawExistingBookings(){
         if(!cell) continue;
 
         cell.classList.add(b.checkedIn ? "checked-in-booking" : "booked");
+        cell.dataset.bookingId = String(b.id);
         cell.style.background = bgColor;
         cell.style.color = "#332d24";
 
@@ -2262,32 +2584,41 @@ function drawRunningTables(){
     if(startRow === -1) return;
 
     const bgColor = darkenColor(t.groupColor || getRunningColor(t), 35);
+    const runningBookingId = t.bookingId === undefined || t.bookingId === null
+      ? ""
+      : String(t.bookingId);
+    const drawableRows = [];
 
     for(let row=startRow; row<=endRow; row++){
       const cell = document.querySelector(
         `.slot-cell[data-table="${tableIndex}"][data-row="${row}"]`
       );
 
-    if(cell){
-  cell.style.background = bgColor;
+      if(!cell) continue;
 
-  cell.onclick = (e)=>{
-    e.preventDefault();
-    e.stopPropagation();
+      // 后续预约的颜色和点击入口优先保留。正在使用的色块只能覆盖空白格，
+      // 或覆盖属于当前正在使用预约本身的格子。
+      const cellBookingId = cell.dataset.bookingId || "";
+      const occupiedByOtherBooking = cellBookingId && cellBookingId !== runningBookingId;
+      if(occupiedByOtherBooking) continue;
 
-    if(bookingLocked) return;
+      drawableRows.push(row);
+      cell.style.background = bgColor;
 
-if(t.type === "walkin"){
-  openMoveRunningTableModal(tableIndex);
-}else{
-  openRunningTablePay(tableIndex);
-}
+      cell.onclick = (e)=>{
+        e.preventDefault();
+        e.stopPropagation();
 
-  };
-}      
+        if(bookingLocked) return;
+
+        // 预约页只负责登记与排桌。到店后的付款、换桌、续时和结账统一进入计时器处理。
+        window.location.href = `app.html#table-${tableIndex + 1}`;
+      };
     }
 
-    const middleRow = Math.floor((startRow + endRow) / 2);
+    if(drawableRows.length === 0) return;
+
+    const middleRow = drawableRows[Math.floor(drawableRows.length / 2)];
 
 const middleCell = document.querySelector(
   `.slot-cell[data-table="${tableIndex}"][data-row="${middleRow}"]`
@@ -2339,69 +2670,29 @@ function startRunningTimeTextTimer(){
   },1000);
 }
 
-function openRunningTablePay(tableIndex){
-  const t = state.tables[tableIndex];
-  if(!t || !t.start) return;
-
-  runningPayTableIndex = tableIndex;
-
-  document.getElementById("runningPayInfo").innerHTML = `
-    ${t.name}<br>
-    当前付款方式：${t.pay || "未记录"}
-  `;
-
-  document.getElementById("runningPaySelect").value = t.pay || "";
-
-  document.getElementById("runningPayModalBg").style.display = "block";
-}
-
-function closeRunningTablePay(){
-  document.getElementById("runningPayModalBg").style.display = "none";
-  runningPayTableIndex = null;
-}
-
-async function confirmRunningTablePay(){
-  if(runningPayTableIndex === null) return;
-
-  const t = state.tables[runningPayTableIndex];
-  const value = document.getElementById("runningPaySelect").value;
-
-  if(!value){
-    alert("请选择付款方式");
-    return;
-  }
-
-  t.pay = value;
-
-if(t.recordId){
-  const snap = await getDoc(doc(db, "records", t.recordId));
-
-  if(snap.exists()){
-    const r = {
-      id: snap.id,
-      ...snap.data()
-    };
-
-    r.pay = value;
-    r.currency = t.currency || r.currency || "日元";
-
-    await saveRecordSafely({db,ref,record:r});
-  }
-}
-  save();
-  closeRunningTablePay();
-  renderBookingGrid();
-
-  alert(`${t.name} 已设置付款方式：${value}`);
-}
-
-
-
-
-
-
 function getBookingById(id){
   return state.bookings.find(b=>Number(b.id) === Number(id));
+}
+
+function getBookingDetailDraft(){
+  return {
+    name: document.getElementById("detailName")?.value.trim() || "",
+    phone: document.getElementById("detailPhone")?.value.trim() || "",
+    packageIndex: Number(document.getElementById("detailPackage")?.value || 0)
+  };
+}
+
+function getBookingDetailSnapshot(booking){
+  return JSON.stringify({
+    name: booking?.name || "",
+    phone: booking?.phone || "",
+    packageIndex: Number(booking?.packageIndex || 0)
+  });
+}
+
+function hasUnsavedBookingDetailChanges(){
+  if(!activeBookingId || bookingDetailInitialSnapshot === null) return false;
+  return JSON.stringify(getBookingDetailDraft()) !== bookingDetailInitialSnapshot;
 }
 
 function openBookingAction(id){
@@ -2409,137 +2700,103 @@ function openBookingAction(id){
   if(!b) return;
 
   activeBookingId = id;
-
-  const tableIndex = Number(
-    (b.tableIndexes || [b.tableIndex])[0] || 0
-  );
+  bookingDetailClosing = false;
 
   document.getElementById("bookingActionInfo").innerHTML = `
     时间：${b.startTime} - ${b.endTime}<br>
-    状态：${b.checkedIn ? "已到店" : "未到店"}
+    状态：${getBookingVisitStatus(b).text}
   `;
 
-  document.getElementById("detailName").value =
-    b.name || "";
-
-  document.getElementById("detailPhone").value =
-    b.phone || "";
-
-  document.getElementById("detailPay").value =
-    b.pay || "";
-
-  document.getElementById("detailStartTime").value = b.startTime || "";
-  document.getElementById("detailEndTime").value = b.endTime || "";
-  const indexes = (b.tableIndexes || [b.tableIndex])
-  .filter(v=>v !== undefined && v !== null)
-  .map(Number);
-
-document.getElementById("detailTablesBox").innerHTML = `
-  <div style="font-weight:800;margin:8px 0;">
-    预约桌位：${indexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
-  </div>
-`;
-
-
-    document.getElementById("detailPackage").innerHTML =
-  (state.packages || []).map((p,i)=>`
-    <option value="${i}" ${Number(b.packageIndex || 0) === i ? "selected" : ""}>
-      ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
-    </option>
-  `).join("");
-
-  document.getElementById("bookingActionModalBg").style.display = "block";
-}
-
-
-async function saveBookingDetail(){
-  const b = getBookingById(activeBookingId);
-  if(!b) return;
-
-  const newName = document.getElementById("detailName").value.trim();
-  const newPhone = document.getElementById("detailPhone").value.trim();
-  const newPay = document.getElementById("detailPay").value;
-  const newPackageIndex = Number(document.getElementById("detailPackage").value || 0);
-  const newStartTime = document.getElementById("detailStartTime").value;
-  const newEndTime = document.getElementById("detailEndTime").value;
-
-  if(!newStartTime || !newEndTime){
-    alert("请选择预约开始和结束时间");
-    return;
-  }
-
-  if(timeToMinutes(newStartTime) >= timeToMinutes(newEndTime)){
-    alert("结束时间必须晚于开始时间");
-    return;
-  }
+  document.getElementById("detailName").value = b.name || "";
+  document.getElementById("detailPhone").value = b.phone || "";
 
   const indexes = (b.tableIndexes || [b.tableIndex])
     .filter(v=>v !== undefined && v !== null)
     .map(Number);
 
-  const tempBooking = {
-    ...b,
-    startTime:newStartTime,
-    endTime:newEndTime
-  };
+  document.getElementById("detailTablesBox").innerHTML = `
+    <div style="font-weight:800;margin:8px 0;">
+      预约桌位：${indexes.map(i=>state.tables[i]?.name).filter(Boolean).join("、")}
+    </div>
+  `;
 
-  const conflictTables = indexes.filter(idx=>{
-    return hasBookingConflict(idx, tempBooking, b.id);
-  });
+  document.getElementById("detailPackage").innerHTML =
+    (state.packages || []).map((p,i)=>`
+      <option value="${i}" ${Number(b.packageIndex || 0) === i ? "selected" : ""}>
+        ${p.name}｜${p.unlimited ? "不限时" : p.minutes + "分钟"}｜¥${p.price}
+      </option>
+    `).join("");
 
-  if(conflictTables.length){
-    alert(
-      "这个时间段已有预约，冲突桌位：\n" +
-      conflictTables.map(i=>state.tables[i]?.name).join("、")
-    );
-    return;
-  }
+  bookingDetailInitialSnapshot = getBookingDetailSnapshot(b);
+  document.getElementById("bookingActionModalBg").style.display = "block";
+}
 
-  b.name = newName;
-  b.phone = newPhone;
-  b.pay = newPay;
-  b.packageIndex = newPackageIndex;
-  b.startTime = newStartTime;
-  b.endTime = newEndTime;
+async function saveBookingDetail(options = {}){
+  const { closeModal = false, showAlert = false } = options;
+  const b = getBookingById(activeBookingId);
+  if(!b) return false;
+
+  const draft = getBookingDetailDraft();
+  const indexes = (b.tableIndexes || [b.tableIndex])
+    .filter(v=>v !== undefined && v !== null)
+    .map(Number);
+
+  b.name = draft.name;
+  b.phone = draft.phone;
+  b.packageIndex = draft.packageIndex;
 
   indexes.forEach(idx=>{
     const t = state.tables[idx];
     if(!t || !t.start) return;
 
     t.customer = {
-      name:newName,
-      phoneLast4:String(newPhone || "").slice(-4)
+      name:draft.name,
+      phoneLast4:String(draft.phone || "").slice(-4)
     };
 
-    t.pay = newPay || t.pay || "";
-    t.packageIndex = newPackageIndex;
+    t.packageIndex = draft.packageIndex;
     t.type = "booking";
   });
 
-  await save();
-  closeBookingAction();
+  await save("booking_detail_update");
+  bookingDetailInitialSnapshot = getBookingDetailSnapshot(b);
   renderBookingGrid();
   renderList();
 
-  alert("修改成功");
+  if(closeModal) forceCloseBookingAction();
+  if(showAlert) alert("修改成功");
+  return true;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-function closeBookingAction(){
+function forceCloseBookingAction(){
   document.getElementById("bookingActionModalBg").style.display = "none";
   activeBookingId = null;
+  bookingDetailInitialSnapshot = null;
+  bookingDetailClosing = false;
+}
+
+async function closeBookingAction(){
+  if(bookingDetailClosing) return;
+
+  if(!hasUnsavedBookingDetailChanges()){
+    forceCloseBookingAction();
+    return;
+  }
+
+  bookingDetailClosing = true;
+  try{
+    if(confirm("预约信息已修改。\n\n点击“确定”保存修改；点击“取消”选择是否放弃修改。")){
+      await saveBookingDetail({ closeModal:true });
+      return;
+    }
+
+    if(confirm("确定放弃尚未保存的修改吗？")){
+      forceCloseBookingAction();
+      return;
+    }
+  }finally{
+    bookingDetailClosing = false;
+  }
 }
 
 function openCheckInSelectModal(id){
@@ -2583,8 +2840,17 @@ function closeCheckInSelectModal(){
   document.getElementById("checkInSelectModalBg").style.display = "none";
 }
 
-function checkInBooking(){
-  openCheckInSelectModal(activeBookingId);
+async function checkInBooking(){
+  const bookingId = activeBookingId;
+  if(!bookingId) return;
+
+  // 到店操作总是使用画面中的最新资料；有修改时先自动保存。
+  if(hasUnsavedBookingDetailChanges()){
+    const saved = await saveBookingDetail();
+    if(!saved) return;
+  }
+
+  openCheckInSelectModal(bookingId);
 }
 
 async function confirmCheckInSelected(){
@@ -2596,118 +2862,79 @@ async function confirmCheckInSelected(){
     .map(Number);
 
   const mode = document.getElementById("checkInMode").value;
-
   let indexes = allIndexes;
 
   if(mode === "partial"){
     indexes = [...document.querySelectorAll(".checkin-table-check:checked")]
       .map(el=>Number(el.value));
-
     if(indexes.length === 0){
-      alert("请至少选择一张桌开始计时");
+      alert("请至少选择一张桌进入计时器");
       return;
     }
   }
 
-  const busy = indexes.filter(idx=>{
-  const t = state.tables[idx];
-  if(!t?.start) return false;
-
-  return String(t.bookingId || "") !== String(b.id || "");
-});
-
-if(busy.length){
-  alert("以下桌位正在使用中，不能开始：\n" + busy.map(i=>state.tables[i].name).join("、"));
-  return;
-}
-
-const startIndexes = indexes.filter(idx=>{
-  const t = state.tables[idx];
-  return !t?.start;
-});
-
-if(startIndexes.length === 0){
-  alert("这些桌位已经开始计时了");
-  return;
-}
-
-const group = getGroupById(b.groupId);
-
-if(group){
-  group.tableIndexes = Array.from(new Set([
-    ...group.tableIndexes,
-    ...startIndexes
-  ]));
-}
-
-const now = Date.now();
-
-for(const idx of startIndexes){
-  const oldName = state.tables[idx]?.name || `${idx + 1}号桌`;
-
-  const t = {
-    ...resetTable(oldName),
-    type:"booking",
-    bookingId:b.id,
-    groupId:b.groupId,
-    groupColor:b.groupColor || b.color || getNextBookingColor(),
-    groupName:b.groupName || (b.name ? `${b.name}一组` : "未命名组"),
-    activeColor:b.groupColor || b.color || getNextBookingColor(),
-    customerKey:getCustomerKey(b.name, b.phone),
-    pay:b.pay || "",
-    currency:"日元",
-    packageIndex:Number(b.packageIndex || 0),
-    customer:{
-      name:b.name || "",
-      phoneLast4:String(b.phone || "").slice(-4)
-    },
-    start:now,
-    pausedAt:null,
-    extra:0,
-    alerted:false,
-    alerting:false,
-    lastAction:"start"
-  };
-
-  state.tables[idx] = t;
-
-  await createOrUpdateTableRecord(state.tables[idx], {
-    customerType:"booking",
-    checkoutMethod:"预约到店开始计时"
-  });
-}
-
-
-  if(!b.checkedInTableIndexes){
-    b.checkedInTableIndexes = [];
+  const busy = indexes.filter(idx=>state.tables[idx]?.start);
+  if(busy.length){
+    alert("以下桌位正在使用中，不能转入计时器：\n" + busy.map(i=>state.tables[i].name).join("、"));
+    return;
   }
 
-  b.checkedInTableIndexes = Array.from(new Set([
-    ...b.checkedInTableIndexes.map(Number),
+  const now = Date.now();
+  for(const idx of indexes){
+    const oldName = state.tables[idx]?.name || `${idx + 1}号桌`;
+    const previous = state.tables[idx] || resetTable(oldName);
+    state.tables[idx] = {
+      ...resetTable(oldName),
+      ...previous,
+      name:oldName,
+      type:"booking",
+      bookingId:b.id,
+      groupId:b.groupId,
+      groupColor:b.groupColor || b.color || getNextBookingColor(),
+      groupName:b.groupName || "预约组",
+      activeColor:b.groupColor || b.color || getNextBookingColor(),
+      customerKey:getCustomerKey(b.name,b.phone),
+      pay:"",
+      currency:"日元",
+      payTiming:"prepaid",
+      paidJPY:0,
+      paidRMB:0,
+      paidAt:null,
+      packageIndex:Number(b.packageIndex || 0),
+      customer:{
+        name:b.name || "",
+        phoneLast4:String(b.phone || "").slice(-4)
+      },
+      start:null,
+      pausedAt:null,
+      extra:0,
+      recordId:"",
+      visitId:"",
+      startLocked:false,
+      alerted:false,
+      alerting:false,
+      lastAction:"booking_arrived"
+    };
+  }
+
+  b.arrived = true;
+  b.arrivedAt = b.arrivedAt || now;
+  b.arrivedTimeText = b.arrivedTimeText || new Date(now).toLocaleString();
+  b.arrivedTableIndexes = Array.from(new Set([
+    ...(b.arrivedTableIndexes || []).map(Number),
     ...indexes
   ]));
 
-  b.checkedIn = b.checkedInTableIndexes.length >= allIndexes.length;
-  b.checkInTime = b.checkInTime || now;
-  b.checkInTimeText = b.checkInTimeText || new Date(now).toLocaleString();
+  // 这里只登记“已到店并送入计时器”，不产生账单、不计营业额。
+  // 套餐费必须在计时器选择付款方式后点击“开始”才正式写入。
+  emergencySaveState({db,ref,state,action:"booking_arrived_to_timer"});
+  save("booking_arrived_to_timer").catch(err=>console.warn("预约到店状态后台同步失败",err));
 
-  addCustomerVisit({
-    name:b.name,
-    phone:b.phone,
-    packageIndex:b.packageIndex,
-    tableIndexes:indexes,
-    startTime:b.startTime,
-    endTime:b.endTime
-  });
-
-await save("booking_checkin");
-
-alert("已写入计时器数据，请去计时器页面查看");
-
-closeCheckInSelectModal();
-closeBookingAction();  
+  closeCheckInSelectModal();
+  closeBookingAction();
   renderBookingGrid();
   renderList();
+  location.href = "./app.html";
 }
 
 function cancelBooking(){
@@ -2928,7 +3155,7 @@ async function confirmGroupPayment(){
 
   const group = createOrUpdateGroup({
     groupId:b.groupId,
-    groupName:b.groupName || (b.name ? `${b.name}一组` : "未命名组"),
+    groupName:b.groupName || "预约组",
     groupColor:b.groupColor || b.color || getNextBookingColor(),
     tableIndexes,
     bookingId:b.id
@@ -2941,7 +3168,7 @@ async function confirmGroupPayment(){
     pay,
     payer:payer || b.name || "",
     amountJPY:amount,
-    amountRMB:Math.floor(amount * 0.044),
+    amountRMB:jpyToRmb(amount),
     tableIndexes,
     tableNames,
     note,
@@ -2951,7 +3178,13 @@ async function confirmGroupPayment(){
     createdTime:new Date().toLocaleString()
   };
 
+  payment.currency = currencyForPaymentMethod(pay);
+  payment.referenceOnly = true;
+  if(!Array.isArray(group.payments)) group.payments = [];
   group.payments.push(payment);
+  group.updatedAt = Date.now();
+
+  await syncGroupPrepaymentsToRunningTables(b, group);
 
   b.groupPaymentStatus = "paid";
   b.groupPaymentUpdatedAt = Date.now();
@@ -2994,9 +3227,6 @@ window.openMoveTableModal = openMoveTableModal;
 window.closeMoveTableModal = closeMoveTableModal;
 window.confirmMoveTable = confirmMoveTable;
 window.startMoveDrag = startMoveDrag;
-window.openRunningTablePay = openRunningTablePay;
-window.closeRunningTablePay = closeRunningTablePay;
-window.confirmRunningTablePay = confirmRunningTablePay;
 window.openMoveRunningTableModal = openMoveRunningTableModal;
 window.openAssignTableModal=openAssignTableModal;
 window.assignBookingTable=assignBookingTable;

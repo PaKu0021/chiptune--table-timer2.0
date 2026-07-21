@@ -123,36 +123,18 @@
 
     <input id="detailPhone" placeholder="手机号">
 
-    <label>开始时间</label>
-<input id="detailStartTime" type="time">
-
-<label>结束时间</label>
-<input id="detailEndTime" type="time">
-
     <div id="detailTablesBox"></div>
 
     <select id="detailPackage"></select>
 
-    <select id="detailPay">
-      <option value="">付款方式</option>
-      <option value="现金">现金</option>
-      <option value="PayPay">PayPay</option>
-      <option value="微信">微信</option>
-      <option value="支付宝">支付宝</option>
-    </select>
-
-    <button class="btn-main full"
-      onclick="saveBookingDetail()">
-      保存修改
-    </button>
 
     <button class="btn-blue full" onclick="openMoveTableModal()">
-  移动桌位
+  调整桌位
 </button>
 
     <button class="btn-success full"
       onclick="checkInBooking()">
-      到店并开始计时
+      到店并进入计时器
     </button>
 
     <button class="btn-danger full"
@@ -160,11 +142,6 @@
       取消预约
     </button>
     
-    <button class="btn-success full"
-    onclick="openGroupPayment()">
-    💴 整组收款
-    </button>
-
     <button class="btn-ghost full"
       onclick="closeBookingAction()">
       关闭
@@ -175,19 +152,19 @@
 
 <div id="checkInSelectModalBg" class="modal-bg">
   <div class="modal">
-    <h2>到店开始</h2>
+    <h2>到店进入计时器</h2>
 
     <div id="checkInSelectInfo" style="margin-bottom:12px;font-weight:800;"></div>
 
     <select id="checkInMode" onchange="toggleCheckInMode()">
-      <option value="all">一起开始</option>
-      <option value="partial">分开开始</option>
+      <option value="all">全部进入计时器</option>
+      <option value="partial">部分进入计时器</option>
     </select>
 
     <div id="checkInTableChecks" class="table-check-grid" style="display:none;"></div>
 
     <button class="btn-success full" onclick="confirmCheckInSelected()">
-      确认开始计时
+      确认进入计时器
     </button>
 
     <button class="btn-ghost full" onclick="closeCheckInSelectModal()">
@@ -198,42 +175,18 @@
 
 <div id="moveTableModalBg" class="modal-bg">
   <div class="modal move-modal">
-    <h2>移动桌位</h2>
+    <h2>调整桌位</h2>
 
     <div id="moveTableInfo" style="margin-bottom:12px;font-weight:800;"></div>
 
     <div id="moveLineArea" class="move-line-area"></div>
 
     <button class="btn-main full" onclick="confirmMoveTable()">
-      确认移动
+      确认调整
     </button>
 
     <button class="btn-ghost full" onclick="closeMoveTableModal()">
       取消
-    </button>
-  </div>
-</div>
-
-<div id="runningPayModalBg" class="modal-bg">
-  <div class="modal">
-    <h2>付款方式</h2>
-
-    <div id="runningPayInfo" style="font-weight:900;margin-bottom:12px;"></div>
-
-    <select id="runningPaySelect">
-      <option value="">请选择付款方式</option>
-      <option value="现金">现金</option>
-      <option value="PayPay">PayPay</option>
-      <option value="微信">微信</option>
-      <option value="支付宝">支付宝</option>
-    </select>
-
-    <button class="btn-main full" onclick="confirmRunningTablePay()">
-      保存付款方式
-    </button>
-
-    <button class="btn-ghost full" onclick="closeRunningTablePay()">
-      关闭
     </button>
   </div>
 </div>
@@ -328,7 +281,7 @@
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=2.6.9";
+  import { renderNav } from "./js/nav.js?v=4.0.0";
 
   try {
     renderNav("booking");
@@ -336,7 +289,7 @@
     console.error("预约页面导航加载失败", error);
   }
 
-  import("./js/booking.js?v=2.6.9")
+  import("./js/booking.js?v=4.0.0")
     .catch(error => {
       console.error("booking.js 加载失败", error);
 

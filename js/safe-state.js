@@ -20,7 +20,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const DB_NAME = "chiptune_local_first_v1";
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 const STATE_KEY = "shop_main";
 const RECORDS_KEY = "records";
 const STATE_SHADOW = "chiptune_state_shadow_v2";
@@ -32,6 +32,114 @@ const RECORD_HISTORY_SYNC_META = "chiptune_records_history_sync_v2";
 const RECORD_DELETES_COLLECTION = "recordDeletes";
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+
+const ENTITY_SYNC_KEY = "_entitySync";
+
+function entityMeta(value){
+  const meta = value && typeof value === "object" ? value[ENTITY_SYNC_KEY] : null;
+  return {
+    version:Number(meta?.version || 0),
+    updatedAt:Number(meta?.updatedAt || 0),
+    deviceId:String(meta?.deviceId || ""),
+    operationId:String(meta?.operationId || "")
+  };
+}
+
+function compareEntityMeta(a,b){
+  const am=entityMeta(a), bm=entityMeta(b);
+  if(am.version !== bm.version) return am.version - bm.version;
+  if(am.updatedAt !== bm.updatedAt) return am.updatedAt - bm.updatedAt;
+  return am.operationId.localeCompare(bm.operationId);
+}
+
+function stampEntity(value, baseValue, operationId, now=Date.now()){
+  if(!value || typeof value !== "object") return value;
+  const next=clone(value);
+  const currentVersion=Math.max(entityMeta(value).version,entityMeta(baseValue).version);
+  next[ENTITY_SYNC_KEY]={
+    version:currentVersion+1,
+    updatedAt:now,
+    deviceId:getDeviceId(),
+    operationId
+  };
+  return next;
+}
+
+function chooseEntity(latestValue, localValue, baseValue){
+  const localChanged=!same(localValue,baseValue);
+  if(!localChanged) return clone(latestValue);
+  const cloudChanged=!same(latestValue,baseValue);
+  if(!cloudChanged) return clone(localValue);
+  return compareEntityMeta(localValue,latestValue) >= 0 ? clone(localValue) : clone(latestValue);
+}
+
+function stampArrayChanges(localValue,baseValue,prefix,operationId,now){
+  const local=Array.isArray(localValue)?clone(localValue):[];
+  const base=Array.isArray(baseValue)?baseValue:[];
+  const baseMap=new Map(base.map((v,i)=>[itemId(v,i,prefix),v]));
+  return local.map((value,index)=>{
+    const id=itemId(value,index,prefix);
+    const baseItem=baseMap.get(id);
+    return !same(value,baseItem) ? stampEntity(value,baseItem,operationId,now) : value;
+  });
+}
+
+function stampLocalState(local,base,changed,operationId,now=Date.now()){
+  const next=clone(local || {});
+  for(const key of changed || []){
+    if(key === "tables" && Array.isArray(next.tables)){
+      const baseTables=Array.isArray(base?.tables)?base.tables:[];
+      next.tables=next.tables.map((table,index)=>!same(table,baseTables[index]) ? stampEntity(table,baseTables[index],operationId,now) : table);
+    }else if(key === "bookings"){
+      next.bookings=stampArrayChanges(next.bookings,base?.bookings,"booking",operationId,now);
+    }else if(key === "groups"){
+      next.groups=stampArrayChanges(next.groups,base?.groups,"group",operationId,now);
+    }else if(key === "customers" && next.customers && typeof next.customers === "object"){
+      const localCustomers=normalizeCustomersMap(next.customers);
+      const baseCustomers=normalizeCustomersMap(base?.customers);
+      for(const [id,value] of Object.entries(localCustomers)){
+        if(!same(value,baseCustomers[id])) localCustomers[id]=stampEntity(value,baseCustomers[id],operationId,now);
+      }
+      next.customers=localCustomers;
+    }
+  }
+  return next;
+}
+
+function stateRevision(value){
+  const n = Number(value?._sync?.revision || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function stateUpdatedAt(value){
+  const n = Number(value?._sync?.updatedAt || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function hasRunningTable(value){
+  return Array.isArray(value?.tables) && value.tables.some(table=>Boolean(table?.start));
+}
+
+/*
+ * Firestore 持久化缓存有时会在事务成功后再次发出旧快照。
+ * revision 必须单调递增；同 revision 下也不能用缺少运行桌位的旧快照
+ * 覆盖本机已经确认的运行状态。
+ */
+function isStateOlder(candidate, reference){
+  if(!candidate || !reference) return false;
+  const candidateRevision = stateRevision(candidate);
+  const referenceRevision = stateRevision(reference);
+  if(candidateRevision !== referenceRevision){
+    return candidateRevision < referenceRevision;
+  }
+  const candidateUpdatedAt = stateUpdatedAt(candidate);
+  const referenceUpdatedAt = stateUpdatedAt(reference);
+  if(candidateUpdatedAt && referenceUpdatedAt && candidateUpdatedAt !== referenceUpdatedAt){
+    return candidateUpdatedAt < referenceUpdatedAt;
+  }
+  if(hasRunningTable(reference) && !hasRunningTable(candidate)) return true;
+  return false;
+}
 function withTimeout(promise, ms=8000, label="本地数据库操作"){
   return Promise.race([
     promise,
@@ -60,6 +168,23 @@ const stateChannel =
   typeof BroadcastChannel !== "undefined"
     ? new BroadcastChannel("chiptune-state-sync-v1")
     : null;
+
+const recordChannel =
+  typeof BroadcastChannel !== "undefined"
+    ? new BroadcastChannel("chiptune-record-sync-v1")
+    : null;
+
+function broadcastRecord(record, action = "record_update"){
+  if(!record?.id) return;
+  const detail = {record:clone(record),action,sentAt:Date.now(),deviceId:getDeviceId()};
+  window.dispatchEvent(new CustomEvent("chiptune-record-broadcast",{detail}));
+  try{ recordChannel?.postMessage(detail); }catch(error){ console.warn("跨页面账单广播失败",error); }
+}
+
+recordChannel?.addEventListener("message",event=>{
+  if(!event.data?.record?.id) return;
+  window.dispatchEvent(new CustomEvent("chiptune-record-broadcast",{detail:event.data}));
+});
 
 function broadcastState(state, action = "state_update"){
   const detail = {
@@ -120,11 +245,16 @@ function role(){
 function openLocalDb(){
   return new Promise((resolve,reject)=>{
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = ()=>{
+    req.onupgradeneeded = event=>{
       const db = req.result;
       if(!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
       if(!db.objectStoreNames.contains("queue")) db.createObjectStore("queue", {keyPath:"id"});
       if(!db.objectStoreNames.contains("recordQueue")) db.createObjectStore("recordQueue", {keyPath:"id"});
+      // v3 不再执行旧版整状态快照队列。上线前必须先在旧版本完成同步。
+      if(Number(event.oldVersion||0) > 0 && Number(event.oldVersion||0) < 3){
+        try{ event.target.transaction.objectStore("queue").clear(); }catch(_){}
+        try{ event.target.transaction.objectStore("recordQueue").clear(); }catch(_){}
+      }
     };
     req.onsuccess = ()=>resolve(req.result);
     req.onerror = ()=>reject(req.error);
@@ -265,7 +395,20 @@ export async function loadLocalState(){
 async function writeLocalState(state, cloudBaseline=baseline){
   const box = {state:clone(state),cloudBaseline:clone(cloudBaseline),savedAt:Date.now(),deviceId:getDeviceId()};
   writeShadow(STATE_SHADOW,box);
-  await idbPut("kv",box,STATE_KEY);
+  let lastError = null;
+  for(let attempt=1; attempt<=3; attempt++){
+    try{
+      await idbPut("kv",box,STATE_KEY);
+      return;
+    }catch(error){
+      lastError = error;
+      console.warn(`IndexedDB状态保存失败，第 ${attempt} 次`,error);
+      if(attempt < 3) await new Promise(resolve=>setTimeout(resolve,150 * attempt));
+    }
+  }
+  // localStorage shadow 已经成功写入，因此不丢失当前状态；让调用方继续排队上传云端。
+  console.warn("IndexedDB连续失败，已降级使用localStorage应急副本",lastError);
+  setSyncStatus("pending","● IndexedDB暂不可用 · 已保存应急副本并继续同步");
 }
 
 export async function loadLocalRecords(){
@@ -514,6 +657,16 @@ export async function reconcileCloudState(cloud){
    * 没有本机待上传修改时，云端就是最终状态。
    */
   if(!pendingItem){
+    /*
+     * 没有待上传项目时也不能盲信快照：Firestore 本地持久化缓存
+     * 可能在原子开始成功后重新发出更旧的 shop/main。
+     */
+    const reference = local || baseline;
+    if(reference && isStateOlder(cloud,reference)){
+      await writeLocalState(reference,baseline || reference);
+      return clone(reference);
+    }
+
     baseline = clone(cloud);
 
     await writeLocalState(
@@ -572,9 +725,25 @@ export async function reconcileCloudState(cloud){
 
       localValue.forEach((table,index)=>{
         const baseTable = baseTables[index];
+        const cloudTable = cloudTables[index];
 
         if(!same(table,baseTable)){
-          cloudTables[index] = clone(table);
+          /*
+           * 防止旧页面快照把其他页面刚开始的桌位覆盖回未开始。
+           *
+           * cloud 已经运行，而 local 和 base 都未运行，说明本机这次操作
+           * 并没有显式结束该桌，只是携带了开始前的旧快照，必须保留云端。
+           * 真正结账/强制结束时 base 原本是运行状态，因此仍可正常清空。
+           */
+          const staleStopOverwrite = Boolean(
+            cloudTable?.start &&
+            !table?.start &&
+            !baseTable?.start
+          );
+
+          if(!staleStopOverwrite){
+            cloudTables[index] = chooseEntity(cloudTable,table,baseTable);
+          }
         }
       });
 
@@ -637,6 +806,9 @@ if(key === "customers"){
 }
 
 export function setStateBaseline(nextState){
+  if(!nextState) return;
+  // 绝不允许缓存或延迟到达的旧快照降低云端基线版本。
+  if(baseline && isStateOlder(nextState,baseline)) return;
   baseline = clone(nextState);
   const shadow = readShadow(STATE_SHADOW);
   if(shadow?.state) writeLocalState(shadow.state,nextState).catch(()=>{});
@@ -663,10 +835,12 @@ function mergeArrayChanges(latestValue, localValue, baseValue, prefix){
     if(!localMap.has(id)) latestMap.delete(id);
   }
 
-  // 只写入本机相对基线新增或修改的项目，保留其他设备新增的项目。
+  // 同一实体并发修改时使用版本号 + 客户端时间戳决定胜者。
+  // Firestore Transaction 会在文档版本变化时自动重试；这里负责重试后的业务实体级合并。
   for(const [id,value] of localMap){
-    if(!baseMap.has(id) || !same(value,baseMap.get(id))){
-      latestMap.set(id,clone(value));
+    const baseItem=baseMap.get(id);
+    if(!baseMap.has(id) || !same(value,baseItem)){
+      latestMap.set(id,chooseEntity(latestMap.get(id),value,baseItem));
     }
   }
 
@@ -753,14 +927,14 @@ function mergeCustomerChanges(
       !(key in base) ||
       !same(customer,base[key])
     ){
-      latest[key] = clone(customer);
+      latest[key] = chooseEntity(latest[key],customer,base[key]);
     }
   }
 
   return latest;
 }
 
-function mergeState(latest, local, base, keys){
+function mergeState(latest, local, base, keys, action=""){
   const merged = clone(latest || {});
   const changed = keys?.length ? keys : changedKeys(local,base);
   for(const key of changed){
@@ -770,7 +944,28 @@ function mergeState(latest, local, base, keys){
       const latestTables = Array.isArray(merged.tables) ? clone(merged.tables) : [];
       const baseTables = Array.isArray(baseValue) ? baseValue : [];
       localValue.forEach((table,index)=>{
-        if(!same(table,baseTables[index])) latestTables[index] = clone(table);
+        const baseTable = baseTables[index];
+        const latestTable = latestTables[index];
+
+        if(!same(table,baseTable)){
+          const explicitStopActions = new Set([
+            "checkout_complete",
+            "emergency_force_end_table",
+            "force_end_table",
+            "checkout_table",
+            "batch_checkout",
+            "clear_finished_table"
+          ]);
+          const staleStopOverwrite = Boolean(
+            latestTable?.start &&
+            !table?.start &&
+            !explicitStopActions.has(String(action || ""))
+          );
+
+          if(!staleStopOverwrite){
+            latestTables[index] = chooseEntity(latestTable,table,baseTable);
+          }
+        }
       });
       merged.tables = latestTables;
     }else if(key === "bookings"){
@@ -791,86 +986,340 @@ function mergeState(latest, local, base, keys){
   return {merged,changed};
 }
 
-async function enqueue(local,base,action){
-  const changed = changedKeys(local,base);
-  const item = {id:`${getDeviceId()}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,state:clone(local),base:clone(base),changed,action,createdAt:Date.now(),deviceId:getDeviceId()};
 
-  // 桌位状态使用“最新快照队列”，而不是累积几十个旧快照。
-  // 旧快照在弱网恢复后依次重放，会把刚刚开始的桌位重新覆盖成未开始。
-  // 当前 state 已包含本机此前所有尚未同步的修改，所以只保留最新一项即可。
-  await idbClear("queue");
-  await idbPut("queue",item);
-  return item;
+
+// ===== v4 top-level entity operation sync =====
+const OP_COLLECTION = "operationLogs";
+const CONFLICT_COLLECTION = "syncConflicts";
+
+function operationRef(db, operationId){ return doc(db,OP_COLLECTION,String(operationId)); }
+function entityRef(db,type,id){
+  const collectionName=entityCollectionName(type);
+  if(!collectionName) throw new Error(`未知实体类型：${type}`);
+  return doc(db,collectionName,String(id));
+}
+function recordRefV4(db,recordId){ return doc(db,"records",String(recordId)); }
+function paymentRefV4(db,recordId,paymentId){ return doc(db,"records",String(recordId),"payments",String(paymentId)); }
+function entityCollectionName(type){
+  return ({table:"tables",booking:"bookings",group:"groups",customer:"customers",record:"records"})[type] || null;
+}
+function entityDocId(type,id,index){
+  if(type === "table") return `table_${String(Number(index)+1).padStart(2,"0")}`;
+  return String(id || "");
+}
+function shallowPatch(next,base){
+  const patch={};
+  const keys=new Set([...Object.keys(base||{}),...Object.keys(next||{})]);
+  for(const key of keys){
+    if(key === ENTITY_SYNC_KEY || key === "_recordSync") continue;
+    if(!same(next?.[key],base?.[key])) patch[key]=clone(next?.[key]);
+  }
+  return patch;
+}
+function arrayMapById(list,prefix){
+  const map=new Map();
+  (Array.isArray(list)?list:[]).forEach((v,i)=>map.set(itemId(v,i,prefix),v));
+  return map;
+}
+async function pendingForEntity(type,id){
+  const items=await idbAll("queue").catch(()=>[]);
+  return items.filter(x=>(x.syncV4 || x.syncV3) && x.entityType===type && String(x.entityId)===String(id)).sort((a,b)=>a.createdAt-b.createdAt);
+}
+async function makeEntityOperation({type,id,index,next,base,action,deleted=false}){
+  const pending=await pendingForEntity(type,id);
+  const previous=pending.length ? pending[pending.length-1] : null;
+  const effectiveBase=previous?.nextEntity || base || null;
+  const baseVersion=previous ? Number(previous.expectedVersion||0)+1 : Number(entityMeta(base).version||0);
+  const operationId=crypto.randomUUID ? crypto.randomUUID() : `${getDeviceId()}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return {
+    id:operationId,
+    syncV4:true,
+    entityType:type,
+    entityId:entityDocId(type,id,index),
+    logicalId:String(id ?? index ?? ""),
+    tableIndex:type==="table"?Number(index):null,
+    action,
+    command:deleted?"TOMBSTONE":"PATCH",
+    expectedVersion:baseVersion,
+    baseEntity:clone(effectiveBase),
+    nextEntity:deleted?null:clone(next),
+    patch:deleted?{}:shallowPatch(next,effectiveBase),
+    deleted:Boolean(deleted),
+    createdAt:Date.now(),
+    deviceId:getDeviceId(),
+    retryCount:0
+  };
+}
+async function enqueueEntityOperations(local,base,action){
+  const ops=[];
+  const changed=changedKeys(local,base);
+  if(changed.includes("tables")){
+    const max=Math.max(local?.tables?.length||0,base?.tables?.length||0);
+    for(let i=0;i<max;i++) if(!same(local?.tables?.[i],base?.tables?.[i])){
+      ops.push(await makeEntityOperation({type:"table",id:i,index:i,next:local?.tables?.[i]||{},base:base?.tables?.[i]||{},action}));
+    }
+  }
+  for(const [key,type,prefix] of [["bookings","booking","booking"],["groups","group","group"]]){
+    if(!changed.includes(key)) continue;
+    const lm=arrayMapById(local?.[key],prefix), bm=arrayMapById(base?.[key],prefix);
+    const ids=new Set([...lm.keys(),...bm.keys()]);
+    for(const id of ids){
+      const lv=lm.get(id), bv=bm.get(id);
+      if(same(lv,bv)) continue;
+      ops.push(await makeEntityOperation({type,id,next:lv,base:bv,action,deleted:!lv}));
+    }
+  }
+  if(changed.includes("customers")){
+    const lm=normalizeCustomersMap(local?.customers), bm=normalizeCustomersMap(base?.customers);
+    const ids=new Set([...Object.keys(lm),...Object.keys(bm)]);
+    for(const id of ids){
+      if(same(lm[id],bm[id])) continue;
+      ops.push(await makeEntityOperation({type:"customer",id,next:lm[id],base:bm[id],action,deleted:!lm[id]}));
+    }
+  }
+  const entityKeys=new Set(["tables","bookings","groups","customers"]);
+  const metaPatch={};
+  for(const key of changed){ if(!entityKeys.has(key)) metaPatch[key]=clone(local?.[key]); }
+  if(Object.keys(metaPatch).length){
+    const operationId=crypto.randomUUID ? crypto.randomUUID() : `${getDeviceId()}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    ops.push({id:operationId,syncV4:true,entityType:"shopMeta",entityId:"main",action,command:"PATCH",patch:metaPatch,baseEntity:{},nextEntity:metaPatch,expectedVersion:stateRevision(base),createdAt:Date.now(),deviceId:getDeviceId(),retryCount:0});
+  }
+  for(const op of ops) await idbPut("queue",op);
+  return ops;
+}
+function hasPatchConflict(remote,base,patch){
+  for(const key of Object.keys(patch||{})){
+    if(!same(remote?.[key],base?.[key])) return key;
+  }
+  return null;
+}
+function materializeEntityIntoMain(main,item,nextEntity){
+  const out=clone(main||{});
+  if(item.entityType==="table"){
+    const arr=Array.isArray(out.tables)?clone(out.tables):[];
+    arr[item.tableIndex]=clone(nextEntity||{}); out.tables=arr;
+  }else if(item.entityType==="booking" || item.entityType==="group"){
+    const key=item.entityType==="booking"?"bookings":"groups";
+    const prefix=item.entityType;
+    const arr=Array.isArray(out[key])?clone(out[key]):[];
+    const idx=arr.findIndex((v,i)=>itemId(v,i,prefix)===item.logicalId);
+    if(item.deleted){ if(idx>=0) arr.splice(idx,1); }
+    else if(idx>=0) arr[idx]=clone(nextEntity); else arr.push(clone(nextEntity));
+    out[key]=arr;
+  }else if(item.entityType==="customer"){
+    const map=normalizeCustomersMap(out.customers);
+    if(item.deleted) delete map[item.logicalId]; else map[item.logicalId]=clone(nextEntity);
+    out.customers=map;
+  }
+  out._sync={revision:Number(out?._sync?.revision||0)+1,updatedAt:Date.now(),deviceId:getDeviceId(),operationId:item.id,architecture:"entity-v4"};
+  return out;
+}
+async function flushEntityOperation({db,ref},item){
+  let materialized=null;
+  await runTransaction(db,async tx=>{
+    const opRef=operationRef(db,item.id);
+    const opSnap=await tx.get(opRef);
+    if(opSnap.exists()) return;
+    const mainSnap=await tx.get(ref);
+    const main=mainSnap.exists()?mainSnap.data():{};
+    if(item.entityType==="shopMeta"){
+      materialized={...clone(main),...clone(item.patch),_sync:{revision:Number(main?._sync?.revision||0)+1,updatedAt:Date.now(),deviceId:getDeviceId(),operationId:item.id,architecture:"entity-v4"}};
+      tx.set(ref,materialized);
+      tx.set(opRef,{...item,status:"committed",committedAt:serverTimestamp()});
+      return;
+    }
+    const collectionName=entityCollectionName(item.entityType);
+    const targetRef=entityRef(db,item.entityType,item.entityId);
+    const targetSnap=await tx.get(targetRef);
+    const remote=targetSnap.exists()?targetSnap.data():{};
+    const remoteVersion=Number(remote.version||remote?._entitySync?.version||0);
+    if(remote.lastOperationId===item.id){ return; }
+    if(remoteVersion!==Number(item.expectedVersion||0)){
+      const conflict=hasPatchConflict(remote,item.baseEntity,item.patch);
+      if(conflict){
+        const err=new Error(`同步冲突：${item.entityType}/${item.entityId} 的 ${conflict} 已被其他设备修改`);
+        err.code="sync-conflict"; err.conflictField=conflict; throw err;
+      }
+    }
+    const next=item.deleted
+      ? {...clone(remote),deleted:true,deletedAt:serverTimestamp(),deletedBy:item.deviceId}
+      : {...clone(remote),...clone(item.patch),deleted:false};
+    const version=remoteVersion+1;
+    const entityWrite={...next,version,updatedAt:serverTimestamp(),updatedBy:item.deviceId,lastOperationId:item.id,_entitySync:{version,deviceId:item.deviceId,operationId:item.id}};
+    tx.set(targetRef,entityWrite,{merge:false});
+    const viewEntity=item.deleted?null:{...clone(next),_entitySync:{version,updatedAt:Date.now(),deviceId:item.deviceId,operationId:item.id}};
+    materialized=materializeEntityIntoMain(main,item,viewEntity);
+    tx.set(ref,materialized);
+    tx.set(opRef,{operationId:item.id,entityType:item.entityType,entityId:item.entityId,action:item.action,deviceId:item.deviceId,expectedVersion:item.expectedVersion,committedVersion:version,status:"committed",committedAt:serverTimestamp()});
+  });
+  await idbDelete("queue",item.id);
+  if(materialized){
+    baseline=clone(materialized); await writeLocalState(materialized,materialized);
+    writeShadow(STATE_SHADOW,{state:clone(materialized),cloudBaseline:clone(materialized),savedAt:Date.now(),deviceId:getDeviceId()});
+    broadcastState(materialized,item.action||"entity_sync");
+  }
+}
+
+async function enqueue(local,base,action){
+  return enqueueEntityOperations(local,base,action);
 }
 
 async function flushOne({db,ref}, item){
-  let result;
-  await runTransaction(db,async tx=>{
-    const snap = await tx.get(ref);
-    const latest = snap.exists() ? snap.data() : {};
-    result = mergeState(latest,item.state,item.base,item.changed);
-    tx.set(ref,result.merged);
-  });
-  await idbDelete("queue",item.id);
-  baseline = clone(result.merged);
+  if(item?.syncV4 || item?.syncV3) return flushEntityOperation({db,ref},item);
+  throw new Error("检测到旧版整状态队列，请先执行迁移或清除旧待同步队列");
+}
 
-  // 上传成功后，本机也必须改成服务器最终合并后的状态。
-  // 不能继续保存上传前的旧 state，否则其他终端的修改会在本机重新出现并再次覆盖云端。
-  await writeLocalState(result.merged,result.merged);
-  writeShadow(STATE_SHADOW,{state:clone(result.merged),cloudBaseline:clone(result.merged),savedAt:Date.now(),deviceId:getDeviceId()});
-  window.dispatchEvent(new CustomEvent("chiptune-cloud-state-saved",{detail:{state:clone(result.merged)}}));
-  broadcastState(
-  result.merged,
-  item.action || "cloud_saved"
-);
-  try{
-    await addDoc(collection(db,"operationLogs"),{action:item.action,changed:item.changed,deviceId:item.deviceId,createdAt:serverTimestamp(),clientTime:item.createdAt});
-  }catch(err){ console.warn("操作日志写入失败",err); }
+
+function paymentStableId(payment,index,recordId){
+  return String(payment?.id || payment?.paymentId || `${recordId}_payment_${index}_${Number(payment?.createdAt||payment?.localCreatedAt||0)}`);
+}
+function normalizeRecordPayments(record){
+  const next=clone(record||{});
+  next.payments=(Array.isArray(next.payments)?next.payments:[]).map((p,i)=>({...clone(p),id:paymentStableId(p,i,next.id),paymentId:paymentStableId(p,i,next.id)}));
+  return next;
+}
+async function enqueueRecordOperations(next,previous){
+  const recordId=String(next.id);
+  const now=Date.now();
+  const deviceId=getDeviceId();
+  const prev=normalizeRecordPayments(previous||{id:recordId,payments:[]});
+  const normalized=normalizeRecordPayments(next);
+  const {payments:_nextPayments,...nextMeta}=normalized;
+  const {payments:_prevPayments,...prevMeta}=prev;
+  const recordPatch=shallowPatch(nextMeta,prevMeta);
+  const recordOpId=crypto.randomUUID?crypto.randomUUID():`record_${recordId}_${now}`;
+  await idbPut("recordQueue",{id:recordOpId,syncV4:true,type:"record_patch",recordId,patch:recordPatch,baseRecord:clone(prev),expectedVersion:Number(prev.version||prev?._recordSync?.version||0),createdAt:now,deviceId});
+  const pm=new Map(prev.payments.map(x=>[String(x.id),x]));
+  const nm=new Map(normalized.payments.map(x=>[String(x.id),x]));
+  for(const [id,payment] of nm){
+    const old=pm.get(id);
+    if(same(payment,old)) continue;
+    const opId=crypto.randomUUID?crypto.randomUUID():`payment_${id}_${Date.now()}`;
+    await idbPut("recordQueue",{id:opId,syncV4:true,type:"payment_upsert",recordId,paymentId:id,payment:clone(payment),basePayment:clone(old||{}),createdAt:Date.now(),deviceId});
+  }
+  for(const [id,old] of pm){
+    if(nm.has(id)) continue;
+    const opId=crypto.randomUUID?crypto.randomUUID():`payment_void_${id}_${Date.now()}`;
+    await idbPut("recordQueue",{id:opId,syncV4:true,type:"payment_void",recordId,paymentId:id,basePayment:clone(old),createdAt:Date.now(),deviceId});
+  }
+  return normalized;
+}
+async function flushRecordV3({db},item){
+  await runTransaction(db,async tx=>{
+    const opRef=operationRef(db,item.id);
+    const opSnap=await tx.get(opRef); if(opSnap.exists()) return;
+    const canonicalRef=recordRefV4(db,item.recordId);
+    const legacyRef=canonicalRef;
+    const canonicalSnap=await tx.get(canonicalRef);
+    const canonical=canonicalSnap.exists()?canonicalSnap.data():{};
+    const legacy=canonical;
+    let nextRecord={...clone(legacy),...clone(canonical)};
+    if(item.type==="record_delete"){
+      const version=Number(canonical.version||0)+1;
+      nextRecord={...nextRecord,deleted:true,deletedAt:serverTimestamp(),deletedBy:item.deviceId,version,updatedAt:serverTimestamp(),lastOperationId:item.id};
+      tx.set(canonicalRef,nextRecord,{merge:false});
+      tx.set(canonicalRef,{...nextRecord,payments:Array.isArray(legacy.payments)?legacy.payments:[]},{merge:false});
+    }else if(item.type==="record_patch"){
+      const remoteVersion=Number(canonical.version||0);
+      const conflict=remoteVersion!==Number(item.expectedVersion||0)?hasPatchConflict(nextRecord,item.baseRecord,item.patch):null;
+      if(conflict){ const err=new Error(`账单已在其他设备修改：${conflict}`); err.code="sync-conflict"; throw err; }
+      const version=remoteVersion+1;
+      nextRecord={...nextRecord,...clone(item.patch),deleted:false,version,updatedAt:serverTimestamp(),updatedBy:item.deviceId,lastOperationId:item.id};
+      tx.set(canonicalRef,nextRecord,{merge:false});
+      tx.set(canonicalRef,{...nextRecord,payments:Array.isArray(legacy.payments)?legacy.payments:[]},{merge:false});
+    }else{
+      const paymentRef=paymentRefV4(db,item.recordId,item.paymentId);
+      const paymentSnap=await tx.get(paymentRef);
+      const remotePayment=paymentSnap.exists()?paymentSnap.data():{};
+      let paymentWrite;
+      if(item.type==="payment_void") paymentWrite={...remotePayment,status:"void",voidedAt:serverTimestamp(),voidedBy:item.deviceId,lastOperationId:item.id};
+      else paymentWrite={...remotePayment,...clone(item.payment),status:item.payment?.status||"active",updatedAt:serverTimestamp(),updatedBy:item.deviceId,lastOperationId:item.id};
+      tx.set(paymentRef,paymentWrite,{merge:false});
+      const payments=Array.isArray(legacy.payments)?clone(legacy.payments):[];
+      const idx=payments.findIndex((p,i)=>paymentStableId(p,i,item.recordId)===String(item.paymentId));
+      const viewPayment={...clone(paymentWrite),updatedAt:Date.now()};
+      if(idx>=0) payments[idx]=viewPayment; else payments.push(viewPayment);
+      const version=Number(canonical.version||0)+1;
+      nextRecord={...nextRecord,payments,version,updatedAt:serverTimestamp(),updatedBy:item.deviceId,lastOperationId:item.id};
+      const {payments:_materializedPayments,...canonicalMeta}=nextRecord;
+      tx.set(canonicalRef,canonicalMeta,{merge:true});
+      tx.set(canonicalRef,{...nextRecord,payments},{merge:false});
+    }
+    tx.set(opRef,{operationId:item.id,type:item.type,recordId:item.recordId,paymentId:item.paymentId||null,deviceId:item.deviceId,status:"committed",committedAt:serverTimestamp()});
+  });
+  await idbDelete("recordQueue",item.id);
 }
 
 async function flushRecordOne({db}, item){
-  if(item.type === "delete"){
-    const recordId = String(item.recordId);
-    // 先写共享删除标记，再删除正式账单。其他设备即使保留旧缓存，也会收到删除标记。
-    await setDoc(doc(db,RECORD_DELETES_COLLECTION,recordId),{
-      recordId,
-      deletedAt:serverTimestamp(),
-      clientDeletedAt:Number(item.createdAt || Date.now()),
-      deviceId:item.deviceId || getDeviceId()
-    });
-    await deleteDoc(doc(db,"records",recordId));
-  }else{
-    await setDoc(doc(db,"records",String(item.record.id)), item.record);
-  }
-  await idbDelete("recordQueue",item.id);
+  if(item?.syncV4 || item?.syncV3) return flushRecordV3({db},item);
+  throw new Error("检测到旧版账单队列，请先执行迁移或清除旧待同步队列");
 }
 
 export async function flushPending({db,ref}){
   if(!navigator.onLine) return;
-  let items = (await idbAll("queue")).sort((a,b)=>a.createdAt-b.createdAt);
 
-  // 兼容旧版本已经积累的多个桌位快照：只上传最后一份，禁止旧快照依次重放。
-  if(items.length > 1){
-    const latestItem = items[items.length - 1];
-    await idbClear("queue");
-    await idbPut("queue",latestItem);
-    items = [latestItem];
-  }
+  const run = async()=>{
+    const items = (await idbAll("queue")).sort((a,b)=>a.createdAt-b.createdAt);
+    const recordItems = (await idbAll("recordQueue")).sort((a,b)=>a.createdAt-b.createdAt);
+    const total = items.length + recordItems.length;
+    if(!total){ setSyncStatus("synced"); return; }
 
-  const recordItems = (await idbAll("recordQueue")).sort((a,b)=>a.createdAt-b.createdAt);
-  const total = items.length + recordItems.length;
-  if(!total){ setSyncStatus("synced"); return; }
-  setSyncStatus("syncing",`● 本机已保存 · 正在上传 ${total} 项`);
-  for(const item of items){
-    if(!navigator.onLine) break;
-    await withTimeout(flushOne({db,ref},item),12000,"桌位状态同步");
+    setSyncStatus("syncing",`● 本机已保存 · 正在上传 ${total} 项`);
+
+    // 同一设备的计时器、预约页、账单页共用一个 IndexedDB 队列。
+    // 必须在跨标签页锁内按顺序上传，禁止多个页面同时重放或删除同一操作。
+    for(const item of items){
+      if(!navigator.onLine) break;
+      try{
+        await withTimeout(flushOne({db,ref},item),12000,"桌位状态同步");
+      }catch(error){
+        if(error?.code==="sync-conflict"){
+          await quarantineConflict(db,item,error,"queue");
+          console.warn("操作发生并发冲突，已隔离等待人工确认",item,error);
+          continue;
+        }
+        throw error;
+      }
+    }
+    for(const item of recordItems){
+      if(!navigator.onLine) break;
+      try{
+        await withTimeout(flushRecordOne({db},item),12000,"收银记录同步");
+      }catch(error){
+        if(error?.code==="sync-conflict"){
+          await quarantineConflict(db,item,error,"recordQueue");
+          console.warn("账单操作发生并发冲突，已隔离等待人工确认",item,error);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    const left = (await idbAll("queue")).length + (await idbAll("recordQueue")).length;
+    setSyncStatus(left ? "pending" : "synced", left ? `● 已保存本机 · ${left} 项等待上传` : undefined);
+  };
+
+  if(navigator.locks?.request){
+    return navigator.locks.request("chiptune-cloud-flush-v4",run);
   }
-  for(const item of recordItems){
-    if(!navigator.onLine) break;
-    await withTimeout(flushRecordOne({db},item),12000,"收银记录同步");
-  }
-  const left = (await idbAll("queue")).length + (await idbAll("recordQueue")).length;
-  setSyncStatus(left ? "pending" : "synced", left ? `● 已保存本机 · ${left} 项等待上传` : undefined);
+  return run();
+}
+
+async function quarantineConflict(db,item,error,storeName){
+  const payload={
+    operationId:String(item?.id||""),
+    entityType:item?.entityType||item?.type||"unknown",
+    entityId:item?.entityId||item?.recordId||null,
+    paymentId:item?.paymentId||null,
+    message:String(error?.message||error||"同步冲突"),
+    conflictField:error?.conflictField||null,
+    operation:stripImagesDeep(clone(item||{})),
+    deviceId:getDeviceId(),
+    status:"needs_review",
+    createdAt:serverTimestamp()
+  };
+  await setDoc(doc(db,CONFLICT_COLLECTION,String(item.id)),payload,{merge:true});
+  await idbDelete(storeName,String(item.id));
 }
 
 async function pendingCount(){
@@ -949,25 +1398,97 @@ export function saveStateSafely({
 }
 
 export async function saveRecordSafely({db,ref,record}){
-  const next = clone(record);
-  next.localUpdatedAt = Date.now();
-  const current = await loadLocalRecords();
-  const merged = mergeRecordLists(current,[next]);
+  const current=await loadLocalRecords();
+  const previous=current.find(r=>String(r.id)===String(record.id)) || {id:String(record.id),payments:[]};
+  const next=normalizeRecordPayments({...clone(record),localUpdatedAt:Date.now()});
+  const merged=mergeRecordLists(current,[next]);
   writeShadow(RECORDS_SHADOW,merged);
+  broadcastRecord(next,"save_record");
   await writeLocalRecords(merged);
-  await idbPut("recordQueue",{id:`record_${next.id}`,record:next,createdAt:Date.now()});
-  const count = await pendingCount();
-  setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? `● 已保存本机 · ${count} 项等待上传` : `● 已保存本机 · 离线 · ${count} 项待上传`);
-  if(navigator.onLine){
-    clearTimeout(flushTimer);
-    flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
-      console.warn("账单同步失败，将自动重试",err);
-      setSyncStatus("pending","● 账单已保存本机 · 云端同步失败，将重试");
-    }),150);
-  }
+  await enqueueRecordOperations(next,previous);
+  const count=await pendingCount();
+  setSyncStatus(navigator.onLine?"pending":"offline",navigator.onLine?`● 已保存本机 · ${count} 项等待上传`:`● 已保存本机 · 离线 · ${count} 项待上传`);
+  if(navigator.onLine){ clearTimeout(flushTimer); flushTimer=setTimeout(()=>flushPending({db,ref}).catch(err=>{ console.warn("账单同步失败，将自动重试",err); setSyncStatus("pending","● 账单已保存本机 · 云端同步失败，将重试"); }),0); }
   return next;
 }
 
+
+
+async function mirrorTableEntity(db,tableIndex,table,operationId){
+  const id=entityDocId("table",tableIndex,tableIndex);
+  const ref=doc(db,"tables",id);
+  await runTransaction(db,async tx=>{
+    const snap=await tx.get(ref); const remote=snap.exists()?snap.data():{};
+    const version=Number(remote.version||0)+1;
+    tx.set(ref,{...clone(table),id,tableIndex:Number(tableIndex),version,deleted:false,updatedAt:serverTimestamp(),updatedBy:getDeviceId(),lastOperationId:operationId,_entitySync:{version,deviceId:getDeviceId(),operationId}},{merge:false});
+  });
+}
+async function mirrorRecordEntity(db,record,operationId){
+  if(!record?.id) return;
+  const normalized=normalizeRecordPayments(record);
+  const {payments=[],...meta}=normalized;
+  await setDoc(doc(db,"records",String(record.id)),{...meta,deleted:false,updatedAt:serverTimestamp(),updatedBy:getDeviceId(),lastOperationId:operationId},{merge:true});
+  for(const payment of payments){
+    await setDoc(doc(db,"records",String(record.id),"payments",String(payment.id)),{...payment,status:payment.status||"active",updatedAt:serverTimestamp(),updatedBy:getDeviceId(),lastOperationId:operationId},{merge:true});
+  }
+}
+
+export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,timerStartAt,timerEndAt,excludeBookingId=null}){
+  if(!navigator.onLine){
+    throw new Error("当前离线，无法执行跨设备安全开始");
+  }
+  let result = null;
+  await runTransaction(db, async tx=>{
+    const snap = await tx.get(ref);
+    const latest = snap.exists() ? clone(snap.data()) : {};
+    const tables = Array.isArray(latest.tables) ? clone(latest.tables) : [];
+    const existing = tables[tableIndex] || {};
+
+    if(existing.start){
+      result = {startedByThisDevice:false,state:latest,table:clone(existing)};
+      return;
+    }
+
+    // 实际计时与预约排期完全分离。
+    // 开始桌位时不因后续预约而拒绝事务，也不修改任何预约起止时间；
+    // 预约重叠仅由计时器页面作为现场安排提示。
+
+    const nextTable = {...existing,...clone(tablePatch)};
+    tables[tableIndex] = nextTable;
+    latest.tables = tables;
+    latest._sync = {
+      revision:Number(latest?._sync?.revision || 0)+1,
+      updatedAt:Date.now(),
+      deviceId:getDeviceId(),
+      action:"atomic_start_table"
+    };
+
+    tx.set(ref,latest);
+    tx.set(doc(db,"records",String(record.id)),clone(record));
+    result = {startedByThisDevice:true,state:latest,table:clone(nextTable)};
+  });
+
+  if(result?.startedByThisDevice){
+    const opId=`atomic_start_${record?.id||tableIndex}_${Date.now()}`;
+    await mirrorTableEntity(db,tableIndex,result.table,opId);
+    await mirrorRecordEntity(db,record,opId);
+  }
+  if(result?.state){
+    baseline = clone(result.state);
+    await writeLocalState(result.state,result.state);
+    writeShadow(STATE_SHADOW,{state:clone(result.state),cloudBaseline:clone(result.state),savedAt:Date.now(),deviceId:getDeviceId()});
+    window.dispatchEvent(new CustomEvent("chiptune-cloud-state-saved",{detail:{state:clone(result.state)}}));
+    broadcastState(result.state,"atomic_start_table");
+  }
+  if(result?.startedByThisDevice && record){
+    const localRecords = await loadLocalRecords().catch(()=>[]);
+    const mergedRecords = mergeRecordLists(localRecords,[record]);
+    writeShadow(RECORDS_SHADOW,mergedRecords);
+    broadcastRecord(record,"atomic_start_record");
+    await writeLocalRecords(mergedRecords);
+  }
+  return result;
+}
 
 export async function deleteRecordSafely({db,ref,recordId}){
   const id = String(recordId || "");
@@ -986,7 +1507,7 @@ export async function deleteRecordSafely({db,ref,recordId}){
     const current = await loadLocalRecords();
     const next = current.filter(r=>String(r.id)!==id);
     await writeLocalRecords(next);
-    await idbPut("recordQueue",{id:`delete_record_${id}`,type:"delete",recordId:id,createdAt:Date.now(),deviceId:getDeviceId()});
+    await idbPut("recordQueue",{id:(crypto.randomUUID?crypto.randomUUID():`delete_record_${id}_${Date.now()}`),syncV4:true,type:"record_delete",recordId:id,createdAt:Date.now(),deviceId:getDeviceId()});
   }catch(err){
     console.warn("账单本地删除队列写入失败，已保留删除标记",err);
   }
@@ -1021,18 +1542,20 @@ export function emergencySaveRecord({db,ref,record}){
   const merged = mergeRecordLists(Array.isArray(current) ? current : [], [next]);
   // localStorage is synchronous: once this returns, the emergency bill has a durable local shadow.
   writeShadow(RECORDS_SHADOW, merged);
+  broadcastRecord(next,"emergency_save_record");
 
   // IndexedDB and cloud queue run in background and must never block the UI.
   Promise.resolve().then(async()=>{
     try{
       await writeLocalRecords(merged);
-      await idbPut("recordQueue",{id:`record_${next.id}`,record:next,createdAt:Date.now()});
+      const previous=(await loadLocalRecords().catch(()=>[])).find(r=>String(r.id)===String(next.id)) || {id:String(next.id),payments:[]};
+      await enqueueRecordOperations(next,previous);
       if(navigator.onLine){
         clearTimeout(flushTimer);
         flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
           console.warn("紧急账单云端同步失败，将自动重试",err);
           setSyncStatus("pending","● 账单已保存本机 · 云端同步失败，将重试");
-        }),150);
+        }),0);
       }
     }catch(err){
       console.warn("紧急账单 IndexedDB 保存失败，已保留 localStorage 备份",err);
@@ -1061,7 +1584,7 @@ export function emergencySaveState({db,ref,state,action="emergency_state_update"
         flushTimer = setTimeout(()=>flushPending({db,ref}).catch(err=>{
           console.warn("紧急状态云端同步失败，将自动重试",err);
           setSyncStatus("pending","● 已保存本机 · 云端同步失败，将重试");
-        }),150);
+        }),0);
       }
     }catch(err){
       console.warn("紧急状态 IndexedDB 保存失败，已保留 localStorage 备份",err);
@@ -1069,6 +1592,108 @@ export function emergencySaveState({db,ref,state,action="emergency_state_update"
     }
   });
   return local;
+}
+
+
+export async function atomicBatchStartTables({db,ref,entries,group=null}){
+  if(!navigator.onLine) throw new Error("当前离线，无法执行跨设备安全批量开始");
+  const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  if(!list.length) throw new Error("没有可开始的桌位");
+
+  let result = null;
+  await runTransaction(db, async tx=>{
+    const snap = await tx.get(ref);
+    const latest = snap.exists() ? clone(snap.data()) : {};
+    const tables = Array.isArray(latest.tables) ? clone(latest.tables) : [];
+
+    for(const entry of list){
+      const tableIndex = Number(entry.tableIndex);
+      const existing = tables[tableIndex] || {};
+      if(existing.start){
+        const err = new Error(`${existing.name || `${tableIndex+1}号桌`}已经开始，批量开始已取消。`);
+        err.code = "table-already-started";
+        throw err;
+      }
+    }
+    for(const entry of list){
+      const tableIndex = Number(entry.tableIndex);
+      tables[tableIndex] = {...(tables[tableIndex] || {}),...clone(entry.tablePatch)};
+    }
+    latest.tables = tables;
+    if(group){
+      const groups = Array.isArray(latest.groups) ? clone(latest.groups) : [];
+      const idx = groups.findIndex(g=>String(g?.id) === String(group.id));
+      if(idx >= 0) groups[idx] = {...groups[idx],...clone(group)};
+      else groups.push(clone(group));
+      latest.groups = groups;
+    }
+    latest._sync = {revision:Number(latest?._sync?.revision || 0)+1,updatedAt:Date.now(),deviceId:getDeviceId(),action:"atomic_batch_start_tables"};
+    tx.set(ref,latest);
+    for(const entry of list){
+      if(entry.record?.id) tx.set(doc(db,"records",String(entry.record.id)),clone(entry.record));
+    }
+    result = {state:latest,startedIndexes:list.map(x=>Number(x.tableIndex))};
+  });
+
+  if(result?.state){
+    const opId=`atomic_batch_${Date.now()}`;
+    for(const entry of list){ await mirrorTableEntity(db,Number(entry.tableIndex),result.state.tables?.[Number(entry.tableIndex)]||entry.tablePatch,`${opId}_${entry.tableIndex}`); await mirrorRecordEntity(db,entry.record,`${opId}_${entry.tableIndex}`); }
+    baseline = clone(result.state);
+    await writeLocalState(result.state,result.state);
+    writeShadow(STATE_SHADOW,{state:clone(result.state),cloudBaseline:clone(result.state),savedAt:Date.now(),deviceId:getDeviceId()});
+    broadcastState(result.state,"atomic_batch_start_tables");
+  }
+  if(result){
+    const records = list.map(x=>x.record).filter(Boolean);
+    const localRecords = await loadLocalRecords().catch(()=>[]);
+    const mergedRecords = mergeRecordLists(localRecords,records);
+    writeShadow(RECORDS_SHADOW,mergedRecords);
+    await writeLocalRecords(mergedRecords);
+  }
+  return result;
+}
+
+
+export async function atomicAdjustStartTime({db,ref,tableIndex,tablePatch,recordId,recordPatch}){
+  if(!navigator.onLine) throw new Error("当前离线，无法安全修改开始时间");
+  let result = null;
+  await runTransaction(db, async tx=>{
+    const snap = await tx.get(ref);
+    if(!snap.exists()) throw new Error("云端桌位数据不存在");
+    const latest = clone(snap.data());
+    const tables = Array.isArray(latest.tables) ? clone(latest.tables) : [];
+    const index = Number(tableIndex);
+    const existing = tables[index];
+    if(!existing?.start) throw new Error("该桌当前未开始，无法修改开始时间");
+    if(recordId && existing.recordId && String(existing.recordId) !== String(recordId)){
+      throw new Error("账单已被其他设备更新，请刷新后重试");
+    }
+    tables[index] = {...existing,...clone(tablePatch)};
+    latest.tables = tables;
+    latest._sync = {revision:Number(latest?._sync?.revision || 0)+1,updatedAt:Date.now(),deviceId:getDeviceId(),action:"atomic_adjust_start_time"};
+    tx.set(ref,latest);
+    if(recordId){
+      tx.set(doc(db,"records",String(recordId)),clone(recordPatch || {}),{merge:true});
+    }
+    result = {state:latest};
+  });
+  if(result?.state){
+    const opId=`adjust_start_${recordId||tableIndex}_${Date.now()}`;
+    await mirrorTableEntity(db,Number(tableIndex),result.state.tables?.[Number(tableIndex)]||tablePatch,opId);
+    if(recordId){ const legacy=await getDoc(doc(db,"records",String(recordId))); await mirrorRecordEntity(db,legacy.exists()?legacy.data():{id:String(recordId),...(recordPatch||{})},opId); }
+    baseline = clone(result.state);
+    await writeLocalState(result.state,result.state);
+    writeShadow(STATE_SHADOW,{state:clone(result.state),cloudBaseline:clone(result.state),savedAt:Date.now(),deviceId:getDeviceId()});
+    broadcastState(result.state,"atomic_adjust_start_time");
+  }
+  if(recordId && recordPatch){
+    const localRecords = await loadLocalRecords().catch(()=>[]);
+    const old = localRecords.find(r=>String(r.id)===String(recordId)) || {id:String(recordId)};
+    const mergedRecords = mergeRecordLists(localRecords,[{...old,...clone(recordPatch),id:String(recordId)}]);
+    writeShadow(RECORDS_SHADOW,mergedRecords);
+    await writeLocalRecords(mergedRecords);
+  }
+  return result;
 }
 
 export async function atomicAdjustTableExtra({db,ref,tableIndex,deltaMs,action,getState}){
@@ -1115,6 +1740,20 @@ export function subscribeAllRecords({
   let incrementalUnsubscribe = null;
   let deleteUnsubscribe = null;
   let sharedDeletedIds = new Set();
+
+  // 同一台设备的计时器写入账单后，首页/今日账单/老板模式立即接收，
+  // 不等待 Firestore 再回传一次。
+  const recordBroadcastHandler = event=>{
+    const record = event?.detail?.record;
+    if(stopped || !record?.id || sharedDeletedIds.has(String(record.id))) return;
+    cloudRecords = mergeRecordLists(cloudRecords,[record]);
+    loadLocalRecords().then(local=>{
+      if(!stopped) onChange?.(mergeRecordLists(cloudRecords,local));
+    }).catch(()=>{
+      if(!stopped) onChange?.(mergeRecordLists(cloudRecords,[record]));
+    });
+  };
+  window.addEventListener("chiptune-record-broadcast",recordBroadcastHandler);
 
   const readMeta = ()=>{
     try{
@@ -1425,5 +2064,6 @@ export function subscribeAllRecords({
     incrementalUnsubscribe?.();
     deleteUnsubscribe?.();
     window.removeEventListener("online",onlineHandler);
+    window.removeEventListener("chiptune-record-broadcast",recordBroadcastHandler);
   };
 }

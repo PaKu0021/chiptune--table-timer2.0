@@ -1,6 +1,8 @@
-import { db } from "./firebase.js?v=2.6.5";
+import { db } from "./firebase.js?v=4.0.0";
+import { RMB_PER_JPY } from "./business-day.js?v=4.0.0";
 
-import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=2.6.5";
+import { loadLocalRecords, mergeRecordLists, saveRecordSafely, installConnectionGuard, flushPending, subscribeAllRecords } from "./safe-state.js?v=4.0.0";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=4.0.0";
 
 
 import {
@@ -32,7 +34,8 @@ async function uploadReceipt(recordId,file){
   record.receiptUploadedAt = Date.now();
   record.receiptUploadedTime = new Date().toLocaleString();
 
-  await saveRecordSafely({db,ref,record});
+  const linked = record.groupId ? records.filter(x=>String(x.groupId||"")===String(record.groupId)) : [record];
+  for(const item of linked){ item.receiptImage=base64; item.receiptFileName=record.receiptFileName; item.receiptUploadedAt=record.receiptUploadedAt; item.receiptUploadedTime=record.receiptUploadedTime; await saveRecordSafely({db,ref,record:item}); }
   records = mergeRecordLists(records,[record]);
   renderCashier();
   alert("截图已保存");
@@ -91,7 +94,12 @@ function closeReceiptPreview(){
     
 
 const ref = doc(db, "shop", "main");
-const RATE = 0.044;
+
+
+// 所有页面统一使用营业日模块解析账单时间，避免未定义函数及 Safari 日期格式差异。
+function getRecordTime(record){
+  return getRecordTimestamp(record);
+}
 
 let state = null;
 let records = [];
@@ -108,6 +116,7 @@ window.addEventListener("chiptune-online-change",e=>{
   }
 });
 let quickRange = "today";
+let timeSortDirection = "asc";
 let initialized = false; 
 
 function get90DaysAgo(){
@@ -118,27 +127,6 @@ function get90DaysAgo(){
 
   return d.getTime();
 }
-
-function dateKey(ts){
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function getTodayDate(){
-  return dateKey(Date.now());
-}
-
-function getRecordTime(r){
-  return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || 0;
-}
-
-function getRecordBusinessDate(r){
-  if(r.businessDate) return r.businessDate;
-
-  const d = new Date(r.startAt || r.timestamp || r.time || r.date || Date.now());
-  return dateKey(d.getTime());
-}
-
 
 function normalizePayments(r){
   if(Array.isArray(r.payments)) return r.payments;
@@ -174,7 +162,7 @@ function paymentRMB(p){
   if(p.amountRMB !== undefined){
     return Number(p.amountRMB || 0);
   }
-  return Math.floor(Number(p.amountJPY || 0) * RATE);
+  return Math.floor(Number(p.amountJPY || 0) * RMB_PER_JPY);
 }
 
 function sumPaymentsJPY(r){
@@ -235,13 +223,51 @@ function getPaySummary(r){
 }
 
 
+function buildCurrencySummary(rows){
+  const channels = {
+    "现金":{currency:"日元",amount:0},
+    "PayPay":{currency:"日元",amount:0},
+    "微信":{currency:"人民币",amount:0},
+    "支付宝":{currency:"人民币",amount:0},
+    "未记录":{currency:"日元",amount:0}
+  };
+  let actualJPY = 0;
+  let actualRMB = 0;
+  rows.forEach(r=>{
+    normalizePayments(r).forEach(p=>{
+      const pay = p.pay || r.pay || "未记录";
+      const rmb = isRmbPayment(p,r);
+      const amount = rmb ? paymentRMB(p) : paymentJPY(p);
+      if(!channels[pay]) channels[pay] = {currency:rmb ? "人民币" : "日元",amount:0};
+      channels[pay].currency = rmb ? "人民币" : "日元";
+      channels[pay].amount += amount;
+      if(rmb) actualRMB += amount; else actualJPY += amount;
+    });
+  });
+  const jpyToRmb = Math.floor(actualJPY * RMB_PER_JPY);
+  const rmbToJpy = Math.floor(actualRMB / RMB_PER_JPY);
+  return {
+    channels, actualJPY, actualRMB, jpyToRmb, rmbToJpy,
+    convertedJPY: actualJPY + rmbToJpy,
+    convertedRMB: actualRMB + jpyToRmb
+  };
+}
+
+function channelSummaryText(summary){
+  return Object.entries(summary.channels)
+    .filter(([,v])=>Number(v.amount)!==0)
+    .map(([name,v])=>`${name} ${v.currency === "人民币" ? "人民币 " : ""}¥${Math.floor(v.amount).toLocaleString()}`)
+    .join(" / ") || "暂无";
+}
+
+
 function toJPY(r){
   if(Array.isArray(r.payments)){
     return sumPaymentsJPY(r);
   }
 
   if(r.currency === "人民币"){
-    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RMB_PER_JPY);
   }
 
   return Number(r.totalJPY || r.jpy || 0);
@@ -249,14 +275,14 @@ function toJPY(r){
 
 function toRMB(r){
   if(Array.isArray(r.payments)){
-    return Math.floor(toJPY(r) * RATE);
+    return Math.floor(toJPY(r) * RMB_PER_JPY);
   }
 
   if(r.currency === "人民币"){
     return Number(r.totalRMB || r.rmb || 0);
   }
 
-  return Math.floor(toJPY(r) * RATE);
+  return Math.floor(toJPY(r) * RMB_PER_JPY);
 }
 
 function actualRMBIncome(r){
@@ -280,13 +306,13 @@ function displayCurrency(r){
 
 function setQuickRange(type){
   quickRange = type;
-  const now = new Date();
+  const now = businessDateToLocalDate(getCurrentBusinessDate()) || new Date();
   let start = "";
   let end = "";
 
   if(type === "today"){
-    start = getTodayDate();
-    end = getTodayDate();
+    start = getCurrentBusinessDate();
+    end = getCurrentBusinessDate();
   }
 
   if(type === "week"){
@@ -295,13 +321,13 @@ function setQuickRange(type){
     monday.setDate(now.getDate() - day + 1);
 
     start = dateKey(monday.getTime());
-    end = getTodayDate();
+    end = getCurrentBusinessDate();
   }
 
   if(type === "month"){
     const first = new Date(now.getFullYear(), now.getMonth(), 1);
     start = dateKey(first.getTime());
-    end = getTodayDate();
+    end = getCurrentBusinessDate();
   }
 
   if(type === "all"){
@@ -312,6 +338,20 @@ function setQuickRange(type){
   document.getElementById("startDate").value = start;
   document.getElementById("endDate").value = end;
 
+  renderCashier();
+}
+
+function updateCashierTimeSortHeader(){
+  const button = document.getElementById("cashierTimeSortButton");
+  if(!button) return;
+  const ascending = timeSortDirection === "asc";
+  button.innerHTML = `时间 <span aria-hidden="true">${ascending ? "▲" : "▼"}</span>`;
+  button.title = ascending ? "当前从早到晚，点击切换为从晚到早" : "当前从晚到早，点击切换为从早到晚";
+  button.setAttribute("aria-label", button.title);
+}
+
+function toggleCashierTimeSort(){
+  timeSortDirection = timeSortDirection === "asc" ? "desc" : "asc";
   renderCashier();
 }
 
@@ -336,16 +376,22 @@ function getFilteredRecords(){
 
     return true;
   }).sort((a,b)=>{
+    const directionFactor = timeSortDirection === "asc" ? 1 : -1;
     const da = getRecordBusinessDate(a);
     const db = getRecordBusinessDate(b);
 
-    if(da !== db) return da.localeCompare(db);
+    if(da !== db) return da.localeCompare(db) * directionFactor;
 
-    return getRecordTime(a) - getRecordTime(b);
+    const ta = getRecordTime(a);
+    const tb = getRecordTime(b);
+    if(ta && tb && ta !== tb) return (ta - tb) * directionFactor;
+    if(ta !== tb) return (ta ? -1 : 1) * directionFactor;
+    return String(a.tableName || "").localeCompare(String(b.tableName || ""), "zh-CN", {numeric:true}) * directionFactor;
   });
 }
 
 function renderCashier(){
+  updateCashierTimeSortHeader();
   const rows = getFilteredRecords();
 
   document.getElementById("cashierTitle").innerText =
@@ -405,53 +451,19 @@ function renderCashierButtons(){
 }
 
 function renderSummary(rows){
-  const pays = {
-    "现金":0,
-    "PayPay":0,
-    "微信":0,
-    "支付宝":0,
-    "未记录":0
-  };
-
-  let totalJPY = 0;
-  let totalRMB = 0;
-
-rows.forEach(r=>{
-  normalizePayments(r).forEach(p=>{
-    const pay = p.pay || "未记录";
-    const jpy = paymentJPY(p);
-
-    if(!pays[pay]) pays[pay] = 0;
-
-    pays[pay] += jpy;
-    totalJPY += jpy;
-
-    if(isRmbPayment(p,r)){
-      totalRMB += paymentRMB(p);
-    }
-  });
-});
-
+  const summary = buildCurrencySummary(rows);
   document.getElementById("cashierSummary").innerHTML = `
-    <table class="record-table">
-      <tbody>
-        ${Object.keys(pays).map(k=>`
-          <tr>
-            <td><b>${k}</b></td>
-            <td>¥${Math.floor(pays[k]).toLocaleString()}</td>
-          </tr>
-        `).join("")}
-        <tr>
-          <td><b>日元总计</b></td>
-          <td><b>¥${Math.floor(totalJPY).toLocaleString()}</b></td>
-        </tr>
-        <tr>
-          <td><b>人民币参考</b></td>
-          <td><b>¥${Math.floor(totalRMB).toLocaleString()}</b></td>
-        </tr>
-      </tbody>
-    </table>
-  `;
+    <table class="record-table"><tbody>
+      ${Object.entries(summary.channels).map(([name,v])=>`
+        <tr><td><b>${name}</b></td><td>${v.currency === "人民币" ? "人民币 " : ""}¥${Math.floor(v.amount).toLocaleString()}</td></tr>
+      `).join("")}
+      <tr><td><b>日元实收总计</b></td><td><b>¥${Math.floor(summary.actualJPY).toLocaleString()}</b></td></tr>
+      <tr><td><b>日元实收对应人民币参考</b></td><td><b>人民币 ¥${Math.floor(summary.jpyToRmb).toLocaleString()}</b></td></tr>
+      <tr><td><b>人民币实收总计</b></td><td><b>人民币 ¥${Math.floor(summary.actualRMB).toLocaleString()}</b></td></tr>
+      <tr><td><b>人民币实收对应日元参考</b></td><td><b>¥${Math.floor(summary.rmbToJpy).toLocaleString()}</b></td></tr>
+      <tr><td><b>换算日元总收入</b></td><td><b>¥${Math.floor(summary.convertedJPY).toLocaleString()}</b></td></tr>
+      <tr><td><b>换算人民币总收入</b></td><td><b>人民币 ¥${Math.floor(summary.convertedRMB).toLocaleString()}</b></td></tr>
+    </tbody></table>`;
 }
 
 function exportCashierCSV(){
@@ -478,39 +490,16 @@ function exportCashierCSV(){
     r.receiptImage ? "已上传" : "未上传"
   ]);
 
-  const pays = {
-    "现金":0,
-    "PayPay":0,
-    "微信":0,
-    "支付宝":0,
-    "未记录":0
-  };
-
-  let totalJPY = 0;
-  let totalRMB = 0;
-
-rows.forEach(r=>{
-  normalizePayments(r).forEach(p=>{
-    const pay = p.pay || "未记录";
-    const jpy = paymentJPY(p);
-
-    if(!pays[pay]) pays[pay] = 0;
-
-    pays[pay] += jpy;
-    totalJPY += jpy;
-
-    if(isRmbPayment(p,r)){
-      totalRMB += paymentRMB(p);
-    }
-  });
-});
+  const summary = buildCurrencySummary(rows);
   const summaryRows = [
-    [],
-    ["支付方式总计"],
-    ["支付方式","金额（日元）"],
-    ...Object.keys(pays).map(k=>[k, Math.floor(pays[k])]),
-    ["日元总计", Math.floor(totalJPY)],
-    ["人民币参考", Math.floor(totalRMB)]
+    [],["支付方式总计"],["支付方式","实际币种","实际金额"],
+    ...Object.entries(summary.channels).map(([name,v])=>[name,v.currency,Math.floor(v.amount)]),
+    ["日元实收总计","日元",Math.floor(summary.actualJPY)],
+    ["日元实收对应人民币参考","人民币",Math.floor(summary.jpyToRmb)],
+    ["人民币实收总计","人民币",Math.floor(summary.actualRMB)],
+    ["人民币实收对应日元参考","日元",Math.floor(summary.rmbToJpy)],
+    ["换算日元总收入","日元",Math.floor(summary.convertedJPY)],
+    ["换算人民币总收入","人民币",Math.floor(summary.convertedRMB)]
   ];
 
   const csv = [
@@ -628,6 +617,7 @@ alert(`已清理 ${count} 条90天前截图`);
 }
 
 
+window.toggleCashierTimeSort = toggleCashierTimeSort;
 window.applyDateFilter = applyDateFilter;
 window.setQuickRange = setQuickRange;
 window.renderCashier = renderCashier;

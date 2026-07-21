@@ -1,11 +1,18 @@
-import { db } from "./firebase.js?v=2.6.5";
+import { db } from "./firebase.js?v=4.0.0";
+import { RMB_PER_JPY } from "./business-day.js?v=4.0.0";
 
 import { doc, onSnapshot, collection, deleteDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.6.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, deleteRecordSafely, subscribeAllRecords } from "./safe-state.js?v=4.0.0";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp, businessDateToLocalDate } from "./business-day.js?v=4.0.0";
 
 const ref = doc(db,"shop","main");
 const recordsRef = collection(db,"records");
-const RATE = 0.044;
+
+
+// 所有页面统一使用营业日模块解析账单时间，避免未定义函数及 Safari 日期格式差异。
+function getRecordTime(record){
+  return getRecordTimestamp(record);
+}
 
 let state = null;
 installConnectionGuard();
@@ -55,7 +62,7 @@ onSnapshot(ref,{ includeMetadataChanges:true },async snap=>{
   if(!snap.exists()) return;
 
   state = await reconcileCloudState(snap.data());
-  if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
+  if(!snap.metadata.fromCache && !snap.metadata.hasPendingWrites) setStateBaseline(snap.data());
   if(snap.metadata.fromCache) setSyncStatus("cache");
 
   if(!state.packages) state.packages = [];
@@ -84,24 +91,8 @@ function save(action="owner_update"){
   return saveStateSafely({db, ref, getState:()=>state, action});
 }
 
-function dateKey(ts){
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function getRecordTime(r){
-  return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
-}
-
-function getRecordBusinessDate(r){
-  if(r.businessDate) return r.businessDate;
-
-  const d = new Date(r.startAt || r.timestamp || r.time || r.date || Date.now());
-  return dateKey(d.getTime());
-}
-
 function getFilteredRecords(){
-  const now = new Date();
+  const now = businessDateToLocalDate(getCurrentBusinessDate()) || new Date();
 
   return records.filter(r=>{
     const businessDate = getRecordBusinessDate(r);
@@ -111,12 +102,12 @@ function getFilteredRecords(){
     }
 
     if(currentFilter === "today"){
-      return businessDate === dateKey(Date.now());
+      return businessDate === getCurrentBusinessDate();
     }
 
-    const d = new Date(businessDate + "T00:00:00");
+    const d = businessDateToLocalDate(businessDate);
 
-    if(isNaN(d.getTime())) return false;
+    if(!d || isNaN(d.getTime())) return false;
 
     if(currentFilter === "week"){
       const day = now.getDay() || 7;
@@ -176,7 +167,7 @@ function paymentRMB(p){
   if(p.amountRMB !== undefined){
     return Number(p.amountRMB || 0);
   }
-  return Math.floor(Number(p.amountJPY || 0) * RATE);
+  return Math.floor(Number(p.amountJPY || 0) * RMB_PER_JPY);
 }
 
 
@@ -219,7 +210,7 @@ function toJPY(r){
   if(r.jpy !== undefined) return Number(r.jpy || 0);
 
   if(r.currency === "人民币"){
-    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+    return Math.floor(Number(r.totalRMB || r.rmb || 0) / RMB_PER_JPY);
   }
 
   return 0;
@@ -228,12 +219,12 @@ function toJPY(r){
 
 function toRMB(r){
   if(Array.isArray(r.payments)){
-    return Math.floor(toJPY(r) * RATE);
+    return Math.floor(toJPY(r) * RMB_PER_JPY);
   }
 
   if(r.totalRMB !== undefined) return Number(r.totalRMB || 0);
   if(r.rmb !== undefined) return Number(r.rmb || 0);
-  return Math.floor(toJPY(r) * RATE);
+  return Math.floor(toJPY(r) * RMB_PER_JPY);
 }
 
 function actualRMBIncome(r){
@@ -253,6 +244,54 @@ function displayCurrency(r){
   if(hasRmb && hasJpy) return "混合";
   if(hasRmb) return "人民币";
   return "日元";
+}
+
+function getPaySummary(r){
+  const pays = [...new Set(
+    normalizePayments(r)
+      .filter(p=>Number(p.amountJPY || 0) !== 0 || Number(p.amountRMB || 0) !== 0)
+      .map(p=>p.pay || r.pay || "未记录")
+  )];
+  if(pays.length === 0) return r.pay || "未记录";
+  if(pays.length === 1) return pays[0];
+  return "混合";
+}
+
+function buildCurrencySummary(rows){
+  const channels = {
+    "现金":{currency:"日元",amount:0},
+    "PayPay":{currency:"日元",amount:0},
+    "微信":{currency:"人民币",amount:0},
+    "支付宝":{currency:"人民币",amount:0},
+    "未记录":{currency:"日元",amount:0}
+  };
+  let actualJPY = 0;
+  let actualRMB = 0;
+  rows.forEach(r=>{
+    normalizePayments(r).forEach(p=>{
+      const pay = p.pay || r.pay || "未记录";
+      const rmb = isRmbPayment(p,r);
+      const amount = rmb ? paymentRMB(p) : paymentJPY(p);
+      if(!channels[pay]) channels[pay] = {currency:rmb ? "人民币" : "日元",amount:0};
+      channels[pay].currency = rmb ? "人民币" : "日元";
+      channels[pay].amount += amount;
+      if(rmb) actualRMB += amount; else actualJPY += amount;
+    });
+  });
+  const jpyToRmb = Math.floor(actualJPY * RMB_PER_JPY);
+  const rmbToJpy = Math.floor(actualRMB / RMB_PER_JPY);
+  return {
+    channels, actualJPY, actualRMB, jpyToRmb, rmbToJpy,
+    convertedJPY: actualJPY + rmbToJpy,
+    convertedRMB: actualRMB + jpyToRmb
+  };
+}
+
+function channelSummaryText(summary){
+  return Object.entries(summary.channels)
+    .filter(([,v])=>Number(v.amount)!==0)
+    .map(([name,v])=>`${name} ${v.currency === "人民币" ? "人民币 " : ""}¥${Math.floor(v.amount).toLocaleString()}`)
+    .join(" / ") || "暂无";
 }
 
 function getAmountByMode(r){
@@ -323,86 +362,89 @@ document.getElementById("c_converted")?.classList.toggle("active",currencyMode =
 
 function renderSummary(){
   const list = getFilteredRecords();
-
-  let jpyIncome = 0;
-  let rmbIncome = 0;
-  let convertedJPY = 0;
-
-  let payStats = {};
-  let typeStats = {walkin:0, booking:0};
-
-  list.forEach(r=>{
-
-normalizePayments(r).forEach(p=>{
-  const jpy = paymentJPY(p);
-
-  convertedJPY += jpy;
-
-  if(isRmbPayment(p, r)){
-    rmbIncome += paymentRMB(p);
-  }else{
-    jpyIncome += jpy;
-  }
-
-  const pay = p.pay || r.pay || "未记录";
-  payStats[pay] = (payStats[pay] || 0) + jpy;
-});
-  const type = r.customerType || r.type || "walkin";
-  typeStats[type] = (typeStats[type] || 0) + 1;
-});
-
+  const summary = buildCurrencySummary(list);
+  const typeStats = {walkin:0, booking:0};
+  list.forEach(r=>{ const type=r.customerType || r.type || "walkin"; typeStats[type]=(typeStats[type]||0)+1; });
   document.getElementById("summary").innerHTML =
-    `${filterName()}｜日元收入：¥${Math.floor(jpyIncome).toLocaleString()}｜人民币收入：¥${Math.floor(rmbIncome).toLocaleString()}｜换算总收入：¥${Math.floor(convertedJPY).toLocaleString()}｜笔数：${list.length}`;
-
+    `${filterName()}｜日元实收：¥${Math.floor(summary.actualJPY).toLocaleString()}｜日元→人民币参考：人民币 ¥${Math.floor(summary.jpyToRmb).toLocaleString()}｜人民币实收：人民币 ¥${Math.floor(summary.actualRMB).toLocaleString()}｜人民币→日元参考：¥${Math.floor(summary.rmbToJpy).toLocaleString()}｜换算日元总收入：¥${Math.floor(summary.convertedJPY).toLocaleString()}｜笔数：${list.length}`;
   document.getElementById("payStats").innerHTML =
-    `付款渠道：${Object.keys(payStats).map(k=>`${k} ¥${Math.floor(payStats[k]).toLocaleString()}`).join(" / ") || "暂无"}<br>
-     客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔`;
+    `付款渠道：${channelSummaryText(summary)}<br>客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔`;
 }
-
 
 function renderChart(){
   const canvas = document.getElementById("chart");
+  if(!canvas) return;
+
+  const panel = canvas.closest(".panel");
+  const availableWidth = Math.max(320, Math.floor((panel?.clientWidth || window.innerWidth) - 48));
+  const cssWidth = Math.min(availableWidth, 1500);
+  const cssHeight = Math.max(320, Math.min(440, Math.round(cssWidth * 0.34)));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.round(cssHeight * dpr);
+
   const ctx = canvas.getContext("2d");
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,cssWidth,cssHeight);
 
   const list = getFilteredRecords();
   const grouped = {};
 
   list.forEach(r=>{
     const key = getRecordBusinessDate(r);
-
-    const value =
-  currencyMode === "RMB"
-    ? actualRMBIncome(r)
-    : toJPY(r);    
+    const value = currencyMode === "RMB" ? actualRMBIncome(r) : toJPY(r);
     grouped[key] = (grouped[key] || 0) + value;
   });
 
   const labels = Object.keys(grouped).sort();
   const values = labels.map(k=>grouped[k]);
+  const unitText = currencyMode === "JPY"
+    ? "日元收入"
+    : currencyMode === "RMB"
+      ? "人民币收入"
+      : "换算日元总收入";
 
-  const padL = 70;
-  const padR = 25;
-  const padT = 35;
-  const padB = 55;
+  const padL = 78;
+  const padR = 36;
+  const padT = 76;
+  const padB = 58;
+  const w = cssWidth - padL - padR;
+  const h = cssHeight - padT - padB;
 
-  const w = canvas.width - padL - padR;
-  const h = canvas.height - padT - padB;
+  ctx.textBaseline = "alphabetic";
+  ctx.font = "600 15px -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.fillStyle = "#332d24";
+  ctx.fillText(`单位：${unitText}`,padL,28);
 
-  ctx.font = "14px -apple-system";
+  ctx.font = "13px -apple-system, BlinkMacSystemFont, sans-serif";
   ctx.fillStyle = "#8a8174";
+  ctx.fillText("按营业日统计",padL,50);
 
   if(!labels.length){
-    ctx.fillText("暂无数据",padL,60);
+    ctx.font = "15px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillStyle = "#8a8174";
+    ctx.textAlign = "center";
+    ctx.fillText("暂无收入数据",padL + w / 2,padT + h / 2);
+    ctx.textAlign = "left";
     return;
   }
 
   const maxValue = Math.max(...values,1);
-  const yMax = Math.ceil(maxValue / 1000) * 1000 || 1000;
-  const steps = 5;
+  const roughStep = maxValue / 5;
+  const magnitude = 10 ** Math.floor(Math.log10(Math.max(roughStep,1)));
+  const normalized = roughStep / magnitude;
+  const niceFactor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  const yStep = niceFactor * magnitude;
+  const yMax = Math.max(yStep * 5, Math.ceil(maxValue / yStep) * yStep);
+  const steps = Math.max(4, Math.round(yMax / yStep));
 
-  ctx.strokeStyle = "#e6dccb";
+  ctx.strokeStyle = "#ebe2d4";
   ctx.lineWidth = 1;
+  ctx.textAlign = "right";
+  ctx.font = "12px -apple-system, BlinkMacSystemFont, sans-serif";
 
   for(let i=0;i<=steps;i++){
     const y = padT + h - (i/steps)*h;
@@ -414,57 +456,87 @@ function renderChart(){
     ctx.stroke();
 
     ctx.fillStyle = "#8a8174";
-    ctx.fillText(value.toLocaleString(),8,y+4);
+    ctx.fillText(value.toLocaleString(),padL-12,y+4);
   }
 
-  ctx.strokeStyle = "#332d24";
+  ctx.strokeStyle = "#6b6258";
+  ctx.lineWidth = 1.25;
   ctx.beginPath();
   ctx.moveTo(padL,padT);
   ctx.lineTo(padL,padT+h);
   ctx.lineTo(padL+w,padT+h);
   ctx.stroke();
 
+  const points = labels.map((label,i)=>({
+    label,
+    value:values[i],
+    x:labels.length === 1 ? padL + w/2 : padL + i*(w/(labels.length-1)),
+    y:padT + h - (values[i]/yMax)*h
+  }));
+
+  // 轻微面积填充，让走势更容易辨认。
+  const gradient = ctx.createLinearGradient(0,padT,0,padT+h);
+  gradient.addColorStop(0,"rgba(216,169,0,0.22)");
+  gradient.addColorStop(1,"rgba(216,169,0,0.02)");
+  ctx.beginPath();
+  ctx.moveTo(points[0].x,padT+h);
+  points.forEach((point,i)=> i === 0 ? ctx.lineTo(point.x,point.y) : ctx.lineTo(point.x,point.y));
+  ctx.lineTo(points[points.length-1].x,padT+h);
+  ctx.closePath();
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
   ctx.strokeStyle = "#d8a900";
   ctx.lineWidth = 4;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   ctx.beginPath();
-
-  labels.forEach((label,i)=>{
-    const x = labels.length === 1 ? padL + w/2 : padL + i*(w/(labels.length-1));
-    const y = padT + h - (values[i]/yMax)*h;
-
-    if(i===0) ctx.moveTo(x,y);
-    else ctx.lineTo(x,y);
-  });
-
+  points.forEach((point,i)=> i === 0 ? ctx.moveTo(point.x,point.y) : ctx.lineTo(point.x,point.y));
   ctx.stroke();
 
-  labels.forEach((label,i)=>{
-    const x = labels.length === 1 ? padL + w/2 : padL + i*(w/(labels.length-1));
-    const y = padT + h - (values[i]/yMax)*h;
-
+  const minLabelGap = 34;
+  points.forEach((point,i)=>{
     ctx.fillStyle = "#332d24";
     ctx.beginPath();
-    ctx.arc(x,y,5,0,Math.PI*2);
+    ctx.arc(point.x,point.y,5,0,Math.PI*2);
     ctx.fill();
 
-    ctx.font = "13px -apple-system";
-    ctx.fillText(Math.floor(values[i]).toLocaleString(),x-18,y-12);
+    ctx.strokeStyle = "#fffaf1";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const isNearTop = point.y < padT + 28;
+    const prev = points[i-1];
+    const next = points[i+1];
+    const crowded = (prev && Math.abs(prev.y-point.y)<minLabelGap) || (next && Math.abs(next.y-point.y)<minLabelGap);
+    const placeBelow = isNearTop || (crowded && i % 2 === 1);
+    const labelY = placeBelow ? point.y + 22 : point.y - 14;
+
+    ctx.font = "600 12px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.textAlign = "center";
+    const text = Math.floor(point.value).toLocaleString();
+    const textWidth = ctx.measureText(text).width;
+    const boxX = Math.max(padL, Math.min(point.x - textWidth/2 - 5, padL+w-textWidth-10));
+    ctx.fillStyle = "rgba(255,250,241,0.92)";
+    ctx.beginPath();
+    ctx.roundRect(boxX,labelY-13,textWidth+10,18,6);
+    ctx.fill();
+    ctx.fillStyle = "#4b4339";
+    ctx.fillText(text,boxX+(textWidth+10)/2,labelY);
 
     ctx.fillStyle = "#8a8174";
-    ctx.fillText(label.slice(5),x-22,padT+h+25);
+    ctx.font = "12px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(point.label.slice(5),point.x,padT+h+28);
   });
 
-  ctx.fillStyle = "#332d24";
-  ctx.font = "15px -apple-system";
-const unitText =
-  currencyMode === "JPY"
-    ? "单位：日元收入"
-    : currencyMode === "RMB"
-      ? "单位：人民币收入"
-      : "单位：换算日元总收入";
-
-ctx.fillText(unitText,padL,22);
+  ctx.textAlign = "left";
 }
+
+let chartResizeTimer = null;
+window.addEventListener("resize",()=>{
+  clearTimeout(chartResizeTimer);
+  chartResizeTimer = setTimeout(renderChart,160);
+});
 
 function renderPackages(){
   const box = document.getElementById("packageBox");
@@ -518,7 +590,7 @@ function renderRecords(){
     const rmb = actualRMBIncome(r);
 
     return `
-      <tr>
+      <tr style="${getPaySummary(r)!=="现金" ? "height:120px;" : ""}">
         <td>${r.closedTime || r.time || ""}</td>
         <td>${table}</td>
         <td>${name}${phone ? "("+phone+")" : ""}</td>
@@ -736,7 +808,8 @@ async function handleOwnerReceiptFileChange(e){
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
 
-    await saveRecordSafely({db,ref,record:r});
+    const linked = r.groupId ? records.filter(x=>String(x.groupId||"")===String(r.groupId)) : [r];
+    for(const item of linked){ item.receiptImage=base64; item.receiptFileName=r.receiptFileName; item.receiptUploadedAt=r.receiptUploadedAt; item.receiptUploadedTime=r.receiptUploadedTime; await saveRecordSafely({db,ref,record:item}); }
 
     uploadingRecordId = null;
     alert("收款截图已保存");

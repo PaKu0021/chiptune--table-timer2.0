@@ -1,11 +1,13 @@
 /*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=2.6.9";
+import { db } from "./firebase.js?v=4.0.0";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=2.6.9";
-/*import { formatTime } from "./common.js?v=2.6.5";*/
-import { resetTable, formatTime } from "./common.js?v=2.6.9";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime } from "./safe-state.js?v=4.0.0";
+/*import { formatTime } from "./common.js?v=4.0.0";*/
+import { resetTable, formatTime } from "./common.js?v=4.0.0";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=4.0.0";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.0";
 const ref = doc(db, "shop", "main");
-const RATE = 0.044;
+
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
 
 
@@ -127,7 +129,7 @@ async function refreshSharedStateFromServer(){
     );
   }
 }
-setInterval(refreshSharedStateFromServer,15000);
+setInterval(refreshSharedStateFromServer,3000);
 window.addEventListener("online",refreshSharedStateFromServer);
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refreshSharedStateFromServer(); });
 
@@ -144,6 +146,8 @@ let typeFilter = "";
 let payFilter = "";
 let sortDirection = "asc";
 let filterPanelOpen = true;
+let groupViewMode = false;
+let editingGroupId = "";
 let autoClosingOldTables = false;
 let movingRunningFromIndex = null;
 let movingRunningToIndex = null;
@@ -271,9 +275,7 @@ function normalizeAppState(nextState){
     next.bookings = [];
   }
 
-  if(!Array.isArray(next.groups)){
-    next.groups = [];
-  }
+  ensureGroups(next);
 
   next.customers =
     normalizeAppCustomers(next.customers);
@@ -301,6 +303,7 @@ function normalizeAppState(nextState){
     if(t.type === undefined) t.type = "";
     if(t.lastAction === undefined) t.lastAction = "";
     if(t.recordId === undefined) t.recordId = null;
+    if(t.startLocked === undefined) t.startLocked = Boolean(t.start);
     if(t.customerKey === undefined) t.customerKey = "";
     if(t.visitId === undefined) t.visitId = null;
     if(t.visitDate === undefined) t.visitDate = "";
@@ -316,6 +319,23 @@ function normalizeAppState(nextState){
     }
   });
 
+  const legacyById = new Map();
+  next.tables.forEach((t,index)=>{
+    if(!t.groupId) return;
+    if(!legacyById.has(String(t.groupId))) legacyById.set(String(t.groupId),[]);
+    legacyById.get(String(t.groupId)).push(index);
+  });
+  legacyById.forEach((indexes,id)=>{
+    const first = next.tables[indexes[0]] || {};
+    upsertGroup(next,{
+      ...(getGroup(next,id) || {}),
+      id,
+      name:first.groupName || getGroup(next,id)?.name || "未命名组",
+      color:first.groupColor || getGroup(next,id)?.color || "#B7E4C7",
+      tableIndexes:indexes,
+      peopleCount:getGroup(next,id)?.peopleCount || Math.max(1,indexes.length)
+    });
+  });
   return next;
 }
 
@@ -375,7 +395,7 @@ onSnapshot(
        * 这里传原始云端数据，
        * 不要传本机合并后的 state。
        */
-      if(!snap.metadata.hasPendingWrites){
+      if(!snap.metadata.fromCache && !snap.metadata.hasPendingWrites){
         setStateBaseline(
           snap.data()
         );
@@ -474,14 +494,6 @@ function calcPriceByTotalMinutes(totalMinutes){
   return 5500 + (hours - 6) * 800;
 }
 
-/*
-function getOriginalJPY(t){
-  const p = getPackage(t);
-  if(p.unlimited) return Number(p.price || 0);
-  return Number(p.price || 0) + (Number(t.extra || 0) / 3600000) * Number(p.extensionPrice || 0);
-}
-*/
-
 function getOriginalJPY(t){
   const p = getPackage(t);
 
@@ -521,16 +533,29 @@ function roundJPY(jpy){
 }
 
 function getRMB(jpy){
-  return Math.floor(jpy * RATE);
+  return jpyToRmb(jpy);
+}
+
+function ensureVisitAndRecordId(t){
+  if(!t.visitId){
+    t.visitId = `visit_${Date.now()}_${Math.random().toString(36).slice(2,10)}`;
+  }
+  if(!t.recordId){
+    t.recordId = `rec_${String(t.visitId).replace(/[^a-zA-Z0-9_-]/g,"_")}`;
+  }
+  return t.recordId;
 }
 
 function makePaymentLine({type="收入", reason="", pay="", amountJPY=0, note=""}){
   return {
+    id:`pay_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+    operationId:`op_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
     type,
     reason,
     pay: pay || "未记录",
+    currency: currencyForPaymentMethod(pay),
     amountJPY: Number(amountJPY || 0),
-    amountRMB: getRMB(Number(amountJPY || 0)),
+    amountRMB: currencyForPaymentMethod(pay) === "人民币" ? getRMB(Number(amountJPY || 0)) : 0,
     note,
     time: new Date().toLocaleString(),
     timestamp: Date.now()
@@ -556,8 +581,60 @@ function normalizePayments(record){
   return [];
 }
 
+function consolidatePayment(record, {amountJPY, pay, reason="桌位消费", note=""} = {}){
+  const oldPayments = normalizePayments(record);
+  const receiptSource = oldPayments.find(p=>p?.receiptImage) || null;
+  const first = oldPayments[0] || {};
+  const amount = Number(amountJPY ?? sumPaymentsJPY(oldPayments) ?? 0);
+  const line = {
+    ...first,
+    type: amount < 0 ? "退款" : "收入",
+    reason,
+    pay: pay || first.pay || record.pay || "未记录",
+    amountJPY: amount,
+    amountRMB: currencyForPaymentMethod(pay || first.pay || record.pay) === "人民币" ? getRMB(amount) : 0,
+    note: note || first.note || "",
+    time: first.time || new Date().toLocaleString(),
+    timestamp: first.timestamp || Date.now(),
+    updatedAt: Date.now()
+  };
+  if(receiptSource){
+    line.receiptImage = receiptSource.receiptImage;
+    line.receiptFileName = receiptSource.receiptFileName || "";
+    line.receiptUploadedAt = receiptSource.receiptUploadedAt || null;
+    line.receiptUploadedTime = receiptSource.receiptUploadedTime || "";
+  }
+  record.payments = amount === 0 ? [] : [line];
+  return record.payments;
+}
+
 function sumPaymentsJPY(payments){
   return payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+}
+
+function sumPaymentsRMB(payments){
+  return payments.reduce((sum,p)=>sum + Number(p.amountRMB || 0),0);
+}
+
+// 在同一张账单内记录套餐预付款与离店补收。不会创建第二张收入记录。
+function settleRecordToFinalAmount(record,{finalAmountJPY,pay,reason="续时补收",note=""}={}){
+  record.payments = normalizePayments(record);
+  const current = sumPaymentsJPY(record.payments);
+  const target = Number(finalAmountJPY || 0);
+  const diff = target - current;
+  // 结账只允许补收，不再根据负差额自动生成退款。
+  // 退款必须通过独立的“退款”按钮人工录入。
+  if(diff > 0){
+    record.payments.push(makePaymentLine({
+      type: "收入",
+      reason,
+      pay: pay || record.pay || "未记录",
+      amountJPY: diff,
+      note
+    }));
+  }
+  // 差额为 0 或小于 0 时只结束桌位，不修改历史付款，也不自动退款。
+  return record.payments;
 }
 
 function getPaymentSummary(payments){
@@ -569,6 +646,18 @@ function getPaymentSummary(payments){
 
   if(pays.length === 0) return "未记录";
   if(pays.length === 1) return pays[0];
+  return "混合";
+}
+
+function getCurrencySummary(payments){
+  const currencies = [...new Set(
+    payments
+      .filter(p=>Number(p.amountJPY || 0) !== 0)
+      .map(p=>p.currency || currencyForPaymentMethod(p.pay))
+      .filter(Boolean)
+  )];
+  if(currencies.length === 0) return "未记录";
+  if(currencies.length === 1) return currencies[0];
   return "混合";
 }
 
@@ -590,6 +679,57 @@ async function getTableRecord(t){
     console.warn("读取云端账单失败，继续使用本机数据", err);
     return null;
   }
+}
+
+function getBookingIndexes(booking){
+  return (Array.isArray(booking?.tableIndexes) ? booking.tableIndexes : [booking?.tableIndex])
+    .filter(v=>v !== undefined && v !== null && v !== "")
+    .map(Number)
+    .filter(Number.isFinite);
+}
+
+function markBookingTableStarted(booking, tableIndex, startedAt){
+  if(!booking) return;
+  const index = Number(tableIndex);
+  booking.checkedIn = true;
+  booking.completed = false;
+  booking.checkedOut = false;
+  booking.checkInTime = booking.checkInTime || startedAt;
+  booking.checkInTimeText = booking.checkInTimeText || new Date(startedAt).toLocaleString();
+  booking.checkedInTableIndexes = Array.from(new Set([
+    ...(Array.isArray(booking.checkedInTableIndexes) ? booking.checkedInTableIndexes : []).map(Number),
+    index
+  ])).filter(Number.isFinite);
+  if(Array.isArray(booking.finishedTableIndexes)){
+    booking.finishedTableIndexes = booking.finishedTableIndexes.map(Number).filter(i=>i !== index);
+  }
+  booking.updatedAt = Date.now();
+}
+
+function markBookingTableFinished(booking, tableIndex, finishedAt=Date.now()){
+  if(!booking) return;
+  const index = Number(tableIndex);
+  booking.finishedTableIndexes = Array.from(new Set([
+    ...(Array.isArray(booking.finishedTableIndexes) ? booking.finishedTableIndexes : []).map(Number),
+    index
+  ])).filter(Number.isFinite);
+  booking.checkedInTableIndexes = (Array.isArray(booking.checkedInTableIndexes) ? booking.checkedInTableIndexes : [])
+    .map(Number)
+    .filter(i=>i !== index);
+
+  const indexes = getBookingIndexes(booking);
+  const finished = new Set(booking.finishedTableIndexes);
+  const allFinished = indexes.length > 0 && indexes.every(i=>finished.has(i));
+  if(allFinished){
+    booking.checkedIn = false;
+    booking.completed = true;
+    booking.checkedOut = true;
+    booking.checkOutTime = finishedAt;
+    booking.checkOutTimeText = new Date(finishedAt).toLocaleString();
+  }else{
+    booking.checkedIn = booking.checkedInTableIndexes.length > 0;
+  }
+  booking.updatedAt = Date.now();
 }
 
 function makeCustomerKey(name, phoneLast4){
@@ -718,7 +858,9 @@ const dueJPY = Math.max(0, originalJPY - paidJPY);
 
   if(!record){
     isNewRecord = true;
-    const id = "rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
+    // recordId 一旦分配就必须复用。即使本机账单缓存暂时未读到，
+    // 也不能再生成第二个 ID，否则同一桌会出现两张账单。
+    const id = ensureVisitAndRecordId(t);
     t.recordId = id;
 
 
@@ -727,7 +869,7 @@ const dueJPY = Math.max(0, originalJPY - paidJPY);
 record = {
   id,
   timestamp: now,
-  businessDate: getDateText(now),
+  businessDate: getBusinessDateKey(now),
 
   time: new Date(now).toLocaleString(),
 
@@ -740,13 +882,20 @@ record = {
 
   // 入座开始即生成正式账单；结账时只更新同一个 recordId。
   record.startAt = Number(t.start || record.startAt || Date.now());
-  record.startedTime = record.startedTime || new Date(record.startAt).toLocaleString();
+  if(options.syncStartTime){
+    record.timestamp = record.startAt;
+    record.startedTime = new Date(record.startAt).toLocaleString();
+    record.time = record.startedTime;
+    record.businessDate = getBusinessDateKey(record.startAt);
+  }else{
+    record.startedTime = record.startedTime || new Date(record.startAt).toLocaleString();
+  }
   record.closed = false;
   record.status = "进行中";
 
   record.businessDate =
     record.businessDate ||
-    getDateText(record.timestamp || Date.now());
+    getBusinessDateKey(record.startAt || record.timestamp || Date.now());
   record.tableName = t.name;
   record.groupId = t.groupId || record.groupId || "";
 record.groupName = t.groupName || record.groupName || "";
@@ -767,42 +916,20 @@ record.groupColor = t.groupColor || t.activeColor || record.groupColor || "";
 
   record.payments = normalizePayments(record);
 
-if(isNewRecord && t.payTiming === "prepaid" && paidJPY > 0){
-  record.payments.push(
-    makePaymentLine({
-      type:"收入",
-      reason:"套餐费",
-      pay:t.pay || "未记录",
-      amountJPY:paidJPY,
-      note:"开始计时时记录"
-    })
-  );
-}
-
-const packageLine = record.payments.find(p=>p.reason === "套餐费");
-
-if(packageLine && packageLine.pay === "未记录" && t.pay){
-  packageLine.pay = t.pay;
-}
-
-// 先付款模式下，续时/撤回续时直接修改同一条账单，
-// 并把本次差额作为续时收费或退款记录追加进去。
-const adjustmentJPY = Number(options.adjustmentJPY || 0);
-if(adjustmentJPY !== 0){
-  const actionKey = String(options.actionKey || "");
-  const alreadyAdded = actionKey && record.payments.some(p=>p.actionKey === actionKey);
-  if(!alreadyAdded){
-    const line = makePaymentLine({
-      type: adjustmentJPY > 0 ? "收入" : "退款",
-      reason: adjustmentJPY > 0 ? "续时费" : "撤回续时",
-      pay: t.pay || "未记录",
-      amountJPY: adjustmentJPY,
-      note: options.note || (adjustmentJPY > 0 ? "续时1小时" : "撤回续时1小时")
-    });
-    if(actionKey) line.actionKey = actionKey;
-    record.payments.push(line);
+// 先付款只在入店时收套餐费。续时只提高应收额，离店时再补收；始终沿用同一 recordId。
+if(t.payTiming === "prepaid"){
+  const prepaidAmount = Number(t.paidJPY || 0);
+  if(record.payments.length === 0 && prepaidAmount > 0){
+    record.payments = [makePaymentLine({
+      reason:"套餐预付款",
+      pay:t.pay || record.pay || "未记录",
+      amountJPY:prepaidAmount,
+      note:"入店时收取"
+    })];
   }
 }
+// 运行中修改付款方式只更新桌位上的“下一笔付款方式”。
+// 已完成的 payments[] 属于不可变历史，不在这里回写或覆盖。
 
 const paymentsTotalJPY = sumPaymentsJPY(record.payments);
 
@@ -810,14 +937,14 @@ record.paidJPY = paymentsTotalJPY;
 record.dueJPY = Math.max(0, originalJPY - paymentsTotalJPY);
 
 record.totalJPY = paymentsTotalJPY;
-record.totalRMB = getRMB(paymentsTotalJPY);
+record.totalRMB = sumPaymentsRMB(record.payments);
 
 record.pay = getPaymentSummary(record.payments);
 
 
 
 
-  record.currency = t.currency || "日元";
+  record.currency = getCurrencySummary(record.payments);
   record.payTiming = t.payTiming || "prepaid";
   record.paidStatus = Number(record.dueJPY || 0) > 0 ? "未结清" : "已结清";
   record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
@@ -906,12 +1033,31 @@ const filteredTables = state.tables
     vb = getOriginalJPY(b.t);
   }
 
+  if(groupViewMode){
+    const ga = String(a.t.groupId || "~~~~未分组");
+    const gb = String(b.t.groupId || "~~~~未分组");
+    if(ga !== gb) return ga.localeCompare(gb,"zh-CN");
+  }
   return sortDirection === "desc" ? vb - va : va - vb;
 });
   
 
 
+let lastRenderedGroupId = null;
 filteredTables.forEach(({t,i})=>{
+    if(groupViewMode){
+      const currentGroupId = String(t.groupId || "");
+      if(currentGroupId !== lastRenderedGroupId){
+        const group = getGroup(state,currentGroupId);
+        const header = document.createElement("div");
+        header.className = "group-section-header";
+        header.innerHTML = currentGroupId
+          ? `<div><b>👥 ${group?.name || t.groupName || "未命名组"}</b><span>${currentGroupId}</span></div><button class="btn-ghost" onclick="openGroupManager('${currentGroupId.replaceAll("'","\'")}')">管理组</button>`
+          : `<div><b>未分组桌位</b><span>可选择后创建新组</span></div><button class="btn-main" onclick="openGroupManager('')">创建组</button>`;
+        box.appendChild(header);
+        lastRenderedGroupId = currentGroupId;
+      }
+    }
     const p = getPackage(t);
     const elapsed = getElapsedMs(t);
     const remain = getLimitMs(t) - elapsed;
@@ -959,9 +1105,9 @@ filteredTables.forEach(({t,i})=>{
     div.className = "card " + status;
 
     div.innerHTML = `
-      <h3>${t.name}</h3>
+      <h3 class="table-title-row"><span>${t.name}</span>${(t.start || t.type || t.recordId) && t.groupId ? `<span class="table-group-id">${t.groupId}</span>` : ""}</h3>
 
-    <select onchange="setPackage(${i},this.value)" ${t.start ? "disabled" : ""}>
+    <select onchange="setPackage(${i},this.value)">
   ${state.packages.map((pkg,idx)=>`
     <option value="${idx}" ${idx===t.packageIndex ? "selected" : ""}>
       ${pkg.name} | ${pkg.unlimited ? "不限时" : pkg.minutes + "分钟"} | ¥${pkg.price}
@@ -1000,12 +1146,26 @@ ${t.start ? `
 <button class="btn-ghost" style="${t.type==="booking" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="toggleType(${i},'booking')">预约</button>
 </div>
 
-<input placeholder="提前分钟" id="pre-${i}">
+<label style="display:block;margin:10px 0 8px;font-weight:700;color:#6f6659;">
+  <span style="display:block;margin-bottom:6px;">提前多少分钟</span>
+  <input type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="输入提前分钟数" id="pre-${i}" value="${Math.max(0,Math.floor(Number(t.preMinutes || 0)))}" oninput="updatePreMinutes(${i},this.value)">
+</label>
+
+<div class="action-row" style="grid-template-columns:1fr auto;align-items:stretch;">
+  <button class="btn-main"
+    style="${t.startLocked ? "background:#c9c6bf;color:#777;border-color:#b8b4ad;box-shadow:none;" : "background:#f2c94c;color:#332d24;border-color:#d8a900;"}"
+    onclick="start(${i})"
+    ${t.startLocked ? "disabled" : ""}>
+    ${t.start ? "重新记录开始" : "开始"}
+  </button>
+  <button class="btn-ghost" style="min-width:64px;font-size:20px;" onclick="toggleStartLock(${i})" title="开始按钮锁">
+    ${t.startLocked ? "🔒" : "🔓"}
+  </button>
+</div>
 
 <div class="action-row">
-  <button class="btn-ghost" style="${t.lastAction==="start" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="start(${i})">开始</button>
-  <button class="btn-ghost" style="${t.lastAction==="pause" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="pause(${i})">暂停</button>
-  <button class="btn-ghost" style="${t.lastAction==="resume" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="resume(${i})">继续</button>
+  <button class="btn-ghost" style="${t.lastAction==="pause" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="pause(${i})" ${!t.start || t.pausedAt ? "disabled" : ""}>暂停</button>
+  <button class="btn-ghost" style="${t.lastAction==="resume" ? "background:#f2c94c;color:#332d24;border-color:#d8a900;" : ""}" onclick="resume(${i})" ${!t.pausedAt ? "disabled" : ""}>继续</button>
 </div>
 
       ${p.unlimited ? "" : `
@@ -1047,6 +1207,7 @@ ${t.start ? `
 
 <button class="btn-success full" onclick="openCheckout(${i})">结账</button>
 ${t.start ? `
+<button class="btn-danger full" onclick="openRefund(${i})">退款</button>
 <button class="btn-danger full" onclick="openForceEnd(${i})">
   强制结束桌位
 </button>
@@ -1117,15 +1278,19 @@ function notifyLocal(title, body){
 
 async function setPackage(i,v){
   const t = state.tables[i];
+  const nextIndex = Number(v);
+  if(nextIndex === Number(t.packageIndex || 0)) return;
 
-  t.packageIndex = Number(v);
+  // 只替换套餐规则，不修改 start / pausedAt，因此计时连续进行。
+  t.packageIndex = nextIndex;
   if(t.customPackage) t.customPackage.enabled = false;
+
+  render();
+  emergencySaveState({db,ref,state,action:"change_running_package"});
 
   if(t.start){
     await createOrUpdateRecord(t);
   }
-
-  save();
 }
 
 function toggleType(i,type){
@@ -1189,13 +1354,152 @@ function updateCustomer(i){
   save();
 }
 
-async function start(i){
-  const pre = Number(document.getElementById("pre-"+i)?.value || 0);
+function toggleStartLock(i){
   const t = state.tables[i];
+
+  // 已经计时中的桌位允许显示解锁状态，但开始函数仍有 t.start 防重复保护。
+  t.startLocked = !t.startLocked;
+  t.lastAction = t.startLocked ? "lock" : "unlock";
+  render();
+  emergencySaveState({db,ref,state,action:t.startLocked ? "lock_start" : "unlock_start"});
+}
+
+
+function parseBookingDateTime(dateText,timeText){
+  const date = String(dateText || "").trim();
+  const time = String(timeText || "").trim();
+  if(!date || !/^\d{2}:\d{2}$/.test(time)) return NaN;
+  const [y,m,d] = date.split("-").map(Number);
+  const [hh,mm] = time.split(":").map(Number);
+  if(!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return NaN;
+  return new Date(y,m-1,d,hh,mm,0,0).getTime();
+}
+
+function getPlannedTimerEndAt(table,startAt){
+  const pkg = getPackage(table);
+  if(!pkg?.unlimited){
+    return startAt + Math.max(0,Number(pkg?.minutes || 0))*60000 + Math.max(0,Number(table?.extra || 0));
+  }
+
+  const startDate = new Date(startAt);
+  const day = startDate.getDay();
+  const isWeekend = day === 0 || day === 6;
+  const hours = state.businessHours || {};
+  const closeHour = Number(isWeekend ? (hours.weekendClose ?? 22) : (hours.weekdayClose ?? 22));
+  const closeAt = new Date(startDate.getFullYear(),startDate.getMonth(),startDate.getDate(),closeHour,0,0,0).getTime();
+  return closeAt > startAt ? closeAt : startAt;
+}
+
+function findTimerBookingConflict(tableIndex,startAt,endAt,excludeBookingId=null,sourceState=state){
+  const bookings = Array.isArray(sourceState?.bookings) ? sourceState.bookings : [];
+  return bookings
+    .filter(b=>!b?.cancelled && !b?.checkedIn)
+    .filter(b=>Number(b?.id) !== Number(excludeBookingId))
+    .filter(b=>{
+      const indexes = (Array.isArray(b?.tableIndexes) ? b.tableIndexes : [b?.tableIndex])
+        .filter(v=>v !== undefined && v !== null && v !== "")
+        .map(Number);
+      return indexes.includes(Number(tableIndex));
+    })
+    .map(b=>({
+      booking:b,
+      startAt:parseBookingDateTime(b.date,b.startTime),
+      endAt:parseBookingDateTime(b.date,b.endTime)
+    }))
+    .filter(x=>Number.isFinite(x.startAt) && Number.isFinite(x.endAt))
+    .find(x=>startAt < x.endAt && endAt > x.startAt) || null;
+}
+
+function formatConflictMessage(table,conflict){
+  const b = conflict?.booking || {};
+  const who = [b.name,b.phone].filter(Boolean).join(" / ");
+  return `${table?.name || "该桌"}无法开始：与预约 ${b.date || ""} ${b.startTime || "-"}-${b.endTime || "-"} 冲突${who ? `（${who}）` : ""}。请更换桌位、调整预约或选择不会重叠的套餐。`;
+}
+
+
+function normalizePreMinutes(value){
+  const n = Number(value);
+  if(!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(1440,Math.floor(n));
+}
+
+function updatePreMinutes(i,value){
+  const t = state?.tables?.[i];
+  if(!t) return;
+  t.preMinutes = normalizePreMinutes(value);
+}
+
+async function start(i){
+  const t = state.tables[i];
+  if(!t || t.startLocked) return;
+
+  // 已开始桌位：解锁后再次点击“开始”，只重新记录开始时间，
+  // 不创建新账单、不重复收套餐费。
+  if(t.start){
+    const preInput = document.getElementById("pre-"+i)?.value;
+    const pre = normalizePreMinutes(preInput ?? t.preMinutes);
+    const newStartTime = Date.now() - pre * 60000;
+    const plannedEndAt = getPlannedTimerEndAt(t,newStartTime);
+    // 实际计时与预约排期完全分离：调整真实开始时间时不修改预约，
+    // 即使预计结束时间与后续预约重叠，也允许保存。
+
+    t.preMinutes = pre;
+    t.start = newStartTime;
+    t.startLocked = true;
+    t.lastAction = "start_time_adjusted";
+
+    // 若正在暂停，暂停点保持为当前时刻，避免出现负的已用时间。
+    if(t.pausedAt && Number(t.pausedAt) < newStartTime){
+      t.pausedAt = Date.now();
+    }
+
+    render();
+    setSyncStatus("pending","● 正在原子同步新的开始时间…");
+    try{
+      const result = await atomicAdjustStartTime({
+        db, ref, tableIndex:i,
+        tablePatch:JSON.parse(JSON.stringify(t)),
+        recordId:t.recordId,
+        recordPatch:{
+          timestamp:newStartTime,
+          startAt:newStartTime,
+          startedTime:new Date(newStartTime).toLocaleString(),
+          businessDate:getBusinessDateKey(newStartTime),
+          time:new Date(newStartTime).toLocaleString(),
+          tableName:t.name,
+          updatedAt:Date.now(),
+          localUpdatedAt:Date.now()
+        }
+      });
+      state = JSON.parse(JSON.stringify(result.state));
+      setSyncStatus("synced","● 开始时间与账单已同时更新");
+    }catch(error){
+      console.error("原子更新开始时间失败",error);
+      setSyncStatus("error","● 开始时间更新失败，未修改云端数据");
+      alert(error?.message || "开始时间更新失败，请确认网络后重试");
+    }
+    render();
+    return;
+  }
+
+  // 跨设备安全优先：离线时不允许新开桌，避免两台离线设备生成两个账单。
+  if(!navigator.onLine){
+    alert("当前离线，无法安全开始计时。请恢复网络后再点击开始。");
+    return;
+  }
+
+  const before = JSON.parse(JSON.stringify(t));
+  t.startLocked = true;
+  ensureVisitAndRecordId(t);
+  const preInput = document.getElementById("pre-"+i)?.value;
+  const pre = normalizePreMinutes(preInput ?? t.preMinutes);
+  t.preMinutes = pre;
   const startTime = Date.now() - pre * 60000;
+  const plannedEndAt = getPlannedTimerEndAt(t,startTime);
+  // 点击开始始终以当前真实时间（或店员明确补录的时间）开始。
+  // 后续预约只用于提示，不阻止开始，也不会被移动或覆盖。
 
   stopAlertLoop(i);
-
   t.start = startTime;
   t.pausedAt = null;
   t.alerted = false;
@@ -1204,7 +1508,6 @@ async function start(i){
 
   const p = getPackage(t);
   t.payTiming = t.payTiming || "prepaid";
-
   if(t.payTiming === "prepaid"){
     t.paidJPY = Number(p.price || 0);
     t.paidRMB = getRMB(t.paidJPY);
@@ -1215,28 +1518,137 @@ async function start(i){
     t.paidAt = null;
   }
 
-  // 如果这桌是预约客人，自动把预约标记为已入桌。
-  if(t.type === "booking" && Array.isArray(state.bookings)){
-    const booking = state.bookings.find(b=>{
-      const raw = Array.isArray(b.tableIndexes) ? b.tableIndexes : [b.tableIndex];
-      const tableIndexes = raw
-        .filter(v => v !== undefined && v !== null && v !== "")
-        .map(v => Number(v));
-      return tableIndexes.includes(i) && !b.checkedIn && (!b.name || b.name === t.customer.name);
+  const initialPayments = [];
+  if(t.payTiming === "prepaid" && Number(t.paidJPY || 0) > 0){
+    initialPayments.push(makePaymentLine({
+      reason:"套餐预付款",
+      pay:t.pay || "未记录",
+      amountJPY:Number(t.paidJPY || 0),
+      note:"入店时收取"
+    }));
+  }
+  const initialRecord = {
+    id:t.recordId,
+    visitId:t.visitId,
+    timestamp:startTime,
+    startAt:startTime,
+    startedTime:new Date(startTime).toLocaleString(),
+    businessDate:getBusinessDateKey(startTime),
+    time:new Date(startTime).toLocaleString(),
+    tableName:t.name,
+    customerName:t.customer?.name || "",
+    phoneLast4:t.customer?.phoneLast4 || "",
+    customerType:t.type || "walkin",
+    packageName:p.name,
+    packageMinutes:p.unlimited ? "不限时" : p.minutes,
+    packagePrice:Number(p.price || 0),
+    extraMinutes:0,
+    extensionAmount:0,
+    originalJPY:Number(p.price || 0),
+    payments:initialPayments,
+    paidJPY:sumPaymentsJPY(initialPayments),
+    dueJPY:Math.max(0,Number(p.price || 0)-sumPaymentsJPY(initialPayments)),
+    totalJPY:sumPaymentsJPY(initialPayments),
+    totalRMB:initialPayments.reduce((sum,line)=>sum+Number(line.amountRMB || 0),0),
+    pay:getPaymentSummary(initialPayments),
+    currency:getCurrencySummary(initialPayments),
+    payTiming:t.payTiming,
+    paidStatus:t.payTiming === "prepaid" ? "已结清" : "未结清",
+    status:"进行中",
+    closed:false,
+    receiptImage:"",
+    receiptFileName:"",
+    updatedAt:Date.now(),
+    localUpdatedAt:Date.now()
+  };
+
+  render();
+  setSyncStatus("pending","● 正在由服务器锁定桌位…");
+
+  let serverStartCommitted = false;
+  try{
+    const result = await atomicStartTable({
+      db,ref,tableIndex:i,
+      tablePatch:JSON.parse(JSON.stringify(t)),
+      record:initialRecord,
+      timerStartAt:startTime,
+      timerEndAt:plannedEndAt,
+      excludeBookingId:t.bookingId || null
     });
-    if(booking){
-      booking.checkedIn = true;
-      booking.checkInTime = startTime;
-      booking.checkInTimeText = new Date(startTime).toLocaleString();
+
+    serverStartCommitted = Boolean(result?.startedByThisDevice);
+
+    if(!result?.startedByThisDevice){
+      setSyncStatus("synced","● 该桌已由另一台设备开始，已同步最新状态");
+      render();
+      alert("这张桌已经由另一台设备开始，当前画面已同步。");
+      return;
+    }
+
+    // 事务返回的服务器状态必须成为当前页面的新基线。
+    // 不能继续拿开始前的旧整份 state 做后续保存，否则返回首页时可能被旧快照覆盖。
+    state = JSON.parse(JSON.stringify(result.state));
+
+    // 服务器成功锁定后再建立组，避免双设备同时生成两组。
+    const current = state.tables[i];
+    if(current && !current.groupId){
+      const groupId = await allocateGroupId(db,state.groups || []);
+      const group = upsertGroup(state,{
+        id:groupId,
+        name:`${current.name}组`,
+        color:current.activeColor || "#B7E4C7",
+        tableIndexes:[i],
+        peopleCount:1,
+        paymentMode:"split"
+      });
+      syncGroupReferences(state,group);
+    }
+
+    // 预约签到仅由成功开始的一台设备执行。
+    if(current?.type === "booking" && Array.isArray(state.bookings)){
+      // 优先使用桌位保存的 bookingId 精确定位，避免姓名重复、旧 checkedIn 值
+      // 或多桌预约导致签到状态没有写回。
+      const booking = state.bookings.find(b=>Number(b.id) === Number(current.bookingId))
+        || state.bookings.find(b=>getBookingIndexes(b).includes(i)
+          && (!b.name || b.name === current.customer?.name));
+      if(booking){
+        markBookingTableStarted(booking,i,startTime);
+      }
+    }
+
+    // 开始后的预约签到、组资料必须真正落盘完成后才允许显示“已同步”。
+    // 用户立刻返回首页时，首页因此能够读到同一份运行状态。
+    await saveStateSafely({
+      db,
+      ref,
+      getState:()=>state,
+      action:"start_table_post_transaction"
+    });
+    await createOrUpdateRecord(state.tables[i]);
+    await flushPending({db,ref});
+    setSyncStatus("synced","● 已同步");
+    render();
+
+    // 仅提醒实际计时可能与后续预约重叠；不截断计时，也不改预约时间。
+    const overlap = findTimerBookingConflict(i,startTime,plannedEndAt,current?.bookingId || null,state);
+    if(overlap){
+      const b = overlap.booking || {};
+      const plannedEndText = new Date(plannedEndAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+      alert(`已按真实时间开始计时。\n预计结束 ${plannedEndText}，与后续预约 ${b.startTime || "-"}-${b.endTime || "-"} 重叠。\n预约时间未被修改，请根据现场情况安排。`);
+    }
+  }catch(error){
+    console.error("开始流程失败",error);
+    if(!serverStartCommitted){
+      state.tables[i] = before;
+      render();
+      setSyncStatus("error","● 开始失败，未产生账单");
+      alert(error?.message || "开始失败，请确认网络后重试");
+    }else{
+      render();
+      setSyncStatus("pending","● 桌位已在云端开始，本机保存失败，将自动重试");
+      alert("桌位已经成功开始并产生账单，但本机缓存保存失败。请不要重复点击开始，系统会继续同步。");
     }
   }
-
-  // 先同步保存桌位状态，确保点击开始后立即生效。
-  emergencySaveState({db,ref,state,action:"start_table"});
-  render();
-
-  // 先付款：入座开始时立即建立账单；以后续时和结账都更新这一个 recordId。
-  await createOrUpdateRecord(t);
 }
 
 function pause(i){
@@ -1322,7 +1734,10 @@ async function setPay(i,v){
 
   const t = state.tables[i];
   t.pay = v;
+  t.currency = currencyForPaymentMethod(v);
 
+  // 运行中修改这里只代表“下一笔补收使用的付款方式”。
+  // 已经收过的套餐预付款必须保留原付款方式，不能被微信/支付宝覆盖。
   if(t.start){
     await createOrUpdateRecord(t);
   }
@@ -1332,7 +1747,8 @@ async function setPay(i,v){
 
 async function setCurrency(i,v){
   const t = state.tables[i];
-  t.currency = v;
+  const expected = currencyForPaymentMethod(t.pay);
+  t.currency = t.pay ? expected : v;
 
   if(t.start){
     await createOrUpdateRecord(t);
@@ -1372,7 +1788,7 @@ function updateCheckout(){
   const p = getPackage(t);
 
   const originalJPY = getOriginalJPY(t);
-  const dueJPY = getDueJPY(t);
+  const dueJPY = Math.max(0, originalJPY - Number(t.paidJPY || 0));
   const finalJPY = useRound ? roundJPY(dueJPY) : dueJPY;
   const totalRMB = getRMB(finalJPY);
 
@@ -1382,44 +1798,31 @@ function updateCheckout(){
     类型：${t.type === "booking" ? "预约" : "Walk-in"}<br><br>
 
 <label style="font-weight:900;display:block;margin:10px 0 6px;">
-  本次结账补收付款方式
+  ${finalJPY > 0 ? "本次续费补收付款方式" : "本次无需补收"}
 </label>
 
-<select id="checkoutPay">
-  <option value="">请选择【本次补收】付款方式</option>
-  <option value="现金" ${t.pay==="现金"?"selected":""}>现金</option>
-  <option value="PayPay" ${t.pay==="PayPay"?"selected":""}>PayPay</option>
-  <option value="微信" ${t.pay==="微信"?"selected":""}>微信</option>
-  <option value="支付宝" ${t.pay==="支付宝"?"selected":""}>支付宝</option>
+<select id="checkoutPay" ${finalJPY === 0 ? "disabled" : ""}>
+  <option value="">${finalJPY === 0 ? "直接结账" : "请选择【续费补收】付款方式"}</option>
+  <option value="现金">现金</option>
+  <option value="PayPay">PayPay</option>
+  <option value="微信">微信</option>
+  <option value="支付宝">支付宝</option>
 </select>
 
 <div class="pay-tip">
-  仅记录本次新增收款，不会修改之前已收款项。
+  点击开始时已记录套餐费；结账只处理续费产生的补收。退款请使用桌位上的独立“退款”按钮。
 </div>
-
-    <select id="checkoutCurrency" style="margin-top:8px;">
-      <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
-      <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
-    </select>
+<div class="pay-tip">币种按付款方式自动确定：现金/PayPay 为日元，微信/支付宝为人民币。</div>
   `;
 
-document.getElementById("checkoutAmount").innerHTML = `
-    原价日元：¥${originalJPY.toLocaleString()}<br>
-    已收金额：¥${Number(t.paidJPY || 0).toLocaleString()}<br><br>
-
-    <label>实际应收金额</label>
-    <input id="checkoutFinalCharge" type="number" value="${originalJPY}" oninput="refreshCheckoutDiff()">
+  document.getElementById("checkoutAmount").innerHTML = `
+    当前应收：¥${originalJPY.toLocaleString()}<br>
+    已收净额：¥${Number(t.paidJPY || 0).toLocaleString()}<br><br>
+    本次续费补收：<span id="checkoutDiffText">¥${finalJPY.toLocaleString()}</span><br>
+    人民币参考：<span id="checkoutRmbText">¥${totalRMB.toLocaleString()}</span><br>
     <label>备注</label>
-    <input id="checkoutNote" placeholder="例：不限时改3小时，现金退款差价">
-
-    <br>
-    当前需收/需退：<span id="checkoutDiffText">¥${finalJPY.toLocaleString()}</span><br>
-    人民币参考：<span id="checkoutRmbText">¥${totalRMB.toLocaleString()}</span><br>    
-    <small style="color:#8a8174;">
-      如果要退款，把实际应收金额改小。系统会自动算成负数退款。
-    </small>
+    <input id="checkoutNote" placeholder="例：续费1小时">
   `;
-
 }
 
 async function confirmCheckout(){
@@ -1437,9 +1840,13 @@ async function confirmCheckout(){
   }
 
   const pay = document.getElementById("checkoutPay")?.value || "";
-  const currency = document.getElementById("checkoutCurrency")?.value || "日元";
-  if(!pay){
-    alert("请选择付款方式");
+
+  const finalChargeJPY = getOriginalJPY(t);
+  const rawDiffJPY = Math.max(0, finalChargeJPY - Number(t.paidJPY || 0));
+  const finalJPY = useRound ? roundJPY(rawDiffJPY) : rawDiffJPY;
+
+  if(finalJPY > 0 && !pay){
+    alert("本次有续费补收，请选择付款方式");
     return;
   }
 
@@ -1451,16 +1858,12 @@ async function confirmCheckout(){
 
   try{
     stopAlertLoop(originalIndex);
-    t.pay = pay;
-    t.currency = currency;
+    if(finalJPY > 0){
+      t.pay = pay;
+      t.currency = currencyForPaymentMethod(pay);
+    }
 
-    const defaultOriginalJPY = getOriginalJPY(t);
-    const finalChargeJPY = Number(
-      document.getElementById("checkoutFinalCharge")?.value || defaultOriginalJPY
-    );
     const note = document.getElementById("checkoutNote")?.value || "";
-    const rawDiffJPY = finalChargeJPY - Number(t.paidJPY || 0);
-    const finalJPY = useRound ? roundJPY(rawDiffJPY) : rawDiffJPY;
 
     t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
     t.paidRMB = getRMB(t.paidJPY);
@@ -1477,9 +1880,9 @@ async function confirmCheckout(){
     }catch(err){
       console.warn("结账时完整账单读取超时，改用紧急本地账单",err);
       record = getLocalRecordSync(t.recordId) || {
-        id: t.recordId || ("rec_" + Date.now() + "_" + Math.random().toString(36).slice(2,8)),
+        id: ensureVisitAndRecordId(t),
         timestamp: Date.now(),
-        businessDate: getDateText(Date.now()),
+        businessDate: getBusinessDateKey(Date.now()),
         time: new Date().toLocaleString(),
         tableName: t.name,
         receiptImage:"",
@@ -1490,15 +1893,12 @@ async function confirmCheckout(){
     }
 
     record.payments = normalizePayments(record);
-    if(finalJPY !== 0){
-      record.payments.push(makePaymentLine({
-        type: finalJPY < 0 ? "退款" : "收入",
-        reason: finalJPY < 0 ? "退款/改套餐" : "结账补收",
-        pay,
-        amountJPY: finalJPY,
-        note
-      }));
-    }
+    settleRecordToFinalAmount(record,{
+      finalAmountJPY:finalChargeJPY,
+      pay,
+      reason:"续时补收",
+      note:note || "离店时结清续时费用"
+    });
 
     const paymentTotalJPY = sumPaymentsJPY(record.payments);
     const p = getPackage(t);
@@ -1513,18 +1913,18 @@ async function confirmCheckout(){
     record.extensionAmount = Math.max(0, finalChargeJPY - Number(p.price || 0));
     record.originalJPY = finalChargeJPY;
     record.totalJPY = paymentTotalJPY;
-    record.totalRMB = getRMB(paymentTotalJPY);
+    record.totalRMB = sumPaymentsRMB(record.payments);
     record.paidJPY = paymentTotalJPY;
     record.dueJPY = Math.max(0, finalChargeJPY - paymentTotalJPY);
     record.pay = getPaymentSummary(record.payments);
-    record.currency = t.currency || "日元";
+    record.currency = getCurrencySummary(record.payments);
     record.roundRule = useRound ? "500抹零" : "不抹零";
     record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
     record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
     record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
     record.closedAt = Date.now();
     record.closedTime = new Date(record.closedAt).toLocaleString();
-    record.businessDate = record.businessDate || getDateText(record.timestamp || record.closedAt);
+    record.businessDate = record.businessDate || getBusinessDateKey(record.startAt || record.timestamp || record.closedAt);
 
     const visit = createOrUpdateCustomerVisit(t);
     if(visit){
@@ -1538,15 +1938,7 @@ async function confirmCheckout(){
     if(t.bookingId){
       const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
       if(b){
-        if(!Array.isArray(b.finishedTableIndexes)) b.finishedTableIndexes = [];
-        b.finishedTableIndexes = Array.from(new Set([
-          ...b.finishedTableIndexes.map(Number), originalIndex
-        ]));
-        if(Array.isArray(b.checkedInTableIndexes)){
-          b.checkedInTableIndexes = b.checkedInTableIndexes
-            .map(Number)
-            .filter(i=>i !== originalIndex);
-        }
+        markBookingTableFinished(b,originalIndex,record.closedAt);
       }
     }
 
@@ -1654,12 +2046,12 @@ async function confirmForceEnd(){
     // Read the synchronous local shadow when available, otherwise create a record now.
     let record = getLocalRecordSync(t.recordId);
     if(!record){
-      const id = t.recordId || ("rec_" + now + "_" + Math.random().toString(36).slice(2,8));
+      const id = ensureVisitAndRecordId(t);
       t.recordId = id;
       record = {
         id,
         timestamp: now,
-        businessDate: getDateText(now),
+        businessDate: getBusinessDateKey(now),
         time: new Date(now).toLocaleString(),
         tableName: t.name,
         receiptImage:"",
@@ -1692,11 +2084,11 @@ async function confirmForceEnd(){
     const paymentTotalJPY = sumPaymentsJPY(record.payments);
     record.originalJPY = originalJPY;
     record.totalJPY = paymentTotalJPY;
-    record.totalRMB = getRMB(paymentTotalJPY);
+    record.totalRMB = sumPaymentsRMB(record.payments);
     record.paidJPY = paymentTotalJPY;
     record.dueJPY = Math.max(0, originalJPY - paymentTotalJPY);
     record.pay = getPaymentSummary(record.payments);
-    record.currency = t.currency || "日元";
+    record.currency = getCurrencySummary(record.payments);
     record.payTiming = t.payTiming || "prepaid";
     record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
     record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
@@ -1705,7 +2097,7 @@ async function confirmForceEnd(){
     record.closed = true;
     record.closedAt = now;
     record.closedTime = new Date(now).toLocaleString();
-    record.businessDate = record.businessDate || getDateText(record.timestamp || now);
+    record.businessDate = record.businessDate || getBusinessDateKey(record.startAt || record.timestamp || now);
     record.forceClosed = true;
     record.forceClosedAt = now;
 
@@ -1724,11 +2116,7 @@ async function confirmForceEnd(){
     if(t.bookingId){
       const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
       if(b){
-        if(!Array.isArray(b.finishedTableIndexes)) b.finishedTableIndexes = [];
-        b.finishedTableIndexes = Array.from(new Set([...b.finishedTableIndexes.map(Number),i]));
-        if(Array.isArray(b.checkedInTableIndexes)){
-          b.checkedInTableIndexes = b.checkedInTableIndexes.map(Number).filter(x=>x !== i);
-        }
+        markBookingTableFinished(b,i,now);
       }
     }
 
@@ -1781,7 +2169,7 @@ async function autoCloseOldTables(){
 
       record.businessDate =
         record.businessDate ||
-        getDateText(t.start || record.timestamp || now);
+        getBusinessDateKey(t.start || record.timestamp || now);
 
       record.closedAt = now;
       record.closedTime = new Date(now).toLocaleString();
@@ -1795,13 +2183,14 @@ async function autoCloseOldTables(){
 
       record.originalJPY = getOriginalJPY(t);
       record.totalJPY = paymentTotalJPY;
-      record.totalRMB = getRMB(paymentTotalJPY);
+      record.totalRMB = sumPaymentsRMB(record.payments);
       record.paidJPY = paymentTotalJPY;
       record.dueJPY = Math.max(0, record.originalJPY - paymentTotalJPY);
       record.pay = getPaymentSummary(record.payments);
-      record.currency = t.currency || "日元";
+      record.currency = getCurrencySummary(record.payments);
       record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
 
+      emergencySaveRecord({db,ref,record});
       await updateRecordOnly(record);
 
       const visit = createOrUpdateCustomerVisit(t);
@@ -1817,20 +2206,7 @@ async function autoCloseOldTables(){
         const b = state.bookings?.find(x=>Number(x.id) === Number(t.bookingId));
 
         if(b){
-          if(!Array.isArray(b.finishedTableIndexes)){
-            b.finishedTableIndexes = [];
-          }
-
-          b.finishedTableIndexes = Array.from(new Set([
-            ...b.finishedTableIndexes.map(Number),
-            i
-          ]));
-
-          if(Array.isArray(b.checkedInTableIndexes)){
-            b.checkedInTableIndexes = b.checkedInTableIndexes
-              .map(Number)
-              .filter(idx=>idx !== i);
-          }
+          markBookingTableFinished(b,i,now);
         }
       }
 
@@ -1872,6 +2248,95 @@ function refreshCheckoutDiff(){
   if(rmbText){
     rmbText.innerText = `¥${getRMB(finalJPY).toLocaleString()}`;
   }
+}
+
+let refundIndex = -1;
+let refundSubmitting = false;
+
+function openRefund(i){
+  const t = state.tables[i];
+  if(!t?.start){
+    alert("桌位尚未开始，不能退款");
+    return;
+  }
+  refundIndex = i;
+  const modal = document.getElementById("refundModalBg");
+  document.getElementById("refundInfo").innerHTML = `
+    ${t.name}<br>
+    客人：${t.customer?.name || "-"} ${t.customer?.phoneLast4 || ""}<br>
+    当前已收净额：¥${Number(t.paidJPY || 0).toLocaleString()}
+  `;
+  document.getElementById("refundAmount").value = "";
+  document.getElementById("refundPay").value = t.pay || "现金";
+  document.getElementById("refundNote").value = "";
+  modal.style.display = "block";
+}
+
+async function confirmRefund(){
+  if(refundSubmitting) return;
+  const t = state.tables[refundIndex];
+  if(!t?.start){
+    alert("找不到正在使用的桌位");
+    return;
+  }
+  const amount = Math.round(Number(document.getElementById("refundAmount")?.value || 0));
+  const pay = document.getElementById("refundPay")?.value || "";
+  const note = document.getElementById("refundNote")?.value?.trim() || "";
+  if(!Number.isFinite(amount) || amount <= 0){
+    alert("请输入大于0的退款金额");
+    return;
+  }
+  if(!pay){
+    alert("请选择退款方式");
+    return;
+  }
+  if(amount > Number(t.paidJPY || 0)){
+    if(!confirm(`退款金额 ¥${amount.toLocaleString()} 超过当前已收净额 ¥${Number(t.paidJPY || 0).toLocaleString()}。仍要继续吗？`)) return;
+  }
+  if(!confirm(`确认退款 ¥${amount.toLocaleString()}？
+退款方式：${pay}${note ? `
+备注：${note}` : ""}`)) return;
+
+  refundSubmitting = true;
+  try{
+    let record = await createOrUpdateRecord(t);
+    record.payments = normalizePayments(record);
+    record.payments.push(makePaymentLine({
+      type:"退款",
+      reason:"手动退款",
+      pay,
+      amountJPY:-amount,
+      note
+    }));
+    const paymentTotalJPY = sumPaymentsJPY(record.payments);
+    record.totalJPY = paymentTotalJPY;
+    record.totalRMB = sumPaymentsRMB(record.payments);
+    record.paidJPY = paymentTotalJPY;
+    record.pay = getPaymentSummary(record.payments);
+    record.currency = getCurrencySummary(record.payments);
+    record.dueJPY = Math.max(0, Number(record.originalJPY || getOriginalJPY(t)) - paymentTotalJPY);
+    record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
+    record.updatedAt = Date.now();
+
+    t.paidJPY = paymentTotalJPY;
+    t.paidRMB = record.totalRMB;
+    t.paidAt = Date.now();
+
+    await saveRecordSafely({db,ref,record});
+    await save("manual_refund");
+    render();
+    closeRefund();
+  }catch(e){
+    console.error(e);
+    alert("退款记录失败：" + (e?.message || e));
+  }finally{
+    refundSubmitting = false;
+  }
+}
+
+function closeRefund(){
+  document.getElementById("refundModalBg").style.display = "none";
+  refundIndex = -1;
 }
 
 function closeCheckout(){
@@ -2232,39 +2697,111 @@ async function confirmBatchStart(){
     alert("请选择付款方式");
     return;
   }
+  if(!navigator.onLine){
+    alert("当前离线，无法安全批量开始。请恢复网络后再操作。");
+    return;
+  }
 
   const indexes = [...document.querySelectorAll(".batch-table-check:checked")]
     .map(el=>Number(el.value));
-
   if(indexes.length === 0){
     alert("请选择至少一张桌");
     return;
   }
 
-for(const i of indexes){
-  const t = state.tables[i];
-  if(!t || t.start) continue;
+  const now = Date.now();
+  const groupId = await allocateGroupId(db,state.groups || []);
+  const groupName = document.getElementById("batchGroupName")?.value.trim() || `现场组`;
+  const paymentMode = document.getElementById("batchGroupPaymentMode")?.value || "split";
+  const group = {
+    id:groupId,
+    name:groupName,
+    color:"#B7E4C7",
+    tableIndexes:indexes,
+    peopleCount:Math.max(1,indexes.length),
+    paymentMode,
+    createdAt:now,
+    updatedAt:now
+  };
 
-  t.packageIndex = packageIndex;
-  t.pay = pay;
-  t.start = Date.now();
-  t.pausedAt = null;
-  t.alerted = false;
-  t.alerting = false;
-  t.lastAction = "start";
-  t.paidJPY = Number(getPackage(t).price || 0);
-  t.paidRMB = getRMB(t.paidJPY);
-  t.paidAt = Date.now();
-  t.payTiming = "prepaid";
+  const entries = [];
+  for(const i of indexes){
+    const source = state.tables[i];
+    if(!source || source.start){
+      alert(`${source?.name || `${i+1}号桌`}已经开始，批量开始已取消。`);
+      return;
+    }
 
-  await createOrUpdateRecord(t);
+    const t = JSON.parse(JSON.stringify(source));
+    t.packageIndex = packageIndex;
+    t.pay = pay;
+    t.payTiming = "prepaid";
+    t.groupId = groupId;
+    t.startLocked = true;
+    ensureVisitAndRecordId(t);
+    t.start = now;
+    t.pausedAt = null;
+    t.alerted = false;
+    t.alerting = false;
+    t.lastAction = "batch_start";
+
+    const pkg = getPackage(t);
+    t.paidJPY = Number(pkg.price || 0);
+    t.paidRMB = getRMB(t.paidJPY);
+    t.paidAt = now;
+
+    const payments = t.paidJPY > 0 ? [makePaymentLine({
+      reason:"套餐预付款",
+      pay:t.pay || "未记录",
+      amountJPY:t.paidJPY,
+      note:"批量开始时收取"
+    })] : [];
+
+    const record = {
+      id:t.recordId, visitId:t.visitId, timestamp:now, startAt:now,
+      startedTime:new Date(now).toLocaleString(), businessDate:getBusinessDateKey(now),
+      time:new Date(now).toLocaleString(), tableName:t.name,
+      customerName:t.customer?.name || "", phoneLast4:t.customer?.phoneLast4 || "",
+      customerType:t.type || "walkin", packageName:pkg.name,
+      packageMinutes:pkg.unlimited ? "不限时" : pkg.minutes,
+      packagePrice:Number(pkg.price || 0), extraMinutes:0, extensionAmount:0,
+      originalJPY:Number(pkg.price || 0), payments,
+      paidJPY:sumPaymentsJPY(payments),
+      dueJPY:Math.max(0,Number(pkg.price || 0)-sumPaymentsJPY(payments)),
+      totalJPY:sumPaymentsJPY(payments),
+      totalRMB:payments.reduce((sum,line)=>sum+Number(line.amountRMB || 0),0),
+      pay:getPaymentSummary(payments), currency:getCurrencySummary(payments),
+      payTiming:"prepaid", paidStatus:"已结清", status:"进行中", closed:false,
+      receiptImage:"", receiptFileName:"", groupId, updatedAt:now, localUpdatedAt:now
+    };
+    entries.push({tableIndex:i,tablePatch:t,record});
+  }
+
+  setSyncStatus("pending","● 正在由服务器批量锁定桌位…");
+  try{
+    const result = await atomicBatchStartTables({db,ref,entries,group});
+    state = JSON.parse(JSON.stringify(result.state));
+    for(const i of indexes){
+      const t = state.tables[i];
+      if(t?.type === "booking" && Array.isArray(state.bookings)){
+        const booking = state.bookings.find(b=>Number(b.id) === Number(t.bookingId))
+          || state.bookings.find(b=>getBookingIndexes(b).includes(i) && (!b.name || b.name === t.customer?.name));
+        if(booking) markBookingTableStarted(booking,i,now);
+      }
+    }
+    ensureGroups(state);
+    const savedGroup = upsertGroup(state,group);
+    syncGroupReferences(state,savedGroup);
+    await saveStateSafely({db,ref,getState:()=>state,action:"batch_start_finalize"});
+    closeBatchStart();
+    render();
+    setSyncStatus("synced",`● 已安全批量开始 ${indexes.length} 桌`);
+  }catch(error){
+    console.error("批量开始失败",error);
+    setSyncStatus("error","● 批量开始失败，未写入任何桌位");
+    alert("批量开始失败：\n" + (error?.message || error));
+  }
 }
-  save();
-  closeBatchStart();
-  render();
-}
-
-
 
 
 
@@ -2302,11 +2839,6 @@ function openBatchCheckout(){
             <option value="PayPay" ${t.pay==="PayPay"?"selected":""}>PayPay</option>
             <option value="微信" ${t.pay==="微信"?"selected":""}>微信</option>
             <option value="支付宝" ${t.pay==="支付宝"?"selected":""}>支付宝</option>            
-          </select>
-
-          <select id="batch-currency-${i}">
-            <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
-            <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
           </select>
 
           <input
@@ -2356,8 +2888,34 @@ function toggleGroupPayMode(){
   if(box){
     box.style.display = checked ? "block" : "none";
   }
+  if(checked && document.getElementById("groupPaymentLines") && !document.getElementById("groupPaymentLines").children.length){
+    addGroupPaymentLine();
+  }
 }
 
+
+function addGroupPaymentLine(){
+  const box = document.getElementById("groupPaymentLines");
+  if(!box) return;
+  const row = document.createElement("div");
+  row.className = "group-payment-line";
+  row.innerHTML = `
+    <input class="group-line-payer" placeholder="付款人">
+    <select class="group-line-method"><option value="">付款方式</option><option>现金</option><option>PayPay</option><option>微信</option><option>支付宝</option></select>
+    <input class="group-line-amount" type="number" min="0" placeholder="金额">
+    <input class="group-line-people" type="number" min="1" placeholder="代付人数">
+    <button type="button" class="btn-danger" onclick="this.parentElement.remove()">删除</button>`;
+  box.appendChild(row);
+}
+
+function readGroupPaymentLines(){
+  return [...document.querySelectorAll(".group-payment-line")].map(row=>({
+    payerName:row.querySelector(".group-line-payer")?.value.trim() || "",
+    method:row.querySelector(".group-line-method")?.value || "",
+    amountJPY:Number(row.querySelector(".group-line-amount")?.value || 0),
+    coveredPeople:Number(row.querySelector(".group-line-people")?.value || 0)
+  })).filter(line=>line.amountJPY > 0 || line.payerName || line.method || line.coveredPeople);
+}
 
 function closeBatchCheckout(){
   document.getElementById("batchCheckoutModalBg").style.display = "none";
@@ -2380,8 +2938,13 @@ async function confirmBatchCheckout(){
     const groupPayerName = document.getElementById("groupPayerName")?.value.trim() || "";
     const groupPayNote = document.getElementById("groupPayNote")?.value.trim() || "";
     const manualTotal = Number(document.getElementById("groupPayTotal")?.value || 0);
+    const paymentLines = readGroupPaymentLines();
 
-    if(!groupPayMethod){
+    if(paymentLines.length && paymentLines.some(line=>!line.method || line.amountJPY <= 0)){
+      alert("请完整填写每一笔付款明细的付款方式和金额");
+      return;
+    }
+    if(!paymentLines.length && !groupPayMethod){
       alert("请选择整组付款方式");
       return;
     }
@@ -2396,7 +2959,8 @@ async function confirmBatchCheckout(){
     });
 
     const defaultTotal = items.reduce((sum,item)=>sum + Number(item.dueJPY || 0),0);
-    const groupTotalJPY = manualTotal > 0 ? manualTotal : defaultTotal;
+    const lineTotal = paymentLines.reduce((sum,line)=>sum + line.amountJPY,0);
+    const groupTotalJPY = lineTotal > 0 ? lineTotal : (manualTotal > 0 ? manualTotal : defaultTotal);
 
     if(groupTotalJPY <= 0){
       alert("整组没有需要补收的金额");
@@ -2416,6 +2980,8 @@ async function confirmBatchCheckout(){
       .join("、");
 
     let remaining = groupTotalJPY;
+    const selectedGroupIds = Array.from(new Set(items.map(item=>String(item.t.groupId || "")).filter(Boolean)));
+    const unifiedGroup = selectedGroupIds.length === 1 ? getGroup(state,selectedGroupIds[0]) : null;
 
     for(let idx=0; idx<items.length; idx++){
       const {i,t,dueJPY} = items[idx];
@@ -2435,22 +3001,22 @@ async function confirmBatchCheckout(){
         paidThisTime = dueJPY;
       }
 
-      t.pay = groupPayMethod;
+      const effectiveMethod = paymentLines.length
+        ? Array.from(new Set(paymentLines.map(line=>line.method))).join("+")
+        : groupPayMethod;
+      t.pay = effectiveMethod;
       t.currency = "日元";
 
       const record = await createOrUpdateRecord(t);
       record.payments = normalizePayments(record);
 
       if(paidThisTime !== 0){
-        record.payments.push(
-          makePaymentLine({
-            type:paidThisTime < 0 ? "退款" : "收入",
-            reason:"整组代付",
-            pay:groupPayMethod,
-            amountJPY:paidThisTime,
-            note:groupPayNote || `${groupPayerName || "未填写付款人"} 代付：${tableNames}`
-          })
-        );
+        settleRecordToFinalAmount(record,{
+          finalAmountJPY:sumPaymentsJPY(record.payments) + paidThisTime,
+          pay:effectiveMethod,
+          reason:"整组代付补收",
+          note:groupPayNote || `${groupPayerName || paymentLines.map(line=>line.payerName).filter(Boolean).join("、") || "未填写付款人"} 代付：${tableNames}`
+        });
       }
 
       const paymentTotalJPY = sumPaymentsJPY(record.payments);
@@ -2461,7 +3027,7 @@ async function confirmBatchCheckout(){
 
       record.originalJPY = getOriginalJPY(t);
       record.totalJPY = paymentTotalJPY;
-      record.totalRMB = getRMB(paymentTotalJPY);
+      record.totalRMB = sumPaymentsRMB(record.payments);
       record.paidJPY = paymentTotalJPY;
       record.dueJPY = Math.max(0, record.originalJPY - paymentTotalJPY);
       record.pay = getPaymentSummary(record.payments);
@@ -2471,7 +3037,8 @@ async function confirmBatchCheckout(){
       record.checkoutMethod = "整组代付";
       record.groupPaymentId = groupPaymentId;
       record.groupPayerName = groupPayerName;
-      record.groupPaymentMethod = groupPayMethod;
+      record.groupPaymentMethod = paymentLines.length ? paymentLines.map(line=>line.method).join("+") : groupPayMethod;
+      record.groupPaymentLines = paymentLines;
       record.groupPaymentTotalJPY = groupTotalJPY;
       record.groupPaymentTableNames = tableNames;
       record.groupPaymentNote = groupPayNote;
@@ -2482,7 +3049,7 @@ record.closedTime = new Date(now).toLocaleString();
 
 record.businessDate =
     record.businessDate ||
-    getDateText(record.timestamp || now);
+    getBusinessDateKey(record.startAt || record.timestamp || now);
       record.closedTime = new Date().toLocaleString();
 
       await updateRecordOnly(record);
@@ -2490,11 +3057,32 @@ record.businessDate =
       state.tables[i] = resetTable(t.name);
     }
 
+    if(unifiedGroup){
+      const lines = paymentLines.length ? paymentLines : [{
+        payerName:groupPayerName,
+        method:groupPayMethod,
+        amountJPY:groupTotalJPY,
+        coveredPeople:unifiedGroup.peopleCount || indexes.length
+      }];
+      unifiedGroup.paymentMode = lines.length === 1 ? "unified" : "split";
+      unifiedGroup.payments = lines.map(line=>({
+        id:`pay_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+        payerName:line.payerName,
+        method:line.method,
+        amountJPY:line.amountJPY,
+        coveredPeople:line.coveredPeople,
+        coveredTableIndexes:indexes,
+        note:groupPayNote,
+        createdAt:Date.now(),
+        referenceOnly:true
+      }));
+      unifiedGroup.updatedAt = Date.now();
+    }
     await save();
     closeBatchCheckout();
     render();
 
-    alert("整组代付结账完成");
+    alert("整组付款结账完成");
     return;
   }
 
@@ -2513,7 +3101,7 @@ record.businessDate =
     const t = state.tables[i];
 
     const pay = document.getElementById(`batch-pay-${i}`).value;
-    const currency = document.getElementById(`batch-currency-${i}`).value;
+    const currency = currencyForPaymentMethod(pay);
     const manualAmount = Number(document.getElementById(`batch-amount-${i}`).value || 0);
 
     stopAlertLoop(i);
@@ -2528,15 +3116,12 @@ record.businessDate =
     record.payments = normalizePayments(record);
 
     if(finalPaidJPY !== 0){
-      record.payments.push(
-        makePaymentLine({
-          type: finalPaidJPY < 0 ? "退款" : "收入",
-          reason: finalPaidJPY < 0 ? "批量退款" : "批量结账",
-          pay,
-          amountJPY: finalPaidJPY,
-          note: "批量结账记录"
-        })
-      );
+      settleRecordToFinalAmount(record,{
+        finalAmountJPY:sumPaymentsJPY(record.payments) + finalPaidJPY,
+        pay,
+        reason:"批量续时补收",
+        note:"批量结账记录"
+      });
     }
 
     const paymentTotalJPY = sumPaymentsJPY(record.payments);
@@ -2547,7 +3132,7 @@ record.businessDate =
 
     record.originalJPY = getOriginalJPY(t);
     record.totalJPY = paymentTotalJPY;
-    record.totalRMB = getRMB(paymentTotalJPY);
+    record.totalRMB = sumPaymentsRMB(record.payments);
     record.paidJPY = paymentTotalJPY;
     record.dueJPY = Math.max(0, record.originalJPY - paymentTotalJPY);
     record.pay = getPaymentSummary(record.payments);
@@ -2563,7 +3148,7 @@ record.closedTime = new Date(now).toLocaleString();
 
 record.businessDate =
     record.businessDate ||
-    getDateText(record.timestamp || now);
+    getBusinessDateKey(record.startAt || record.timestamp || now);
 
 
     await updateRecordOnly(record);
@@ -2573,6 +3158,133 @@ record.businessDate =
 
   await save();
   closeBatchCheckout();
+  render();
+}
+
+function setGroupViewMode(value){
+  groupViewMode = value === true || value === "group";
+  render();
+}
+
+function openGroupManager(groupId=""){
+  editingGroupId = String(groupId || "");
+  const group = editingGroupId ? getGroup(state,editingGroupId) : null;
+  document.getElementById("groupManagerTitle").innerText = group ? `管理组 ${group.id}` : "创建新组";
+  document.getElementById("groupManagerName").value = group?.name || "";
+  document.getElementById("groupManagerPaymentMode").value = group?.paymentMode || "split";
+  const selected = new Set((group?.tableIndexes || []).map(Number));
+  document.getElementById("groupManagerTables").innerHTML = state.tables.map((t,i)=>{
+    const other = t.groupId && String(t.groupId)!==editingGroupId;
+    return `<label class="table-item"><input type="checkbox" class="group-manager-table" value="${i}" ${selected.has(i)?"checked":""}><span class="num">${i+1}</span><span class="sub">${other ? `当前：${t.groupId}` : (t.start?"使用中":"空闲")}</span></label>`;
+  }).join("");
+  document.getElementById("groupManagerDelete").style.display = group ? "block" : "none";
+  document.getElementById("groupManagerModalBg").style.display = "block";
+}
+
+function closeGroupManager(){
+  document.getElementById("groupManagerModalBg").style.display = "none";
+  editingGroupId = "";
+}
+
+async function syncTableRecordGroup(tableIndex){
+  const table = state.tables?.[Number(tableIndex)];
+  if(!table?.recordId) return;
+
+  let record = getLocalRecordSync(table.recordId);
+  if(!record){
+    try{
+      record = await Promise.race([
+        getTableRecord(table),
+        new Promise(resolve=>setTimeout(()=>resolve(null),1200))
+      ]);
+    }catch(_error){
+      record = null;
+    }
+  }
+  if(!record) return;
+
+  if(table.groupId){
+    record.groupId = String(table.groupId);
+    record.groupName = String(table.groupName || "未命名组");
+    record.groupColor = String(table.groupColor || table.activeColor || "#B7E4C7");
+  }else{
+    delete record.groupId;
+    delete record.groupName;
+    delete record.groupColor;
+  }
+  record.updatedAt = Date.now();
+  await saveRecordSafely({db,ref,record});
+}
+
+async function saveGroupManager(){
+  const button = document.getElementById("groupManagerSave");
+  const originalText = button?.innerText || "保存组";
+  try{
+    const indexes = [...document.querySelectorAll(".group-manager-table:checked")].map(el=>Number(el.value));
+    if(indexes.length < 1){ alert("请至少选择一张桌"); return; }
+    if(button){ button.disabled = true; button.innerText = "正在保存…"; }
+
+    const id = editingGroupId || await allocateGroupId(db,state.groups || []);
+    if(!id) throw new Error("无法生成组 ID");
+
+    // 保存变更前的成员范围。除了新选中的桌，也要同步从原组移出的桌位账单。
+    const affectedIndexes = new Set(indexes);
+    ensureGroups(state).forEach(g=>{
+      const oldIndexes = (g.tableIndexes || []).map(Number);
+      if(g.id === id || oldIndexes.some(i=>indexes.includes(i))){
+        oldIndexes.forEach(i=>affectedIndexes.add(i));
+      }
+    });
+
+    // 从其他组移除被重新分配的桌位，实现拆组与重组。
+    ensureGroups(state).forEach(g=>{
+      if(g.id === id) return;
+      g.tableIndexes = (g.tableIndexes || []).map(Number).filter(i=>!indexes.includes(i));
+      g.updatedAt = Date.now();
+      syncGroupReferences(state,g);
+    });
+    const existing = getGroup(state,id);
+    const group = upsertGroup(state,{
+      ...(existing || {}),
+      id,
+      name:document.getElementById("groupManagerName").value.trim() || "未命名组",
+      peopleCount:Math.max(1,indexes.length),
+      paymentMode:document.getElementById("groupManagerPaymentMode").value || "split",
+      color:existing?.color || "#B7E4C7",
+      tableIndexes:indexes,
+      updatedAt:Date.now()
+    });
+    syncGroupReferences(state,group);
+
+    // 组与桌位状态保存后，将同一批桌位现有账单的 groupId 一并更新。
+    // 今日账单读取的是 records 集合，不能只修改 shop/main 中的桌位。
+    // 本机立即完成，窗口不再等待每张账单上传。
+    emergencySaveState({db,ref,state,action:"manage_group"});
+    closeGroupManager();
+    render();
+
+    save("manage_group").catch(error=>console.warn("组状态后台同步失败",error));
+    Promise.all([...affectedIndexes].map(index=>syncTableRecordGroup(index)))
+      .catch(error=>console.warn("组内账单后台同步失败",error));
+  }catch(error){
+    console.error("保存组失败",error);
+    alert(`保存组失败：${error?.message || error}`);
+  }finally{
+    if(button){ button.disabled = false; button.innerText = originalText; }
+  }
+}
+
+async function dissolveCurrentGroup(){
+  const group = getGroup(state,editingGroupId);
+  if(!group || !confirm(`确认拆散 ${group.id}？桌位和账单不会被删除。`)) return;
+  (state.tables || []).forEach(t=>{
+    if(String(t.groupId || "") === group.id){ t.groupId="";t.groupName="";t.groupColor=""; }
+  });
+  group.status = "dissolved";
+  group.tableIndexes = [];
+  group.updatedAt = Date.now();
+  await save("dissolve_group");
+  closeGroupManager();
   render();
 }
 
@@ -2604,6 +3316,11 @@ function toggleFilterPanel(){
 
 
 window.toggleSortDirection = toggleSortDirection;
+window.setGroupViewMode = setGroupViewMode;
+window.openGroupManager = openGroupManager;
+window.closeGroupManager = closeGroupManager;
+window.saveGroupManager = saveGroupManager;
+window.dissolveCurrentGroup = dissolveCurrentGroup;
 window.toggleFilterPanel = toggleFilterPanel;
 window.roundBatchAmount = roundBatchAmount;
 window.openBatchCheckout = openBatchCheckout;
@@ -2620,6 +3337,8 @@ window.setPackage = setPackage;
 window.setWalkin = setWalkin;
 window.setBooking = setBooking;
 window.start = start;
+window.updatePreMinutes = updatePreMinutes;
+window.toggleStartLock = toggleStartLock;
 window.pause = pause;
 window.resume = resume;
 window.addHour = addHour;
@@ -2633,6 +3352,9 @@ window.openForceEnd = openForceEnd;
 window.closeForceEnd = closeForceEnd;
 window.confirmForceEnd = confirmForceEnd;
 window.closeCheckout = closeCheckout;
+window.openRefund = openRefund;
+window.confirmRefund = confirmRefund;
+window.closeRefund = closeRefund;
 window.initPush = initPush;
 window.updateCustomer = updateCustomer;
 window.toggleType = toggleType;
@@ -2642,6 +3364,7 @@ window.setPayTiming = setPayTiming;
 window.moveRunningTable = moveRunningTable;
 window.refreshCheckoutDiff = refreshCheckoutDiff;
 window.toggleGroupPayMode = toggleGroupPayMode;
+window.addGroupPaymentLine = addGroupPaymentLine;
 window.startRunningMoveDrag = startRunningMoveDrag;
 window.confirmMoveRunningLine = confirmMoveRunningLine;
 window.closeMoveRunningLineModal = closeMoveRunningLineModal;

@@ -1,0 +1,13 @@
+Chiptune Table Timer v2.9.18
+时间戳 + 乐观锁多端同步增强
+
+1. shop/main 继续使用 Firestore Transaction。事务读取后若文档已被其他设备修改，Firestore 自动重试。
+2. 每次本地操作记录 expectedRevision；提交时比较云端 actualRevision，并写入冲突日志。
+3. 桌位、预约、分组、客户实体增加 _entitySync：version、updatedAt、deviceId、operationId。
+4. 两台设备修改不同实体时逐实体合并，不再整块覆盖。
+5. 两台设备同时修改同一实体时，先比较 version，再比较 updatedAt 和 operationId，保证结果确定且不会反复回档。
+6. 每次离线操作保留独立 operationId，联网后按顺序重放；事务重试时只重放本次真正修改的实体。
+7. records 账单增加 _recordSync 版本与时间戳，并通过事务写入，旧账单版本不会覆盖新版本。
+8. operationLogs 新增 expectedRevision、actualRevision、optimisticConflict、operationId，便于排查冲突。
+
+注意：客户端时间戳用于同版本冲突的确定性排序。设备时间应保持自动校时。核心并发安全仍由 Firestore Transaction 和版本号共同保证。

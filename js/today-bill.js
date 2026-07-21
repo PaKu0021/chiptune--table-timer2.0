@@ -1,12 +1,15 @@
 import { doc, onSnapshot, collection, setDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords } from "./safe-state.js?v=2.6.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, loadLocalRecords, mergeRecordLists, saveRecordSafely, subscribeAllRecords, emergencySaveRecord, emergencySaveState } from "./safe-state.js?v=4.0.0";
+import { encodeGroupDocumentId, ensureGroups } from "./group-model.js?v=4.0.0";
+import { dateKey, getCurrentBusinessDate, getRecordBusinessDate, getRecordTimestamp } from "./business-day.js?v=4.0.0";
+import { RMB_PER_JPY } from "./business-day.js?v=4.0.0";
 
 
-import { db } from "./firebase.js?v=2.6.5";
+import { db } from "./firebase.js?v=4.0.0";
 
 const ref = doc(db, "shop", "main");
 const recordsRef = collection(db, "records");
-const RATE = 0.044;
+
 
 let state = null;
 installConnectionGuard();
@@ -28,6 +31,13 @@ loadLocalRecords().then(localRecords=>{
   renderTodayBill();
 }).catch(err=>console.warn("读取本机账单失败",err));
 
+window.addEventListener("chiptune-record-broadcast",event=>{
+  const record = event.detail?.record;
+  if(!record?.id) return;
+  records = mergeRecordLists(records,[record]);
+  renderTodayBill();
+});
+
 
 let editingRecordId = null;
 let uploadingPaymentRecordId = null;
@@ -36,11 +46,12 @@ let uploadingGroupId = null;
 let uploadingGroupPaymentIndex = null;
 let editingGroupId = null;
 let groupReceiptMap = {};
+let timeSortDirection = "asc";
 
 // 整组截图独立存放，避免把 Base64 图片塞进 shop/main。
 onSnapshot(collection(db,"groupReceipts"), snap=>{
   const next = {};
-  snap.docs.forEach(d=>{ next[String(d.id)] = {id:d.id,...d.data()}; });
+  snap.docs.forEach(d=>{ const data=d.data(); next[String(data.groupId || d.id)] = {id:d.id,...data}; });
   groupReceiptMap = next;
   try{ renderTodayBill(); }catch(err){ console.warn("整组截图刷新失败",err); }
 }, err=>console.warn("整组截图监听失败",err));
@@ -50,12 +61,10 @@ onSnapshot(ref, { includeMetadataChanges:true }, async snap => {
   if(!snap.exists()) return;
 
   state = await reconcileCloudState(snap.data());
-  if(!snap.metadata.hasPendingWrites) setStateBaseline(state);
+  if(!snap.metadata.fromCache && !snap.metadata.hasPendingWrites) setStateBaseline(snap.data());
   if(snap.metadata.fromCache) setSyncStatus("cache");
 
-if(!Array.isArray(state.groups)){
-  state.groups = [];
-}
+ensureGroups(state);
 
 renderTodayBill();
   
@@ -66,20 +75,8 @@ subscribeAllRecords({
   onChange:list=>{ records=list; renderTodayBill(); }
 });
 
-function dateKey(ts){
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function getRecordBusinessDate(r){
-  if(r.businessDate) return r.businessDate;
-
-  const d = new Date(r.startAt || r.timestamp || r.time || r.date || Date.now());
-  return dateKey(d.getTime());
-}
-
-function getRecordTime(r){
-  return r.closedAt || r.paidAt || r.timestamp || r.time || r.date || Date.now();
+function getRecordTime(record){
+  return getRecordTimestamp(record);
 }
 
 
@@ -102,6 +99,44 @@ function normalizePayments(r){
   return [];
 }
 
+
+function paymentCurrency(pay){
+  return pay === "微信" || pay === "支付宝" ? "人民币" : "日元";
+}
+
+function summarizePaymentMethods(payments){
+  const methods = [...new Set((payments || [])
+    .filter(p=>Number(p.amountJPY || 0) !== 0)
+    .map(p=>p.pay || "未记录"))];
+  if(methods.length === 0) return "未记录";
+  return methods.length === 1 ? methods[0] : "混合";
+}
+
+function summarizeCurrencies(payments){
+  const currencies = [...new Set((payments || [])
+    .filter(p=>Number(p.amountJPY || 0) !== 0)
+    .map(p=>p.currency || paymentCurrency(p.pay)))];
+  if(currencies.length === 0) return "日元";
+  return currencies.length === 1 ? currencies[0] : "混合";
+}
+
+function makeManualAdjustment({amountJPY, pay, note, reason}){
+  return {
+    operationId:`manual_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+    type: amountJPY < 0 ? "退款" : "收入",
+    reason: reason || (amountJPY < 0 ? "手动退款修正" : "手动补收修正"),
+    pay: pay || "未记录",
+    currency: paymentCurrency(pay),
+    amountJPY:Number(amountJPY || 0),
+    amountRMB:paymentCurrency(pay) === "人民币"
+      ? Math.floor(Number(amountJPY || 0) * RMB_PER_JPY)
+      : 0,
+    note:note || "",
+    time:new Date().toLocaleString(),
+    timestamp:Date.now()
+  };
+}
+
 function isRmbPayment(p, r){
   const pay = p.pay || r.pay || "";
   return pay === "微信" || pay === "支付宝" || p.currency === "人民币" || r.currency === "人民币";
@@ -115,7 +150,7 @@ function paymentRMB(p){
   if(p.amountRMB !== undefined){
     return Number(p.amountRMB || 0);
   }
-  return Math.floor(Number(p.amountJPY || 0) * RATE);
+  return Math.floor(Number(p.amountJPY || 0) * RMB_PER_JPY);
 }
 
 function sumPaymentsJPY(r){
@@ -177,7 +212,7 @@ function paymentDetailHTML(r){
 
 function getTodayRecords(){
   return records.filter(r=>{
-    return getRecordBusinessDate(r) === dateKey(Date.now());
+    return getRecordBusinessDate(r) === getCurrentBusinessDate();
   });
 }
 
@@ -216,19 +251,19 @@ function toJPY(r){
 
   if(r.totalJPY !== undefined) return Number(r.totalJPY || 0);
   if(r.jpy !== undefined) return Number(r.jpy || 0);
-  if(r.currency === "人民币") return Math.floor(Number(r.totalRMB || r.rmb || 0) / RATE);
+  if(r.currency === "人民币") return Math.floor(Number(r.totalRMB || r.rmb || 0) / RMB_PER_JPY);
   return 0;
 }
 
 
 function toRMB(r){
   if(Array.isArray(r.payments)){
-    return Math.floor(toJPY(r) * RATE);
+    return Math.floor(toJPY(r) * RMB_PER_JPY);
   }
 
   if(r.totalRMB !== undefined) return Number(r.totalRMB || 0);
   if(r.rmb !== undefined) return Number(r.rmb || 0);
-  return Math.floor(toJPY(r) * RATE);
+  return Math.floor(toJPY(r) * RMB_PER_JPY);
 }
 
 function actualRMBIncome(r){
@@ -248,6 +283,54 @@ function displayCurrency(r){
   if(hasRmb && hasJpy) return "混合";
   if(hasRmb) return "人民币";
   return "日元";
+}
+
+function getPaySummary(r){
+  const pays = [...new Set(
+    normalizePayments(r)
+      .filter(p=>Number(p.amountJPY || 0) !== 0 || Number(p.amountRMB || 0) !== 0)
+      .map(p=>p.pay || r.pay || "未记录")
+  )];
+  if(pays.length === 0) return r.pay || "未记录";
+  if(pays.length === 1) return pays[0];
+  return "混合";
+}
+
+function buildCurrencySummary(rows){
+  const channels = {
+    "现金":{currency:"日元",amount:0},
+    "PayPay":{currency:"日元",amount:0},
+    "微信":{currency:"人民币",amount:0},
+    "支付宝":{currency:"人民币",amount:0},
+    "未记录":{currency:"日元",amount:0}
+  };
+  let actualJPY = 0;
+  let actualRMB = 0;
+  rows.forEach(r=>{
+    normalizePayments(r).forEach(p=>{
+      const pay = p.pay || r.pay || "未记录";
+      const rmb = isRmbPayment(p,r);
+      const amount = rmb ? paymentRMB(p) : paymentJPY(p);
+      if(!channels[pay]) channels[pay] = {currency:rmb ? "人民币" : "日元",amount:0};
+      channels[pay].currency = rmb ? "人民币" : "日元";
+      channels[pay].amount += amount;
+      if(rmb) actualRMB += amount; else actualJPY += amount;
+    });
+  });
+  const jpyToRmb = Math.floor(actualJPY * RMB_PER_JPY);
+  const rmbToJpy = Math.floor(actualRMB / RMB_PER_JPY);
+  return {
+    channels, actualJPY, actualRMB, jpyToRmb, rmbToJpy,
+    convertedJPY: actualJPY + rmbToJpy,
+    convertedRMB: actualRMB + jpyToRmb
+  };
+}
+
+function channelSummaryText(summary){
+  return Object.entries(summary.channels)
+    .filter(([,v])=>Number(v.amount)!==0)
+    .map(([name,v])=>`${name} ${v.currency === "人民币" ? "人民币 " : ""}¥${Math.floor(v.amount).toLocaleString()}`)
+    .join(" / ") || "暂无";
 }
 
 function compressImage(file, maxWidth = 600, quality = 0.45){
@@ -288,57 +371,70 @@ function compressImage(file, maxWidth = 600, quality = 0.45){
   });
 }
 
+function updateTodayTimeSortHeader(){
+  const button = document.getElementById("todayTimeSortButton");
+  if(!button) return;
+  const ascending = timeSortDirection === "asc";
+  button.innerHTML = `时间 <span aria-hidden="true">${ascending ? "▲" : "▼"}</span>`;
+  button.title = ascending ? "当前从早到晚，点击切换为从晚到早" : "当前从晚到早，点击切换为从早到晚";
+  button.setAttribute("aria-label", button.title);
+}
+
+function toggleTodayTimeSort(){
+  timeSortDirection = timeSortDirection === "asc" ? "desc" : "asc";
+  renderTodayBill();
+}
+
 function renderTodayBill(){
+  updateTodayTimeSortHeader();
   const list = getTodayRecords();
   const groupMap = getGroupMap();
-
-  let jpyIncome = 0;
-  let rmbIncome = 0;
-  let convertedJPY = 0;
-  let payStats = {};
-  let typeStats = {walkin:0, booking:0};
-
-  list.forEach(r=>{
-
-  normalizePayments(r).forEach(p=>{
-    const jpy = paymentJPY(p);
-
-    convertedJPY += jpy;
-
-    if(isRmbPayment(p, r)){
-      rmbIncome += paymentRMB(p);
-    }else{
-      jpyIncome += jpy;
-    }
-
-    const pay = p.pay || r.pay || "未记录";
-    payStats[pay] = (payStats[pay] || 0) + jpy;
-  });
-
-  const type = r.customerType || r.type || "walkin";
-  typeStats[type] = (typeStats[type] || 0) + 1;
-});
-
+  const summary = buildCurrencySummary(list);
+  const typeStats = {walkin:0, booking:0};
+  list.forEach(r=>{ const type=r.customerType || r.type || "walkin"; typeStats[type]=(typeStats[type]||0)+1; });
 
   document.getElementById("todaySummary").innerHTML = `
-    日元收入：¥${Math.floor(jpyIncome).toLocaleString()}<br>
-    人民币收入：¥${Math.floor(rmbIncome).toLocaleString()}<br>
-    换算总收入：¥${Math.floor(convertedJPY).toLocaleString()}<br>
-    笔数：${list.length}
-  `;
+    日元实收：¥${Math.floor(summary.actualJPY).toLocaleString()}<br>
+    日元实收对应人民币参考：人民币 ¥${Math.floor(summary.jpyToRmb).toLocaleString()}<br>
+    人民币实收：人民币 ¥${Math.floor(summary.actualRMB).toLocaleString()}<br>
+    人民币实收对应日元参考：¥${Math.floor(summary.rmbToJpy).toLocaleString()}<br>
+    换算日元总收入：¥${Math.floor(summary.convertedJPY).toLocaleString()}<br>
+    换算人民币总收入：人民币 ¥${Math.floor(summary.convertedRMB).toLocaleString()}<br>
+    笔数：${list.length}`;
 
   document.getElementById("todayPayStats").innerHTML = `
-  付款渠道：${Object.keys(payStats).map(k=>`${k} ¥${Math.floor(payStats[k]).toLocaleString()}`).join(" / ") || "暂无"}
-  <br>
-    客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔
-  `;
+    付款渠道：${channelSummaryText(summary)}<br>
+    客源：Walk-in ${typeStats.walkin || 0}笔 / 预约 ${typeStats.booking || 0}笔`;
 
-  const { map:groupRecords, singles } = getRecordsByGroup([...list].reverse());
+  const directionFactor = timeSortDirection === "asc" ? 1 : -1;
+  const compareRecordsByTime = (a,b)=>{
+    const diff = getRecordTime(a) - getRecordTime(b);
+    if(diff) return diff * directionFactor;
+    return String(a.tableName || "").localeCompare(String(b.tableName || ""), "zh-CN", {numeric:true}) * directionFactor;
+  };
+  const chronological = [...list].sort(compareRecordsByTime);
+  const { map:groupRecords, singles } = getRecordsByGroup(chronological);
+
+  // 组作为一个完整区块显示；区块按照组内最早一笔账单时间排列，散桌也参与同一时间轴。
+  const blocks = [
+    ...Object.keys(groupRecords).map(groupId=>({
+      type:"group",
+      groupId,
+      rows:groupRecords[groupId].sort(compareRecordsByTime),
+      time:Math.min(...groupRecords[groupId].map(getRecordTime).filter(Boolean)) || 0
+    })),
+    ...singles.map(record=>({type:"single", record, time:getRecordTime(record)}))
+  ].sort((a,b)=>(a.time-b.time) * directionFactor);
 
   let html = "";
 
-  Object.keys(groupRecords).forEach(groupId=>{
-    const rows = groupRecords[groupId];
+  blocks.forEach(block=>{
+    if(block.type === "single"){
+      html += renderRecordRow(block.record,true);
+      return;
+    }
+    const groupId = block.groupId;
+    const rows = block.rows;
     const group = groupMap[groupId];
 
     html += `
@@ -347,6 +443,7 @@ function renderTodayBill(){
           👥 ${group?.name || rows[0]?.groupName || "未命名组"}
           （${rows.map(r=>r.tableName).join("、")}）
           <button class="btn-ghost" style="margin-left:12px;" onclick="openEditGroup('${groupId}')">修改组 / 加桌</button>
+          ${rows.length > 1 && rows.some(r=>getPaySummary(r)!=="现金") ? (rows.find(r=>r.receiptImage) ? `<button class="btn-ghost" style="margin-left:8px;" onclick="viewPaymentReceipt('${rows.find(r=>r.receiptImage).id}',0)">查看共用截图</button>` : `<button class="btn-main" style="margin-left:8px;" onclick="uploadSharedGroupReceipt('${groupId}')">上传共用截图（只需一次）</button>`) : ""}
         </td>
       </tr>
     `;
@@ -375,10 +472,6 @@ function renderTodayBill(){
     rows.forEach(r=>{
       html += renderRecordRow(r,false);
     });
-  });
-
-  singles.forEach(r=>{
-    html += renderRecordRow(r,true);
   });
 
   document.getElementById("todayRecords").innerHTML = html;
@@ -517,10 +610,9 @@ if(!recordId) return;
     r.receiptUploadedAt = Date.now();
     r.receiptUploadedTime = new Date().toLocaleString();
 
-    await setDoc(
-      doc(db,"records",r.id),
-      r
-    );
+    await saveRecordSafely({db,ref,record:r});
+    records = mergeRecordLists(records,[r]);
+    renderTodayBill();
 
     alert("收款截图已保存");
 
@@ -576,15 +668,20 @@ async function handlePaymentReceiptFile(file){
 
     const base64 = await fileToBase64(compressed);
 
+    const uploadedAt = Date.now();
     payment.receiptImage = base64;
     payment.receiptFileName = file.name;
-    payment.receiptUploadedAt = Date.now();
-    payment.receiptUploadedTime = new Date().toLocaleString();
+    payment.receiptUploadedAt = uploadedAt;
+    payment.receiptUploadedTime = new Date(uploadedAt).toLocaleString();
+    // 同时保存在账单级别，避免付款明细合并或索引变化后出现“查看但没有截图”。
+    record.receiptImage = base64;
+    record.receiptFileName = file.name;
+    record.receiptUploadedAt = uploadedAt;
+    record.receiptUploadedTime = payment.receiptUploadedTime;
 
-    await setDoc(
-      doc(db,"records",record.id),
-      record
-    );
+    await saveRecordSafely({db,ref,record});
+    records = mergeRecordLists(records,[record]);
+    renderTodayBill();
 
     uploadingPaymentRecordId = null;
     uploadingPaymentIndex = null;
@@ -618,7 +715,7 @@ async function handleGroupPaymentReceiptFile(file){
       updatedAt:Date.now()
     };
     // 独立文档保存。shop/main 中不再写入图片。
-    await setDoc(doc(db,"groupReceipts",String(group.id)), receiptDoc, {merge:true});
+    await setDoc(doc(db,"groupReceipts",encodeGroupDocumentId(group.id)), receiptDoc, {merge:true});
     groupReceiptMap[String(group.id)] = receiptDoc;
     // 清理旧版可能残留在主状态和付款明细中的重复图片。
     delete group.receiptImage;
@@ -680,7 +777,8 @@ function viewPaymentReceipt(recordId, paymentIndex){
   const r = records.find(x=>x.id === recordId);
   const p = r?.payments?.[paymentIndex];
 
-  if(!p || !p.receiptImage){
+  const receiptImage = p?.receiptImage || r?.receiptImage;
+  if(!receiptImage){
     alert("没有截图");
     return;
   }
@@ -701,7 +799,7 @@ function viewPaymentReceipt(recordId, paymentIndex){
     document.body.appendChild(bg);
   }
 
-  document.getElementById("receiptPreviewImg").src = p.receiptImage;
+  document.getElementById("receiptPreviewImg").src = receiptImage;
   bg.style.display = "block";
 }
 
@@ -780,9 +878,15 @@ function openEditGroup(groupId){
     .map(r=>{
       const checked = currentIds.has(String(r.id));
       const otherGroup = r.groupId && String(r.groupId)!==editingGroupId;
-      return `<label style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #eadfce;border-radius:12px;margin:6px 0;">
-        <input type="checkbox" class="edit-group-record-check" value="${r.id}" ${checked ? "checked" : ""}>
-        <span><b>${r.tableName}</b>｜${r.customerName || "-"}｜${r.packageName || "-"}${otherGroup ? "｜当前属于其他组，勾选后将移入本组" : ""}</span>
+      return `<label class="edit-group-card ${checked ? "selected" : ""} ${otherGroup ? "other-group" : ""}">
+        <input type="checkbox" class="edit-group-record-check" value="${r.id}" ${checked ? "checked" : ""} onchange="this.closest('.edit-group-card')?.classList.toggle('selected', this.checked)">
+        <span class="edit-group-checkmark" aria-hidden="true">✓</span>
+        <span class="edit-group-card-body">
+          <strong>${r.tableName}</strong>
+          <span class="edit-group-customer">${r.customerName || "未填写姓名"}</span>
+          <span class="edit-group-package">${r.packageName || "未选择套餐"}</span>
+          ${otherGroup ? '<em>当前属于其他组，选择后会移入本组</em>' : ''}
+        </span>
       </label>`;
     }).join("") || "今天暂无可加入的桌位账单";
   document.getElementById("editGroupModalBg").style.display = "block";
@@ -859,22 +963,17 @@ async function saveEditedGroup(){
   group.updatedAt = now;
 
   try{
-    // 每条账单先落本机，云端失败由队列稍后补传。
-    await Promise.all(changedRecords.map(r=>
-      Promise.race([
-        saveRecordSafely({db,ref,record:r}),
-        new Promise((_,reject)=>setTimeout(()=>reject(new Error("账单本机保存超时")),8000))
-      ]).catch(err=>{ console.warn("组账单保存进入后台重试",r.id,err); })
-    ));
-
-    await Promise.race([
-      saveStateSafely({db,ref,getState:()=>state,action:"today_bill_replace_group_tables"}),
-      new Promise((_,reject)=>setTimeout(()=>reject(new Error("组状态保存超时")),8000))
-    ]).catch(err=>console.warn("组状态将在后台继续同步",err));
+    // 先同步写入本机影子并立即关闭窗口；云端上传全部转入后台。
+    changedRecords.forEach(r=>emergencySaveRecord({db,ref,record:r}));
+    emergencySaveState({db,ref,state,action:"today_bill_replace_group_tables"});
 
     closeEditGroup();
     renderTodayBill();
-    alert("组桌位已更新");
+
+    Promise.all(changedRecords.map(r=>saveRecordSafely({db,ref,record:r})))
+      .catch(err=>console.warn("组账单后台同步失败，将自动重试",err));
+    saveStateSafely({db,ref,getState:()=>state,action:"today_bill_replace_group_tables"})
+      .catch(err=>console.warn("组状态后台同步失败，将自动重试",err));
   }finally{
     if(button){ button.disabled=false; button.textContent="保存组桌位"; }
   }
@@ -895,10 +994,9 @@ function openEditRecord(recordId){
     ${r.tableName || ""}｜${r.customerName || "-"} ${r.phoneLast4 || ""}
   `;
 
-  document.getElementById("editPay").value = r.pay || "现金";
-  document.getElementById("editTotalJPY").value = toJPY(r);
+  renderEditPayments(normalizePayments(r));
   document.getElementById("editBusinessDate").value =
-  r.businessDate || getRecordBusinessDate(r);
+  getRecordBusinessDate(r) || r.businessDate || "";
 
   document.getElementById("editGroupPaid").value =
     r.groupPaymentId ? "yes" : "";
@@ -920,50 +1018,94 @@ function closeEditRecord(){
   document.getElementById("editRecordModalBg").style.display = "none";
 }
 
+function editPaymentRowHTML(payment = {}, index = -1){
+  const pay = payment.pay || "现金";
+  const amountJPY = Number(payment.amountJPY || 0);
+  const amountRMB = Number(payment.amountRMB || 0);
+  const note = payment.note || "";
+  return `
+    <div class="edit-payment-row" data-original-index="${index}" style="border:1px solid #e7dfd2;border-radius:12px;padding:10px;margin-bottom:9px;background:#fff;">
+      <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:8px;align-items:end;">
+        <div><label style="margin-top:0;">方式</label><select class="edit-payment-pay">
+          ${["现金","PayPay","微信","支付宝"].map(x=>`<option value="${x}" ${x===pay?'selected':''}>${x}</option>`).join('')}
+        </select></div>
+        <div><label style="margin-top:0;">日元金额</label><input class="edit-payment-jpy" type="number" value="${amountJPY}"></div>
+        <div><label style="margin-top:0;">人民币金额</label><input class="edit-payment-rmb" type="number" value="${amountRMB}"></div>
+        <button type="button" class="btn-ghost" style="height:46px;padding:0 14px;" onclick="removeEditPaymentRow(this)">删除</button>
+      </div>
+      <label>该笔备注</label>
+      <input class="edit-payment-note" value="${String(note).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" placeholder="例如：补收、退款、代付">
+    </div>`;
+}
+
+function renderEditPayments(payments){
+  const list = Array.isArray(payments) && payments.length ? payments : [{pay:"现金",amountJPY:0,amountRMB:0,note:""}];
+  document.getElementById("editPaymentsList").innerHTML = list.map((p,i)=>editPaymentRowHTML(p,i)).join("");
+}
+
+function addEditPaymentRow(){
+  document.getElementById("editPaymentsList").insertAdjacentHTML("beforeend", editPaymentRowHTML({pay:"现金",amountJPY:0,amountRMB:0,note:""},-1));
+}
+
+function removeEditPaymentRow(button){
+  const rows = document.querySelectorAll("#editPaymentsList .edit-payment-row");
+  if(rows.length <= 1){ alert("账单至少需要保留一条付款记录"); return; }
+  button.closest(".edit-payment-row")?.remove();
+}
+
 async function saveEditedRecord(){
   const r = records.find(x=>x.id === editingRecordId);
+  if(!r){ alert("找不到这条账单"); return; }
 
-  if(!r){
-    alert("找不到这条账单");
-    return;
-  }
+  const originalPayments = normalizePayments(r).map(p=>({...p}));
+  const rows = [...document.querySelectorAll("#editPaymentsList .edit-payment-row")];
+  if(!rows.length){ alert("请至少保留一条付款记录"); return; }
 
-  const pay = document.getElementById("editPay").value;
-  const totalJPY = Number(document.getElementById("editTotalJPY").value || 0);
+  const now = Date.now();
+  const payments = rows.map((row, rowIndex)=>{
+    const originalIndex = Number(row.dataset.originalIndex ?? -1);
+    const old = originalIndex >= 0 ? (originalPayments[originalIndex] || {}) : {};
+    const pay = row.querySelector(".edit-payment-pay").value;
+    const amountJPY = Number(row.querySelector(".edit-payment-jpy").value || 0);
+    const amountRMB = Number(row.querySelector(".edit-payment-rmb").value || 0);
+    const paymentNote = row.querySelector(".edit-payment-note").value.trim();
+    return {
+      ...old,
+      operationId: old.operationId || `manual_edit_${now}_${rowIndex}_${Math.random().toString(36).slice(2,7)}`,
+      type: amountJPY < 0 || amountRMB < 0 ? "退款" : "收入",
+      reason: old.reason || "手动编辑付款记录",
+      pay,
+      currency: paymentCurrency(pay),
+      amountJPY,
+      amountRMB,
+      note: paymentNote,
+      time: old.time || new Date(now).toLocaleString(),
+      timestamp: old.timestamp || now,
+      editedAt: now
+    };
+  });
+
   const groupPaid = document.getElementById("editGroupPaid").value === "yes";
   const groupPayerName = document.getElementById("editGroupPayerName").value.trim();
   const groupPaymentId = document.getElementById("editGroupPaymentId").value.trim();
   const note = document.getElementById("editPaymentNote").value.trim();
   const businessDate = document.getElementById("editBusinessDate").value;
 
-  r.pay = pay;
-  r.totalJPY = totalJPY;
-  r.totalRMB = Math.floor(totalJPY * RATE);
-  r.paidJPY = totalJPY;
+  r.payments = payments;
+  r.totalJPY = payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
+  r.totalRMB = payments.reduce((sum,p)=>sum + Number(p.amountRMB || 0),0);
+  r.paidJPY = r.totalJPY;
   r.dueJPY = 0;
-  r.currency = pay === "微信" || pay === "支付宝" ? "人民币" : "日元";
+  r.pay = summarizePaymentMethods(payments);
+  r.currency = summarizeCurrencies(payments);
   r.businessDate = businessDate || getRecordBusinessDate(r);
-
-  r.payments = [{
-    type:"收入",
-    reason: groupPaid ? "一人代付/手动修正" : "手动修正",
-    pay,
-    amountJPY: totalJPY,
-    amountRMB:
-  pay === "微信" || pay === "支付宝"
-    ? Math.floor(totalJPY * RATE)
-    : 0,    
-    note,
-    time:new Date().toLocaleString(),
-    timestamp:Date.now()
-  }];
-
+  r.businessDateManual = Boolean(businessDate);
   r.paymentNote = note;
-  r.editedAt = Date.now();
-  r.editedTime = new Date().toLocaleString();
+  r.editedAt = now;
+  r.editedTime = new Date(now).toLocaleString();
 
   if(groupPaid){
-    r.groupPaymentId = groupPaymentId || ("manual_group_" + dateKey(Date.now()));
+    r.groupPaymentId = groupPaymentId || ("manual_group_" + dateKey(now));
     r.groupPayerName = groupPayerName;
     r.groupPaymentNote = note;
   }else{
@@ -973,11 +1115,15 @@ async function saveEditedRecord(){
   }
 
   await saveRecordSafely({db, ref, record:r});
-
   closeEditRecord();
-  alert("账单已修改");
+  renderTodayBill();
+  alert("付款记录已修改");
 }
 
+window.addEditPaymentRow = addEditPaymentRow;
+window.removeEditPaymentRow = removeEditPaymentRow;
+
+window.toggleTodayTimeSort = toggleTodayTimeSort;
 window.confirmExtension = confirmExtension;
 window.uploadReceipt = uploadReceipt;
 window.handleReceiptFileChange = handleReceiptFileChange;
@@ -993,3 +1139,12 @@ window.viewGroupPaymentReceipt = viewGroupPaymentReceipt;
 window.openEditGroup = openEditGroup;
 window.closeEditGroup = closeEditGroup;
 window.saveEditedGroup = saveEditedGroup;
+
+window.uploadSharedGroupReceipt = function(groupId){
+  const input=document.createElement("input"); input.type="file"; input.accept="image/*";
+  input.onchange=async()=>{ const file=input.files?.[0]; if(!file)return; const rows=records.filter(r=>String(r.groupId||"")===String(groupId)); if(!rows.length)return;
+    const compressedBlob=await compressImage(file); const base64=await fileToBase64(compressedBlob);
+    for(const r of rows){ r.receiptImage=base64; r.receiptFileName=file.name||""; r.receiptUploadedAt=Date.now(); r.receiptUploadedTime=new Date().toLocaleString(); await saveRecordSafely({db,ref,record:r}); }
+    records=mergeRecordLists(records,rows); renderTodayBill(); alert("整组收款截图已保存，组内账单共用此截图");
+  }; input.click();
+};
