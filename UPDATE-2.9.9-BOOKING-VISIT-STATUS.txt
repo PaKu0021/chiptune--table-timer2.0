@@ -1,8 +1,0 @@
-v2.9.10 预约到店/离店状态一致性修复
-
-- 预约概览改为三态：未到店、已到店、已离店。
-- 预约状态不再只依赖 checkedIn，而是结合正在运行桌位、bookingId、checkedInTableIndexes、finishedTableIndexes 推导。
-- 开始计时时优先按 bookingId 精确更新预约，并写入 checkedInTableIndexes。
-- 正常结账、紧急强制结束、跨天自动结账都会写入 finishedTableIndexes；全部预约桌位结束后自动标记已离店。
-- 清理 app.js 中遗留的旧价格函数注释，并更新 README 当前版本。
-- 静态资源缓存版本升级至 2.9.9。
