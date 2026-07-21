@@ -163,6 +163,7 @@ let baseline = null;
 let saveQueue = Promise.resolve();
 let badge = null;
 let flushTimer = null;
+let lastSyncStatusType = "";
 
 const stateChannel =
   typeof BroadcastChannel !== "undefined"
@@ -348,6 +349,9 @@ function ensureBadge(){
 }
 
 export function setSyncStatus(type, text){
+  if(type === "cache" && ["pending","syncing","offline","error"].includes(lastSyncStatusType)){
+    return;
+  }
   const el = ensureBadge();
   const map = {
     synced:["#eef7ee","#246b35","● 已保存本机 · 云端已同步"],
@@ -362,6 +366,7 @@ export function setSyncStatus(type, text){
   el.style.background = bg;
   el.style.color = color;
   el.textContent = text || label;
+  lastSyncStatusType = type || "synced";
 }
 
 export function getDeviceId(){
@@ -1287,6 +1292,7 @@ export async function flushPending({db,ref}){
           console.warn("操作发生并发冲突，已隔离等待人工确认",item,error);
           continue;
         }
+        setSyncStatus("error",`● 云端同步失败：${error?.code || error?.message || error}`);
         throw error;
       }
     }
@@ -1300,6 +1306,7 @@ export async function flushPending({db,ref}){
           console.warn("账单操作发生并发冲突，已隔离等待人工确认",item,error);
           continue;
         }
+        setSyncStatus("error",`● 账单同步失败：${error?.code || error?.message || error}`);
         throw error;
       }
     }
