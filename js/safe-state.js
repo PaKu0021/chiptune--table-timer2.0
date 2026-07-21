@@ -1164,9 +1164,39 @@ async function enqueue(local,base,action){
   return enqueueEntityOperations(local,base,action);
 }
 
+async function recoverLegacyStateQueue(items){
+  const legacy=(Array.isArray(items)?items:[]).filter(item=>!item?.syncV4 && !item?.syncV3);
+  if(!legacy.length) return false;
+
+  // 旧版队列保存的是整份状态。升级后不能逐条直接提交，否则会覆盖其他设备数据。
+  // 这里以当前 IndexedDB 状态为准，取旧队列中最早可用的基线，重新拆成 v4 实体操作。
+  const local=await readLocalState().catch(()=>null);
+  const first=legacy.slice().sort((a,b)=>Number(a?.createdAt||0)-Number(b?.createdAt||0))[0] || {};
+  const base=clone(
+    first.base || first.cloudBaseline || first.baseState ||
+    baseline || local || {}
+  );
+  const latest=clone(
+    local ||
+    legacy.slice().sort((a,b)=>Number(b?.createdAt||0)-Number(a?.createdAt||0))[0]?.state ||
+    legacy.slice().sort((a,b)=>Number(b?.createdAt||0)-Number(a?.createdAt||0))[0]?.nextState ||
+    base
+  );
+
+  // 先生成新版操作，再删除旧操作，避免转换中途丢失数据。
+  await enqueueEntityOperations(latest,base,"legacy_queue_recovery");
+  for(const item of legacy){
+    if(item?.id != null) await idbDelete("queue",String(item.id));
+  }
+  console.warn(`已自动把 ${legacy.length} 条旧版同步队列转换为 v4 实体操作`);
+  return true;
+}
+
 async function flushOne({db,ref}, item){
   if(item?.syncV4 || item?.syncV3) return flushEntityOperation({db,ref},item);
-  throw new Error("检测到旧版整状态队列，请先执行迁移或清除旧待同步队列");
+  const err=new Error("检测到旧版整状态队列");
+  err.code="legacy-queue";
+  throw err;
 }
 
 
@@ -1259,8 +1289,13 @@ export async function flushPending({db,ref}){
   if(!navigator.onLine) return;
 
   const run = async()=>{
-    const items = (await idbAll("queue")).sort((a,b)=>a.createdAt-b.createdAt);
-    const recordItems = (await idbAll("recordQueue")).sort((a,b)=>a.createdAt-b.createdAt);
+    let items = (await idbAll("queue")).sort((a,b)=>Number(a?.createdAt||0)-Number(b?.createdAt||0));
+    // v3/v4 升级后若 IndexedDB 中仍有旧版整状态队列，自动安全转换，
+    // 不再让第一条旧操作永久堵塞后续所有同步。
+    if(await recoverLegacyStateQueue(items)){
+      items = (await idbAll("queue")).sort((a,b)=>Number(a?.createdAt||0)-Number(b?.createdAt||0));
+    }
+    const recordItems = (await idbAll("recordQueue")).sort((a,b)=>Number(a?.createdAt||0)-Number(b?.createdAt||0));
     const total = items.length + recordItems.length;
     if(!total){ setSyncStatus("synced"); return; }
 
@@ -1278,6 +1313,20 @@ export async function flushPending({db,ref}){
           console.warn("操作发生并发冲突，已隔离等待人工确认",item,error);
           continue;
         }
+        // 短暂断网/超时先保留重试；同一操作连续失败 3 次后隔离，
+        // 让后续正常操作继续上传，避免整个队列永久卡死。
+        const retryCount=Number(item?.retryCount||0)+1;
+        await idbPut("queue",{
+          ...item,
+          retryCount,
+          lastError:String(error?.message||error||"同步失败"),
+          lastFailedAt:Date.now()
+        });
+        if(retryCount>=3 && navigator.onLine){
+          await quarantineFailure(db,{...item,retryCount},error,"queue");
+          console.error("操作连续失败，已隔离并继续同步",item,error);
+          continue;
+        }
         throw error;
       }
     }
@@ -1289,6 +1338,18 @@ export async function flushPending({db,ref}){
         if(error?.code==="sync-conflict"){
           await quarantineConflict(db,item,error,"recordQueue");
           console.warn("账单操作发生并发冲突，已隔离等待人工确认",item,error);
+          continue;
+        }
+        const retryCount=Number(item?.retryCount||0)+1;
+        await idbPut("recordQueue",{
+          ...item,
+          retryCount,
+          lastError:String(error?.message||error||"同步失败"),
+          lastFailedAt:Date.now()
+        });
+        if(retryCount>=3 && navigator.onLine){
+          await quarantineFailure(db,{...item,retryCount},error,"recordQueue");
+          console.error("账单操作连续失败，已隔离并继续同步",item,error);
           continue;
         }
         throw error;
@@ -1303,6 +1364,30 @@ export async function flushPending({db,ref}){
     return navigator.locks.request("chiptune-cloud-flush-v4",run);
   }
   return run();
+}
+
+async function quarantineFailure(db,item,error,storeName){
+  const payload={
+    operationId:String(item?.id||""),
+    entityType:item?.entityType||item?.type||"unknown",
+    entityId:item?.entityId||item?.recordId||null,
+    paymentId:item?.paymentId||null,
+    message:String(error?.message||error||"同步失败"),
+    errorCode:String(error?.code||"sync-failed"),
+    retryCount:Number(item?.retryCount||0),
+    operation:stripImagesDeep(clone(item||{})),
+    deviceId:getDeviceId(),
+    status:"failed_quarantined",
+    createdAt:serverTimestamp()
+  };
+  try{
+    await setDoc(doc(db,CONFLICT_COLLECTION,String(item.id)),payload,{merge:true});
+  }catch(writeError){
+    // 即使诊断记录写入失败，也保留本地隔离副本，不能再次堵住主队列。
+    console.warn("云端隔离记录写入失败，已仅保存在本机",writeError);
+    writeShadow(`chiptune_failed_sync_${String(item.id)}`,{payload:{...payload,createdAt:Date.now()},savedAt:Date.now()});
+  }
+  await idbDelete(storeName,String(item.id));
 }
 
 async function quarantineConflict(db,item,error,storeName){
