@@ -1,11 +1,11 @@
 ﻿/*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=4.0.7";
+import { db } from "./firebase.js?v=4.0.8";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime } from "./safe-state.js?v=4.0.7";
-/*import { formatTime } from "./common.js?v=4.0.7";*/
-import { resetTable, formatTime } from "./common.js?v=4.0.7";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=4.0.7";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.7";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime } from "./safe-state.js?v=4.0.8";
+/*import { formatTime } from "./common.js?v=4.0.8";*/
+import { resetTable, formatTime } from "./common.js?v=4.0.8";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=4.0.8";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.8";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -154,6 +154,9 @@ let movingRunningToIndex = null;
 let draggingRunningFrom = null;
 let runningMoveTempLine = null;
 let runningMoveAreaRect = null;
+let editingPreMinutesIndex = null;
+let pendingRenderAfterInput = false;
+const preMinutesDrafts = {};
 
 
 function newTable(i){
@@ -350,11 +353,22 @@ function applyIncomingAppState(
     return;
   }
 
+  const activePre = getActivePreMinutesEdit();
+
   state = normalizeAppState(
     structuredClone(incoming)
   );
 
+  if(activePre && state.tables?.[activePre.index]){
+    state.tables[activePre.index].preMinutes = activePre.normalized;
+  }
+
   try{
+    if(shouldDeferTableRender()){
+      pendingRenderAfterInput = true;
+      return;
+    }
+
     render();
 
     /*
@@ -1100,6 +1114,9 @@ filteredTables.forEach(({t,i})=>{
     const roundedJPY = roundJPY(originalJPY);
     const paidJPY = Number(t.paidJPY || 0);
     const dueJPY = getDueJPY(t);
+    const preValue = editingPreMinutesIndex === i && preMinutesDrafts[i] !== undefined
+      ? preMinutesDrafts[i]
+      : Math.max(0,Math.floor(Number(t.preMinutes || 0)));
 
     const div = document.createElement("div");
     div.className = "card " + status;
@@ -1148,7 +1165,7 @@ ${t.start ? `
 
 <label style="display:block;margin:10px 0 8px;font-weight:700;color:#6f6659;">
   <span style="display:block;margin-bottom:6px;">提前多少分钟</span>
-  <input type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="输入提前分钟数" id="pre-${i}" value="${Math.max(0,Math.floor(Number(t.preMinutes || 0)))}" oninput="updatePreMinutes(${i},this.value)">
+  <input type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="输入提前分钟数" id="pre-${i}" value="${preValue}" onfocus="beginPreMinutesEdit(${i},this)" oninput="updatePreMinutes(${i},this.value)" onblur="commitPreMinutesEdit(${i},this.value)">
 </label>
 
 <div class="action-row" style="grid-template-columns:1fr auto;align-items:stretch;">
@@ -1423,9 +1440,52 @@ function normalizePreMinutes(value){
   return Math.min(1440,Math.floor(n));
 }
 
+function isPreMinutesInput(el=document.activeElement){
+  return Boolean(el?.id && /^pre-\d+$/.test(el.id));
+}
+
+function getPreMinutesIndexFromInput(el=document.activeElement){
+  if(!isPreMinutesInput(el)) return null;
+  const index = Number(String(el.id).replace("pre-",""));
+  return Number.isFinite(index) ? index : null;
+}
+
+function getActivePreMinutesEdit(){
+  const index = getPreMinutesIndexFromInput();
+  if(index === null) return null;
+  const raw = String(document.activeElement?.value ?? preMinutesDrafts[index] ?? "");
+  return {index, raw, normalized:normalizePreMinutes(raw)};
+}
+
+function shouldDeferTableRender(){
+  const active = document.activeElement;
+  if(!active) return false;
+  if(isPreMinutesInput(active)) return true;
+  if(active.tagName !== "INPUT" && active.tagName !== "TEXTAREA") return false;
+  return /^name-\d+$/.test(active.id || "") || /^phone-\d+$/.test(active.id || "");
+}
+
+function beginPreMinutesEdit(i,el){
+  editingPreMinutesIndex = i;
+  preMinutesDrafts[i] = String(el?.value ?? "");
+  try{ el?.select?.(); }catch{}
+}
+
+function commitPreMinutesEdit(i,value){
+  const t = state?.tables?.[i];
+  if(t) t.preMinutes = normalizePreMinutes(value);
+  delete preMinutesDrafts[i];
+  if(editingPreMinutesIndex === i) editingPreMinutesIndex = null;
+  if(pendingRenderAfterInput){
+    pendingRenderAfterInput = false;
+    render();
+  }
+}
+
 function updatePreMinutes(i,value){
   const t = state?.tables?.[i];
   if(!t) return;
+  preMinutesDrafts[i] = String(value ?? "");
   t.preMinutes = normalizePreMinutes(value);
 }
 
@@ -3342,7 +3402,9 @@ window.setPackage = setPackage;
 window.setWalkin = setWalkin;
 window.setBooking = setBooking;
 window.start = start;
+window.beginPreMinutesEdit = beginPreMinutesEdit;
 window.updatePreMinutes = updatePreMinutes;
+window.commitPreMinutesEdit = commitPreMinutesEdit;
 window.toggleStartLock = toggleStartLock;
 window.pause = pause;
 window.resume = resume;
