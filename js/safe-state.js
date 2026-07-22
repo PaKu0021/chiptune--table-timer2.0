@@ -30,6 +30,8 @@ const RECORD_MIGRATION_KEY = "records_migration_v3";
 const RECORD_MIGRATION_SHADOW = "chiptune_records_migration_v3";
 const RECORD_HISTORY_SYNC_META = "chiptune_records_history_sync_v2";
 const RECORD_DELETES_COLLECTION = "recordDeletes";
+const LOCAL_DB_TIMEOUT_MS = 15000;
+const CLOUD_SYNC_TIMEOUT_MS = 30000;
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -140,7 +142,7 @@ function isStateOlder(candidate, reference){
   if(hasRunningTable(reference) && !hasRunningTable(candidate)) return true;
   return false;
 }
-function withTimeout(promise, ms=8000, label="本地数据库操作"){
+function withTimeout(promise, ms=LOCAL_DB_TIMEOUT_MS, label="本地数据库操作"){
   return Promise.race([
     promise,
     new Promise((_,reject)=>setTimeout(()=>reject(new Error(label+"超时")),ms))
@@ -270,7 +272,7 @@ async function idbGet(store,key){
     req.onsuccess = ()=>resolve(req.result ?? null);
     req.onerror = ()=>reject(req.error);
   });
-  return withTimeout(task,8000,"读取本地数据");
+  return withTimeout(task,LOCAL_DB_TIMEOUT_MS,"读取本地数据");
 }
 
 async function idbPut(store,value,key){
@@ -281,7 +283,7 @@ async function idbPut(store,value,key){
     req.onsuccess = ()=>resolve(value);
     req.onerror = ()=>reject(req.error);
   });
-  return withTimeout(task,8000,"写入本地数据");
+  return withTimeout(task,LOCAL_DB_TIMEOUT_MS,"写入本地数据");
 }
 
 async function idbDelete(store,key){
@@ -292,7 +294,7 @@ async function idbDelete(store,key){
     tx.oncomplete = ()=>resolve();
     tx.onerror = ()=>reject(tx.error);
   });
-  return withTimeout(task,8000,"删除本地数据");
+  return withTimeout(task,LOCAL_DB_TIMEOUT_MS,"删除本地数据");
 }
 
 async function idbAll(store){
@@ -303,7 +305,7 @@ async function idbAll(store){
     req.onsuccess = ()=>resolve(req.result || []);
     req.onerror = ()=>reject(req.error);
   });
-  return withTimeout(task,8000,"读取本地列表");
+  return withTimeout(task,LOCAL_DB_TIMEOUT_MS,"读取本地列表");
 }
 
 async function idbClear(store){
@@ -315,7 +317,7 @@ async function idbClear(store){
     tx.onerror = ()=>reject(tx.error);
     tx.onabort = ()=>reject(tx.error || new Error("本地队列清理失败"));
   });
-  return withTimeout(task,8000,"清理本地队列");
+  return withTimeout(task,LOCAL_DB_TIMEOUT_MS,"清理本地队列");
 }
 
 function writeShadow(key,value){
@@ -418,6 +420,15 @@ async function writeLocalState(state, cloudBaseline=baseline){
 
 export async function loadLocalRecords(){
   const deleted = getDeletedRecordIds();
+  const shadow = readShadow(RECORDS_SHADOW);
+  if(Array.isArray(shadow)){
+    idbGet("kv",RECORDS_KEY)
+      .then(value=>{
+        if(Array.isArray(value)) writeShadow(RECORDS_SHADOW,value.map(stripImagesDeep));
+      })
+      .catch(err=>console.warn("IndexedDB账单后台读取失败，继续使用轻量备份",err));
+    return clone(shadow.filter(r=>!r?.deleted && !deleted.has(String(r.id))));
+  }
   try{
     const value = await idbGet("kv",RECORDS_KEY);
     if(Array.isArray(value)){
@@ -425,20 +436,20 @@ export async function loadLocalRecords(){
     }
   }catch(err){ console.warn("IndexedDB账单读取失败，尝试轻量备份",err); }
 
-  const shadow = readShadow(RECORDS_SHADOW);
-  if(Array.isArray(shadow)){
-    return clone(shadow.filter(r=>!r?.deleted && !deleted.has(String(r.id))));
-  }
   return [];
 }
 
 async function writeLocalRecords(records){
   const list = clone(records || []);
-  // 完整账单（包括收款截图）只存 IndexedDB，避免 localStorage 容量不足。
-  await idbPut("kv",list,RECORDS_KEY);
-  // localStorage 只保留不含大图片的轻量应急副本。
   const light = list.map(stripImagesDeep);
   writeShadow(RECORDS_SHADOW,light);
+  try{
+    // 完整账单（包括收款截图）只存 IndexedDB；iPad IndexedDB 卡住时降级为轻量备份。
+    await idbPut("kv",list,RECORDS_KEY);
+  }catch(err){
+    console.warn("IndexedDB账单保存失败，已保留轻量本机备份并继续云端同步",err);
+    setSyncStatus("pending","● 已保存轻量本机备份 · 正在继续同步云端");
+  }
 }
 
 
@@ -579,7 +590,7 @@ export async function migrateLegacyRecordsOnce({db,ref,onProgress}={}){
     const cloudFound = [];
     let recordsCollectionSucceeded = false;
     try{
-      const snap = await withTimeout(getDocs(collection(db,"records")),12000,"云端 records 读取");
+      const snap = await withTimeout(getDocs(collection(db,"records")),CLOUD_SYNC_TIMEOUT_MS,"云端 records 读取");
       cloudFound.push(...snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.id!=="init" && !r.deleted));
       notes.push(`云端 records：${snap.size} 条`);
       recordsCollectionSucceeded = true;
@@ -587,7 +598,7 @@ export async function migrateLegacyRecordsOnce({db,ref,onProgress}={}){
 
     let legacyMainSucceeded = false;
     try{
-      const snap = await withTimeout(getDoc(ref),12000,"旧 shop/main 读取");
+      const snap = await withTimeout(getDoc(ref),CLOUD_SYNC_TIMEOUT_MS,"旧 shop/main 读取");
       if(snap.exists() && Array.isArray(snap.data()?.records)){
         collectLegacyRecords(snap.data().records,cloudFound);
         notes.push(`旧 shop/main.records：${snap.data().records.length} 条`);
@@ -1297,7 +1308,7 @@ export async function flushPending({db,ref}){
     for(const item of items){
       if(!navigator.onLine) break;
       try{
-        await withTimeout(flushOne({db,ref},item),12000,"桌位状态同步");
+        await withTimeout(flushOne({db,ref},item),CLOUD_SYNC_TIMEOUT_MS,"桌位状态同步");
       }catch(error){
         if(error?.code==="sync-conflict"){
           await quarantineConflict(db,item,error,"queue");
@@ -1311,7 +1322,7 @@ export async function flushPending({db,ref}){
     for(const item of recordItems){
       if(!navigator.onLine) break;
       try{
-        await withTimeout(flushRecordOne({db},item),12000,"收银记录同步");
+        await withTimeout(flushRecordOne({db},item),CLOUD_SYNC_TIMEOUT_MS,"收银记录同步");
       }catch(error){
         if(error?.code==="sync-conflict"){
           await quarantineConflict(db,item,error,"recordQueue");
@@ -1504,7 +1515,7 @@ export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,time
     tx.set(tableRef,committedTable,{merge:false});
     tx.set(recordRef,{...clone(record),deleted:false,updatedAt:serverTimestamp(),updatedBy:getDeviceId(),lastOperationId:operationId},{merge:true});
     startedByThisDevice = true;
-  }),10000,"服务器锁定桌位");
+  }),CLOUD_SYNC_TIMEOUT_MS,"服务器锁定桌位");
 
   const local = clone((await loadLocalState().catch(()=>null)) || baseline || {});
   const tables = Array.isArray(local.tables) ? clone(local.tables) : [];
