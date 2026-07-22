@@ -1,11 +1,11 @@
 ﻿/*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=4.0.5";
+import { db } from "./firebase.js?v=4.0.7";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime } from "./safe-state.js?v=4.0.5";
-/*import { formatTime } from "./common.js?v=4.0.5";*/
-import { resetTable, formatTime } from "./common.js?v=4.0.5";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=4.0.5";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.5";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime } from "./safe-state.js?v=4.0.7";
+/*import { formatTime } from "./common.js?v=4.0.7";*/
+import { resetTable, formatTime } from "./common.js?v=4.0.7";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=4.0.7";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.7";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -1625,8 +1625,13 @@ async function start(i){
       action:"start_table_post_transaction"
     });
     await createOrUpdateRecord(state.tables[i]);
-    await flushPending({db,ref});
-    setSyncStatus("synced","● 已同步");
+    try{
+      await flushPending({db,ref});
+      setSyncStatus(result?.cloudPending ? "pending" : "synced",result?.cloudPending ? "● 已保存本机 · 云端同步等待重试" : "● 已同步");
+    }catch(syncError){
+      console.warn("开始后的云端同步失败，将继续重试",syncError);
+      setSyncStatus("pending",`● 已保存本机 · 云端同步等待重试：${syncError?.code || syncError?.message || syncError}`);
+    }
     render();
 
     // 仅提醒实际计时可能与后续预约重叠；不截断计时，也不改预约时间。

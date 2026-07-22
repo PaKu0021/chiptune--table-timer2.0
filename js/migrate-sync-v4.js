@@ -1,4 +1,4 @@
-import { db } from "./firebase.js";
+﻿import { db } from "./firebase.js?v=4.0.7";
 import {
   doc,
   getDoc,
@@ -19,16 +19,16 @@ const resultCard = document.getElementById("resultCard");
 
 const TYPES = ["tables", "bookings", "groups", "customers", "records", "payments"];
 const labels = {
-  tables: "桌位",
-  bookings: "预约",
-  groups: "分组",
-  customers: "客户",
-  records: "账单",
-  payments: "付款流水"
+  tables: "妗屼綅",
+  bookings: "棰勭害",
+  groups: "鍒嗙粍",
+  customers: "瀹㈡埛",
+  records: "璐﹀崟",
+  payments: "浠樻娴佹按"
 };
 
 const stats = Object.fromEntries(TYPES.map(k => [k, {
-  source: 0, created: 0, skipped: 0, failed: 0, verified: "待检查"
+  source: 0, created: 0, skipped: 0, failed: 0, verified: "寰呮鏌?
 }]));
 
 let totalJobs = 0;
@@ -50,21 +50,21 @@ function renderStats() {
 function updateProgress(message) {
   const percent = totalJobs > 0 ? Math.min(100, Math.round(finishedJobs / totalJobs * 100)) : 0;
   progressEl.value = percent;
-  progressTextEl.textContent = `${percent}%（${finishedJobs}/${totalJobs || 0}）`;
+  progressTextEl.textContent = `${percent}%锛?{finishedJobs}/${totalJobs || 0}锛塦;
   if (message) statusEl.textContent = message;
   renderStats();
 }
 
 function resetStats() {
   for (const type of TYPES) Object.assign(stats[type], {
-    source: 0, created: 0, skipped: 0, failed: 0, verified: "待检查"
+    source: 0, created: 0, skipped: 0, failed: 0, verified: "寰呮鏌?
   });
   totalJobs = 0;
   finishedJobs = 0;
   resultCard.hidden = true;
   resultCard.className = "card";
   resultCard.textContent = "";
-  updateProgress("正在读取源数据…");
+  updateProgress("姝ｅ湪璇诲彇婧愭暟鎹€?);
 }
 
 function itemId(value, index, prefix) {
@@ -95,11 +95,11 @@ async function createOnly(ref, fullData, type) {
     return "created";
   } catch (error) {
     stats[type].failed++;
-    log(`❌ ${type}/${ref.id}：${error?.message || error}`);
+    log(`鉂?${type}/${ref.id}锛?{error?.message || error}`);
     return "failed";
   } finally {
     finishedJobs++;
-    updateProgress(`正在迁移 ${labels[type]}…`);
+    updateProgress(`姝ｅ湪杩佺Щ ${labels[type]}鈥);
   }
 }
 
@@ -120,7 +120,7 @@ async function migrateEntityArray(values, collectionName, prefix, type, source) 
 async function readSource() {
   const mainRef = doc(db, "shop", "main");
   const mainSnap = await getDoc(mainRef);
-  if (!mainSnap.exists()) throw new Error("找不到 shop/main，无法读取旧版数据");
+  if (!mainSnap.exists()) throw new Error("鎵句笉鍒?shop/main锛屾棤娉曡鍙栨棫鐗堟暟鎹?);
   const state = mainSnap.data() || {};
 
   const tables = Array.isArray(state.tables) ? state.tables : [];
@@ -143,7 +143,7 @@ async function readSource() {
   stats.payments.source = records.reduce((sum, r) => sum + (Array.isArray(r.data.payments) ? r.data.payments.length : 0), 0);
 
   totalJobs = TYPES.reduce((sum, type) => sum + stats[type].source, 0);
-  updateProgress("源数据读取完成，准备迁移…");
+  updateProgress("婧愭暟鎹鍙栧畬鎴愶紝鍑嗗杩佺Щ鈥?);
   return {mainRef, tables, bookings, groups, customersMap, records};
 }
 
@@ -167,8 +167,7 @@ async function migrateRecords(records) {
         stats.records.created++;
       } else {
         const currentData = current.data() || {};
-        // 只补元数据，不改写已有业务字段。
-        await setDoc(recordRef, {
+        // 鍙ˉ鍏冩暟鎹紝涓嶆敼鍐欏凡鏈変笟鍔″瓧娈点€?        await setDoc(recordRef, {
           id: recordId,
           version: Math.max(1, Number(currentData.version || record.version || record?._recordSync?.version || 0)),
           deleted: Boolean(currentData.deleted),
@@ -180,10 +179,10 @@ async function migrateRecords(records) {
       }
     } catch (error) {
       stats.records.failed++;
-      log(`❌ records/${recordId}：${error?.message || error}`);
+      log(`鉂?records/${recordId}锛?{error?.message || error}`);
     } finally {
       finishedJobs++;
-      updateProgress("正在迁移账单…");
+      updateProgress("姝ｅ湪杩佺Щ璐﹀崟鈥?);
     }
 
     const payments = Array.isArray(record.payments) ? record.payments : [];
@@ -229,8 +228,8 @@ async function countPaymentSubcollections(records) {
 }
 
 async function verifyMigration(source = null) {
-  statusEl.textContent = "正在回读 Firestore 验证…";
-  log("开始回读新结构进行验证…");
+  statusEl.textContent = "姝ｅ湪鍥炶 Firestore 楠岃瘉鈥?;
+  log("寮€濮嬪洖璇绘柊缁撴瀯杩涜楠岃瘉鈥?);
 
   const markerSnap = await getDoc(doc(db, "settings", "migration_v4"));
   let sourceData = source;
@@ -249,7 +248,7 @@ async function verifyMigration(source = null) {
   for (const type of TYPES) {
     const expected = stats[type].source;
     const ok = actual[type] >= expected;
-    stats[type].verified = ok ? `✅ ${actual[type]}` : `❌ ${actual[type]}/${expected}`;
+    stats[type].verified = ok ? `鉁?${actual[type]}` : `鉂?${actual[type]}/${expected}`;
     if (!ok) allOk = false;
   }
   renderStats();
@@ -275,11 +274,11 @@ async function verifyMigration(source = null) {
 
     progressEl.value = 100;
     progressTextEl.textContent = "100%";
-    statusEl.textContent = "✅ 迁移完成并验证通过";
+    statusEl.textContent = "鉁?杩佺Щ瀹屾垚骞堕獙璇侀€氳繃";
     resultCard.hidden = false;
     resultCard.className = "card success";
-    resultCard.innerHTML = `<strong>✅ Migration Complete</strong><br><br>迁移标记已写入：<code>settings/migration_v4</code><br>状态：<code>completed</code><br><br>现在可以关闭此页面，再逐台打开其他设备。`;
-    log("✅ 迁移完成，所有数量验证通过，已写入 settings/migration_v4。 ");
+    resultCard.innerHTML = `<strong>鉁?Migration Complete</strong><br><br>杩佺Щ鏍囪宸插啓鍏ワ細<code>settings/migration_v4</code><br>鐘舵€侊細<code>completed</code><br><br>鐜板湪鍙互鍏抽棴姝ら〉闈紝鍐嶉€愬彴鎵撳紑鍏朵粬璁惧銆俙;
+    log("鉁?杩佺Щ瀹屾垚锛屾墍鏈夋暟閲忛獙璇侀€氳繃锛屽凡鍐欏叆 settings/migration_v4銆?");
     return true;
   }
 
@@ -293,11 +292,11 @@ async function verifyMigration(source = null) {
     oldDataDeleted: false
   }, {merge: true});
 
-  statusEl.textContent = "❌ 迁移未通过验证";
+  statusEl.textContent = "鉂?杩佺Щ鏈€氳繃楠岃瘉";
   resultCard.hidden = false;
   resultCard.className = "card error";
-  resultCard.innerHTML = `<strong>迁移尚未完成。</strong><br><br>请查看上方“验证”列和日志。可再次点击“开始/继续迁移”，工具只会补齐缺失数据，不会覆盖已存在的数据。`;
-  log("❌ 数量验证未通过，可安全地再次执行迁移。 ");
+  resultCard.innerHTML = `<strong>杩佺Щ灏氭湭瀹屾垚銆?/strong><br><br>璇锋煡鐪嬩笂鏂光€滈獙璇佲€濆垪鍜屾棩蹇椼€傚彲鍐嶆鐐瑰嚮鈥滃紑濮?缁х画杩佺Щ鈥濓紝宸ュ叿鍙細琛ラ綈缂哄け鏁版嵁锛屼笉浼氳鐩栧凡瀛樺湪鐨勬暟鎹€俙;
+  log("鉂?鏁伴噺楠岃瘉鏈€氳繃锛屽彲瀹夊叏鍦板啀娆℃墽琛岃縼绉汇€?");
   return false;
 }
 
@@ -310,7 +309,7 @@ async function migrate() {
   logEl.textContent = "";
   try {
     const source = await readSource();
-    log(`源数据：桌位 ${stats.tables.source}、预约 ${stats.bookings.source}、分组 ${stats.groups.source}、客户 ${stats.customers.source}、账单 ${stats.records.source}、付款 ${stats.payments.source}`);
+    log(`婧愭暟鎹細妗屼綅 ${stats.tables.source}銆侀绾?${stats.bookings.source}銆佸垎缁?${stats.groups.source}銆佸鎴?${stats.customers.source}銆佽处鍗?${stats.records.source}銆佷粯娆?${stats.payments.source}`);
 
     await migrateEntityArray(source.tables, "tables", "table", "tables", "shop/main.tables");
     await migrateEntityArray(source.bookings, "bookings", "booking", "bookings", "shop/main.bookings");
@@ -327,11 +326,11 @@ async function migrate() {
     await migrateRecords(source.records);
     await verifyMigration(source);
   } catch (error) {
-    statusEl.textContent = "❌ 迁移发生错误";
+    statusEl.textContent = "鉂?杩佺Щ鍙戠敓閿欒";
     resultCard.hidden = false;
     resultCard.className = "card error";
-    resultCard.textContent = `失败：${error?.message || error}`;
-    log(`❌ 失败：${error?.message || error}`);
+    resultCard.textContent = `澶辫触锛?{error?.message || error}`;
+    log(`鉂?澶辫触锛?{error?.message || error}`);
     console.error(error);
   } finally {
     running = false;
@@ -351,10 +350,10 @@ async function verifyOnly() {
     const source = await readSource();
     await verifyMigration(source);
     const marker = await getDoc(doc(db, "settings", "migration_v4"));
-    if (marker.exists()) log(`迁移标记当前状态：${marker.data()?.status || "未知"}`);
+    if (marker.exists()) log(`杩佺Щ鏍囪褰撳墠鐘舵€侊細${marker.data()?.status || "鏈煡"}`);
   } catch (error) {
-    statusEl.textContent = "❌ 检查失败";
-    log(`❌ 检查失败：${error?.message || error}`);
+    statusEl.textContent = "鉂?妫€鏌ュけ璐?;
+    log(`鉂?妫€鏌ュけ璐ワ細${error?.message || error}`);
   } finally {
     running = false;
     btn.disabled = false;
@@ -363,7 +362,7 @@ async function verifyOnly() {
 }
 
 btn.addEventListener("click", () => {
-  if (confirm("请确认所有旧页面已关闭且当前暂停营业。开始或继续 v4 数据迁移？")) migrate();
+  if (confirm("璇风‘璁ゆ墍鏈夋棫椤甸潰宸插叧闂笖褰撳墠鏆傚仠钀ヤ笟銆傚紑濮嬫垨缁х画 v4 鏁版嵁杩佺Щ锛?)) migrate();
 });
 verifyBtn.addEventListener("click", verifyOnly);
 renderStats();

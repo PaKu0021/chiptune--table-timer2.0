@@ -1,4 +1,4 @@
-import { db } from "./firebase.js";
+﻿import { db } from "./firebase.js?v=4.0.7";
 import { doc, getDoc, getDocs, collection, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const logEl=document.getElementById("log");
@@ -9,10 +9,10 @@ const itemId=(v,i,prefix)=>String(v?.id||v?.bookingId||v?.groupId||`${prefix}_${
 async function migrate(){
   btn.disabled=true;
   try{
-    log("读取旧 shop/main…");
+    log("璇诲彇鏃?shop/main鈥?);
     const mainRef=doc(db,"shop","main");
     const snap=await getDoc(mainRef);
-    if(!snap.exists()) throw new Error("找不到 shop/main");
+    if(!snap.exists()) throw new Error("鎵句笉鍒?shop/main");
     const state=snap.data();
     let count=0;
     for(let i=0;i<(state.tables||[]).length;i++){
@@ -29,7 +29,7 @@ async function migrate(){
       await setDoc(doc(db,"shops","main","customers",String(id)),{...(value||{}),id:String(id),version:Number(value?._entitySync?.version||1),deleted:false,updatedAt:serverTimestamp(),migratedFrom:"shop/main"},{merge:true}); count++;
     }
     await setDoc(doc(db,"shops","main"),{schemaVersion:3,migratedAt:serverTimestamp(),legacyMainPath:"shop/main"},{merge:true});
-    log(`状态实体完成：${count} 项。读取 records…`);
+    log(`鐘舵€佸疄浣撳畬鎴愶細${count} 椤广€傝鍙?records鈥);
     const recordsSnap=await getDocs(collection(db,"records"));
     let rc=0,pc=0;
     for(const rs of recordsSnap.docs){
@@ -41,9 +41,9 @@ async function migrate(){
         await setDoc(doc(db,"shops","main","records",recordId,"payments",pid),{...payment,id:pid,paymentId:pid,status:payment.status||"active",updatedAt:serverTimestamp(),migratedFrom:"records.payments"},{merge:true}); pc++;
       }
     }
-    log(`账单 ${rc} 张、付款流水 ${pc} 条迁移完成。`);
-    log("迁移成功。保留旧数据作为兼容视图，请不要立即删除 shop/main 或 records。 ");
-  }catch(err){ log(`失败：${err?.message||err}`); console.error(err); }
+    log(`璐﹀崟 ${rc} 寮犮€佷粯娆炬祦姘?${pc} 鏉¤縼绉诲畬鎴愩€俙);
+    log("杩佺Щ鎴愬姛銆備繚鐣欐棫鏁版嵁浣滀负鍏煎瑙嗗浘锛岃涓嶈绔嬪嵆鍒犻櫎 shop/main 鎴?records銆?");
+  }catch(err){ log(`澶辫触锛?{err?.message||err}`); console.error(err); }
   finally{ btn.disabled=false; }
 }
-btn.addEventListener("click",()=>{ if(confirm("请确认营业已暂停、所有设备已关闭旧页面，并已备份 Firestore。继续迁移？")) migrate(); });
+btn.addEventListener("click",()=>{ if(confirm("璇风‘璁よ惀涓氬凡鏆傚仠銆佹墍鏈夎澶囧凡鍏抽棴鏃ч〉闈紝骞跺凡澶囦唤 Firestore銆傜户缁縼绉伙紵")) migrate(); });

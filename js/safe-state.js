@@ -1473,51 +1473,115 @@ async function mirrorRecordEntity(db,record,operationId){
 }
 
 export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,timerStartAt,timerEndAt,excludeBookingId=null}){
-  if(!navigator.onLine){
-    throw new Error("当前离线，无法执行跨设备安全开始");
-  }
-
   const index = Number(tableIndex);
   const tableId = entityDocId("table",index,index);
   const tableRef = doc(db,"tables",tableId);
   const recordRef = doc(db,"records",String(record.id));
+  const localBefore = clone((await loadLocalState().catch(()=>null)) || baseline || {});
   let committedTable = null;
   let startedByThisDevice = false;
   let operationId = "";
 
-  // 只锁定当前桌位文档，不再在事务中读取和重写整份 shop/main。
-  // 这样其他设备修改预约、账单或其他桌位时，不会迫使本事务不断重试。
-  await withTimeout(runTransaction(db, async tx=>{
-    const tableSnap = await tx.get(tableRef);
-    const remote = tableSnap.exists() ? clone(tableSnap.data()) : {};
-
-    if(remote.start && !remote.deleted){
-      committedTable = clone(remote);
-      startedByThisDevice = false;
-      return;
-    }
-
-    operationId = `atomic_start_${record?.id || index}_${Date.now()}`;
-    const version = Number(remote.version || remote?._entitySync?.version || 0) + 1;
+  const commitLocalFallback = async error=>{
+    console.warn("服务器锁定桌位失败，降级为本机开始并排队同步",error);
+    operationId = `atomic_start_fallback_${record?.id || index}_${Date.now()}`;
+    const tables = Array.isArray(localBefore.tables) ? clone(localBefore.tables) : [];
+    const baseTable = clone(tables[index] || {});
+    const version = Number(baseTable.version || baseTable?._entitySync?.version || 0) + 1;
     committedTable = {
-      ...clone(remote),
+      ...baseTable,
       ...clone(tablePatch),
       id:tableId,
       tableIndex:index,
       version,
       deleted:false,
-      updatedAt:serverTimestamp(),
+      updatedAt:Date.now(),
       updatedBy:getDeviceId(),
       lastOperationId:operationId,
-      _entitySync:{version,deviceId:getDeviceId(),operationId}
+      cloudStartPending:true,
+      _entitySync:{version,updatedAt:Date.now(),deviceId:getDeviceId(),operationId}
+    };
+    tables[index] = clone(committedTable);
+    const nextState = {
+      ...localBefore,
+      tables,
+      _sync:{
+        revision:Number(localBefore?._sync?.revision || 0)+1,
+        updatedAt:Date.now(),
+        deviceId:getDeviceId(),
+        action:"atomic_start_table_fallback",
+        operationId
+      }
     };
 
-    tx.set(tableRef,committedTable,{merge:false});
-    tx.set(recordRef,{...clone(record),deleted:false,updatedAt:serverTimestamp(),updatedBy:getDeviceId(),lastOperationId:operationId},{merge:true});
-    startedByThisDevice = true;
-  }),CLOUD_SYNC_TIMEOUT_MS,"服务器锁定桌位");
+    await writeLocalState(nextState,localBefore);
+    await enqueue(nextState,localBefore,"atomic_start_table_fallback");
+    broadcastState(nextState,"atomic_start_table_fallback");
 
-  const local = clone((await loadLocalState().catch(()=>null)) || baseline || {});
+    if(record){
+      const localRecords = await loadLocalRecords().catch(()=>[]);
+      const previous = localRecords.find(r=>String(r.id)===String(record.id)) || {id:String(record.id),payments:[]};
+      const nextRecord = normalizeRecordPayments({...clone(record),localUpdatedAt:Date.now(),cloudStartPending:true});
+      const mergedRecords = mergeRecordLists(localRecords,[nextRecord]);
+      writeShadow(RECORDS_SHADOW,mergedRecords);
+      broadcastRecord(nextRecord,"atomic_start_record_fallback");
+      await writeLocalRecords(mergedRecords);
+      await enqueueRecordOperations(nextRecord,previous);
+    }
+
+    const count = await pendingCount();
+    setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? `● 已保存本机 · ${count} 项等待上传` : `● 已保存本机 · 离线 · ${count} 项待上传`);
+    if(navigator.onLine){
+      clearTimeout(flushTimer);
+      flushTimer=setTimeout(()=>flushPending({db,ref}).catch(err=>{
+        console.warn("本机开始后的云端同步失败，将继续重试",err);
+        setSyncStatus("pending",`● 已保存本机 · 云端同步等待重试：${err?.code || err?.message || err}`);
+      }),500);
+    }
+    return {startedByThisDevice:true,state:nextState,table:clone(committedTable),cloudPending:true};
+  };
+
+  if(!navigator.onLine){
+    return commitLocalFallback(new Error("当前离线，已先保存本机并等待上传"));
+  }
+
+  // 只锁定当前桌位文档，不再在事务中读取和重写整份 shop/main。
+  // 这样其他设备修改预约、账单或其他桌位时，不会迫使本事务不断重试。
+  try{
+    await withTimeout(runTransaction(db, async tx=>{
+      const tableSnap = await tx.get(tableRef);
+      const remote = tableSnap.exists() ? clone(tableSnap.data()) : {};
+
+      if(remote.start && !remote.deleted){
+        committedTable = clone(remote);
+        startedByThisDevice = false;
+        return;
+      }
+
+      operationId = `atomic_start_${record?.id || index}_${Date.now()}`;
+      const version = Number(remote.version || remote?._entitySync?.version || 0) + 1;
+      committedTable = {
+        ...clone(remote),
+        ...clone(tablePatch),
+        id:tableId,
+        tableIndex:index,
+        version,
+        deleted:false,
+        updatedAt:serverTimestamp(),
+        updatedBy:getDeviceId(),
+        lastOperationId:operationId,
+        _entitySync:{version,deviceId:getDeviceId(),operationId}
+      };
+
+      tx.set(tableRef,committedTable,{merge:false});
+      tx.set(recordRef,{...clone(record),deleted:false,updatedAt:serverTimestamp(),updatedBy:getDeviceId(),lastOperationId:operationId},{merge:true});
+      startedByThisDevice = true;
+    }),CLOUD_SYNC_TIMEOUT_MS,"服务器锁定桌位");
+  }catch(error){
+    return commitLocalFallback(error);
+  }
+
+  const local = clone((await loadLocalState().catch(()=>null)) || localBefore || {});
   const tables = Array.isArray(local.tables) ? clone(local.tables) : [];
   if(committedTable) tables[index] = clone(committedTable);
   const nextState = {
