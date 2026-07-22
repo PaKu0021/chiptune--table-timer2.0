@@ -1,4 +1,4 @@
-﻿import { db } from "./firebase.js?v=4.0.8";
+﻿import { db } from "./firebase.js?v=4.0.9";
 import { doc, getDoc, getDocs, collection, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const logEl=document.getElementById("log");

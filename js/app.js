@@ -1,11 +1,11 @@
 ﻿/*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=4.0.8";
+import { db } from "./firebase.js?v=4.0.9";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime } from "./safe-state.js?v=4.0.8";
-/*import { formatTime } from "./common.js?v=4.0.8";*/
-import { resetTable, formatTime } from "./common.js?v=4.0.8";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=4.0.8";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.8";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime } from "./safe-state.js?v=4.0.9";
+/*import { formatTime } from "./common.js?v=4.0.9";*/
+import { resetTable, formatTime } from "./common.js?v=4.0.9";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=4.0.9";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.9";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -105,6 +105,7 @@ window.addEventListener(
 // 确保手机、iPad 和其他终端都能看到同一份最新桌位状态。
 async function refreshSharedStateFromServer(){
   if(!navigator.onLine) return;
+  if(shouldDeferTableRender()) return;
 
   try{
     const snap =
@@ -157,6 +158,7 @@ let runningMoveAreaRect = null;
 let editingPreMinutesIndex = null;
 let pendingRenderAfterInput = false;
 const preMinutesDrafts = {};
+let tableInteractionHoldUntil = 0;
 
 
 function newTable(i){
@@ -353,22 +355,21 @@ function applyIncomingAppState(
     return;
   }
 
-  const activePre = getActivePreMinutesEdit();
+  if(shouldDeferTableRender()){
+    const activePre = getActivePreMinutesEdit();
+    if(activePre && state?.tables?.[activePre.index]){
+      state.tables[activePre.index].preMinutes = activePre.normalized;
+    }
+    pendingRenderAfterInput = true;
+    console.log(`${source}状态已暂存，等待当前操作结束`);
+    return;
+  }
 
   state = normalizeAppState(
     structuredClone(incoming)
   );
 
-  if(activePre && state.tables?.[activePre.index]){
-    state.tables[activePre.index].preMinutes = activePre.normalized;
-  }
-
   try{
-    if(shouldDeferTableRender()){
-      pendingRenderAfterInput = true;
-      return;
-    }
-
     render();
 
     /*
@@ -1124,7 +1125,7 @@ filteredTables.forEach(({t,i})=>{
     div.innerHTML = `
       <h3 class="table-title-row"><span>${t.name}</span>${(t.start || t.type || t.recordId) && t.groupId ? `<span class="table-group-id">${t.groupId}</span>` : ""}</h3>
 
-    <select onchange="setPackage(${i},this.value)">
+    <select onpointerdown="beginTableInteraction()" onfocus="beginTableInteraction()" onchange="setPackage(${i},this.value);finishTableInteractionSoon()">
   ${state.packages.map((pkg,idx)=>`
     <option value="${idx}" ${idx===t.packageIndex ? "selected" : ""}>
       ${pkg.name} | ${pkg.unlimited ? "不限时" : pkg.minutes + "分钟"} | ¥${pkg.price}
@@ -1199,11 +1200,11 @@ ${t.start ? `
         </div>
       `}
       
-      <select onchange="setPayTiming(${i},this.value)" ${t.start ? "disabled" : ""}>
+      <select onpointerdown="beginTableInteraction()" onfocus="beginTableInteraction()" onchange="setPayTiming(${i},this.value);finishTableInteractionSoon()" ${t.start ? "disabled" : ""}>
        <option value="prepaid" ${t.payTiming==="prepaid"?"selected":""}>先付款</option>
        <option value="postpaid" ${t.payTiming==="postpaid"?"selected":""}>后付款</option>
       </select>
-      <select onchange="setPay(${i},this.value)">
+      <select onpointerdown="beginTableInteraction()" onfocus="beginTableInteraction()" onchange="setPay(${i},this.value);finishTableInteractionSoon()">
         <option value="">付款方式</option>
         <option value="现金" ${t.pay==="现金"?"selected":""}>现金</option>
         <option value="PayPay" ${t.pay==="PayPay"?"selected":""}>PayPay</option>
@@ -1211,7 +1212,7 @@ ${t.start ? `
         <option value="支付宝" ${t.pay==="支付宝"?"selected":""}>支付宝</option>
       </select>
 
-      <select onchange="setCurrency(${i},this.value)">
+      <select onpointerdown="beginTableInteraction()" onfocus="beginTableInteraction()" onchange="setCurrency(${i},this.value);finishTableInteractionSoon()">
         <option value="日元" ${t.currency==="日元"?"selected":""}>日元</option>
         <option value="人民币" ${t.currency==="人民币"?"selected":""}>人民币</option>
       </select>
@@ -1457,15 +1458,35 @@ function getActivePreMinutesEdit(){
   return {index, raw, normalized:normalizePreMinutes(raw)};
 }
 
+function beginTableInteraction(){
+  tableInteractionHoldUntil = Date.now() + 4000;
+}
+
+function finishTableInteractionSoon(){
+  tableInteractionHoldUntil = Date.now() + 500;
+  setTimeout(()=>{
+    if(Date.now() < tableInteractionHoldUntil) return;
+    if(pendingRenderAfterInput && !shouldDeferTableRender()){
+      pendingRenderAfterInput = false;
+      render();
+    }
+  },600);
+}
+
 function shouldDeferTableRender(){
+  if(Date.now() < tableInteractionHoldUntil) return true;
   const active = document.activeElement;
   if(!active) return false;
   if(isPreMinutesInput(active)) return true;
+  if(active.tagName === "SELECT"){
+    return active.id !== "sortMode" && !active.id?.includes("Filter");
+  }
   if(active.tagName !== "INPUT" && active.tagName !== "TEXTAREA") return false;
   return /^name-\d+$/.test(active.id || "") || /^phone-\d+$/.test(active.id || "");
 }
 
 function beginPreMinutesEdit(i,el){
+  beginTableInteraction();
   editingPreMinutesIndex = i;
   preMinutesDrafts[i] = String(el?.value ?? "");
   try{ el?.select?.(); }catch{}
@@ -1476,13 +1497,11 @@ function commitPreMinutesEdit(i,value){
   if(t) t.preMinutes = normalizePreMinutes(value);
   delete preMinutesDrafts[i];
   if(editingPreMinutesIndex === i) editingPreMinutesIndex = null;
-  if(pendingRenderAfterInput){
-    pendingRenderAfterInput = false;
-    render();
-  }
+  finishTableInteractionSoon();
 }
 
 function updatePreMinutes(i,value){
+  beginTableInteraction();
   const t = state?.tables?.[i];
   if(!t) return;
   preMinutesDrafts[i] = String(value ?? "");
@@ -3402,6 +3421,8 @@ window.setPackage = setPackage;
 window.setWalkin = setWalkin;
 window.setBooking = setBooking;
 window.start = start;
+window.beginTableInteraction = beginTableInteraction;
+window.finishTableInteractionSoon = finishTableInteractionSoon;
 window.beginPreMinutesEdit = beginPreMinutesEdit;
 window.updatePreMinutes = updatePreMinutes;
 window.commitPreMinutesEdit = commitPreMinutesEdit;
