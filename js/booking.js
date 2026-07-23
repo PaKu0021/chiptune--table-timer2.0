@@ -1,9 +1,9 @@
-﻿import { db } from "./firebase.js?v=4.0.14";
+﻿import { db } from "./firebase.js?v=4.0.15";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=4.0.14";
-import { resetTable } from "./common.js?v=4.0.14";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=4.0.14";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.14";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, atomicCheckInBooking } from "./safe-state.js?v=4.0.15";
+import { resetTable } from "./common.js?v=4.0.15";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=4.0.15";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.15";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -2941,12 +2941,15 @@ async function confirmCheckInSelected(){
   }
 
   try{
-    await save("booking_arrived_to_timer");
+    state = await atomicCheckInBooking({
+      db,
+      ref,
+      state,
+      bookingId:b.id,
+      tableIndexes:indexes
+    });
 
-    // saveStateSafely 会为普通营业操作保留后台重试能力，因此内部云端失败
-    // 不一定向调用方抛出。到店后马上跳页属于更严格的场景：再次刷新队列，
-    // 并直接读取服务器确认预约和所选桌位都已经落到 shop/main。
-    await flushPending({db,ref});
+    // 原子事务返回后仍直接读取服务器做最终验收，只有完整状态存在才跳页。
     const serverSnap = await getDocFromServer(ref);
     if(!serverSnap.exists()) throw new Error("服务器营业状态不存在");
     const serverState = serverSnap.data();

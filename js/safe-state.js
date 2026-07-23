@@ -1864,6 +1864,140 @@ export function emergencySaveState({db,ref,state,action="emergency_state_update"
   return local;
 }
 
+/*
+ * 预约到店会同时修改一个预约和多张桌位，不能拆成普通实体队列逐条提交。
+ * 否则其中一条冲突时会出现“预约已到店但桌位没进入计时器”或相反的半成功状态。
+ */
+export async function atomicCheckInBooking({db,ref,state,bookingId,tableIndexes}){
+  if(!navigator.onLine) throw new Error("当前离线，无法安全办理预约到店");
+
+  const local = clone(state || {});
+  const indexes = Array.from(new Set(
+    (tableIndexes || []).map(Number).filter(Number.isFinite)
+  ));
+  const booking = (local.bookings || []).find(
+    item=>Number(item?.id) === Number(bookingId)
+  );
+  if(!booking) throw new Error("找不到要办理到店的预约");
+  if(!indexes.length) throw new Error("没有选择到店桌位");
+
+  const operationId = `booking_checkin_${bookingId}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  const bookingRef = entityRef(db,"booking",String(booking.id));
+  const tableRefs = indexes.map(index=>({
+    index,
+    ref:entityRef(db,"table",entityDocId("table",index,index))
+  }));
+  let committedState = null;
+
+  await withTimeout(runTransaction(db,async tx=>{
+    // Firestore 事务要求所有读取都发生在写入之前。
+    const mainSnap = await tx.get(ref);
+    const bookingSnap = await tx.get(bookingRef);
+    const tableSnaps = [];
+    for(const entry of tableRefs){
+      tableSnaps.push({entry,snap:await tx.get(entry.ref)});
+    }
+
+    const main = mainSnap.exists() ? clone(mainSnap.data()) : {};
+    const remoteBooking = bookingSnap.exists() ? bookingSnap.data() : {};
+    const nextTables = Array.isArray(main.tables) ? clone(main.tables) : [];
+    const nextBookings = Array.isArray(main.bookings) ? clone(main.bookings) : [];
+
+    for(const {entry,snap} of tableSnaps){
+      const desired = clone(local.tables?.[entry.index] || {});
+      const remote = snap.exists() ? snap.data() : {};
+      if(remote?.start && Number(remote?.bookingId) !== Number(bookingId)){
+        throw new Error(`${desired.name || `${entry.index+1}号桌`} 已由其他客人开始使用`);
+      }
+      const version = Number(remote.version || remote?._entitySync?.version || 0) + 1;
+      const entity = {
+        ...desired,
+        id:entityDocId("table",entry.index,entry.index),
+        tableIndex:entry.index,
+        version,
+        deleted:false,
+        updatedAt:serverTimestamp(),
+        updatedBy:getDeviceId(),
+        lastOperationId:operationId,
+        _entitySync:{version,deviceId:getDeviceId(),operationId}
+      };
+      tx.set(entry.ref,entity,{merge:false});
+      nextTables[entry.index] = {
+        ...desired,
+        _entitySync:{version,updatedAt:Date.now(),deviceId:getDeviceId(),operationId}
+      };
+    }
+
+    const bookingVersion = Number(
+      remoteBooking.version || remoteBooking?._entitySync?.version || 0
+    ) + 1;
+    tx.set(bookingRef,{
+      ...clone(booking),
+      version:bookingVersion,
+      deleted:false,
+      updatedAt:serverTimestamp(),
+      updatedBy:getDeviceId(),
+      lastOperationId:operationId,
+      _entitySync:{version:bookingVersion,deviceId:getDeviceId(),operationId}
+    },{merge:false});
+
+    const bookingIndex = nextBookings.findIndex(
+      item=>Number(item?.id) === Number(bookingId)
+    );
+    const bookingView = {
+      ...clone(booking),
+      _entitySync:{
+        version:bookingVersion,
+        updatedAt:Date.now(),
+        deviceId:getDeviceId(),
+        operationId
+      }
+    };
+    if(bookingIndex >= 0) nextBookings[bookingIndex] = bookingView;
+    else nextBookings.push(bookingView);
+
+    committedState = {
+      ...main,
+      tables:nextTables,
+      bookings:nextBookings,
+      _sync:{
+        revision:Number(main?._sync?.revision || 0)+1,
+        updatedAt:Date.now(),
+        deviceId:getDeviceId(),
+        operationId,
+        action:"booking_arrived_to_timer",
+        architecture:"entity-v4"
+      }
+    };
+    tx.set(ref,committedState,{merge:false});
+    tx.set(operationRef(db,operationId),{
+      operationId,
+      entityType:"booking_checkin",
+      entityId:String(bookingId),
+      tableIndexes:indexes,
+      action:"booking_arrived_to_timer",
+      deviceId:getDeviceId(),
+      status:"committed",
+      committedAt:serverTimestamp()
+    });
+  }),CLOUD_SYNC_TIMEOUT_MS,"预约到店服务器事务");
+
+  baseline = clone(committedState);
+  await writeLocalState(committedState,committedState);
+  writeShadow(STATE_SHADOW,{
+    state:clone(committedState),
+    cloudBaseline:clone(committedState),
+    savedAt:Date.now(),
+    deviceId:getDeviceId()
+  });
+  broadcastState(committedState,"booking_arrived_to_timer");
+  setSyncStatus(
+    "synced",
+    idbStateDegraded ? "● 云端已同步 · 本机使用应急缓存" : "● 到店状态已同步"
+  );
+  return clone(committedState);
+}
+
 
 export async function atomicBatchStartTables({db,ref,entries,group=null}){
   if(!navigator.onLine) throw new Error("当前离线，无法执行跨设备安全批量开始");
