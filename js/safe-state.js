@@ -1411,7 +1411,7 @@ export async function flushPending({db,ref}){
     const total = items.length + recordItems.length;
     if(!total){
       if(idbStateDegraded || idbRecordsDegraded){
-        setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+        setSyncStatus("synced","● 云端已同步 · 本机使用应急缓存");
       }else{
         setSyncStatus("synced");
       }
@@ -1455,7 +1455,7 @@ export async function flushPending({db,ref}){
     if(left){
       setSyncStatus("pending",`● 已保存本机 · ${left} 项等待上传`);
     }else if(idbStateDegraded || idbRecordsDegraded){
-      setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+      setSyncStatus("synced","● 云端已同步 · 本机使用应急缓存");
     }else{
       setSyncStatus("synced");
     }
@@ -1496,7 +1496,7 @@ export function installConnectionGuard(){
     }else if(count){
       setSyncStatus("pending",`● 已保存本机 · ${count} 项等待上传`);
     }else if(idbStateDegraded || idbRecordsDegraded){
-      setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+      setSyncStatus("synced","● 云端已同步 · 本机使用应急缓存");
     }else{
       setSyncStatus("synced");
     }
@@ -1551,7 +1551,7 @@ export function saveStateSafely({
     }else if(count){
       setSyncStatus("pending",`● 已保存本机 · ${count} 项等待上传`);
     }else if(idbStateDegraded || idbRecordsDegraded){
-      setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+      setSyncStatus("synced","● 云端已同步 · 本机使用应急缓存");
     }else{
       setSyncStatus("pending","● 已保存本机 · 正在确认云端同步");
     }
@@ -1589,7 +1589,7 @@ export async function saveRecordSafely({db,ref,record}){
   }else if(count){
     setSyncStatus("pending",`● 已保存本机 · ${count} 项等待上传`);
   }else if(idbStateDegraded || idbRecordsDegraded){
-    setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+    setSyncStatus("synced","● 云端已同步 · 本机使用应急缓存");
   }else{
     setSyncStatus("pending","● 已保存本机 · 正在确认云端同步");
   }

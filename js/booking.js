@@ -1,9 +1,9 @@
-﻿import { db } from "./firebase.js?v=4.0.13";
-import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, emergencySaveState } from "./safe-state.js?v=4.0.13";
-import { resetTable } from "./common.js?v=4.0.13";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=4.0.13";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.13";
+﻿import { db } from "./firebase.js?v=4.0.14";
+import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely } from "./safe-state.js?v=4.0.14";
+import { resetTable } from "./common.js?v=4.0.14";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=4.0.14";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.14";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -55,6 +55,7 @@ window.addEventListener("storage", event=>{
 let activeBookingId = null;
 let bookingDetailInitialSnapshot = null;
 let bookingDetailClosing = false;
+let checkInSubmitting = false;
 let bookingLocked = true;
 let currentBookingDate = getTodayDate();
 let calendarYear = new Date().getFullYear();
@@ -2854,6 +2855,7 @@ async function checkInBooking(){
 }
 
 async function confirmCheckInSelected(){
+  if(checkInSubmitting) return;
   const b = getBookingById(activeBookingId);
   if(!b) return;
 
@@ -2927,14 +2929,58 @@ async function confirmCheckInSelected(){
 
   // 这里只登记“已到店并送入计时器”，不产生账单、不计营业额。
   // 套餐费必须在计时器选择付款方式后点击“开始”才正式写入。
-  emergencySaveState({db,ref,state,action:"booking_arrived_to_timer"});
-  save("booking_arrived_to_timer").catch(err=>console.warn("预约到店状态后台同步失败",err));
+  //
+  // 必须等待保存和云端提交完成后再跳页。iPad Safari 在 location.href
+  // 执行后会立即终止当前页面尚未完成的异步任务；旧实现因此可能只留下
+  // 状态副本，却没有成功建立/上传操作队列。
+  const button = document.getElementById("confirmCheckInButton");
+  checkInSubmitting = true;
+  if(button){
+    button.disabled = true;
+    button.textContent = "正在保存并同步…";
+  }
 
-  closeCheckInSelectModal();
-  closeBookingAction();
-  renderBookingGrid();
-  renderList();
-  location.href = "./app.html";
+  try{
+    await save("booking_arrived_to_timer");
+
+    // saveStateSafely 会为普通营业操作保留后台重试能力，因此内部云端失败
+    // 不一定向调用方抛出。到店后马上跳页属于更严格的场景：再次刷新队列，
+    // 并直接读取服务器确认预约和所选桌位都已经落到 shop/main。
+    await flushPending({db,ref});
+    const serverSnap = await getDocFromServer(ref);
+    if(!serverSnap.exists()) throw new Error("服务器营业状态不存在");
+    const serverState = serverSnap.data();
+    const serverBooking = (serverState.bookings || []).find(
+      item=>Number(item?.id) === Number(b.id)
+    );
+    const tablesConfirmed = indexes.every(index=>{
+      const table = serverState.tables?.[index];
+      return (
+        table?.type === "booking" &&
+        Number(table?.bookingId) === Number(b.id)
+      );
+    });
+    if(!serverBooking?.arrived || !tablesConfirmed){
+      throw new Error("服务器尚未确认到店桌位，已停止跳转并保留本机待同步数据");
+    }
+
+    state = await reconcileCloudState(serverState);
+    closeCheckInSelectModal();
+    forceCloseBookingAction();
+    renderBookingGrid();
+    renderList();
+    location.href = "./app.html";
+  }catch(error){
+    console.error("预约到店状态保存失败",error);
+    setSyncStatus("error","● 到店状态保存失败 · 未跳转");
+    alert(`到店状态尚未保存成功，请不要重复操作。\n${error?.message || error}`);
+  }finally{
+    checkInSubmitting = false;
+    if(button){
+      button.disabled = false;
+      button.textContent = "确认进入计时器";
+    }
+  }
 }
 
 function cancelBooking(){
