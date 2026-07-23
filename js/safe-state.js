@@ -30,6 +30,8 @@ const RECORD_MIGRATION_KEY = "records_migration_v3";
 const RECORD_MIGRATION_SHADOW = "chiptune_records_migration_v3";
 const RECORD_HISTORY_SYNC_META = "chiptune_records_history_sync_v2";
 const RECORD_DELETES_COLLECTION = "recordDeletes";
+const STATE_QUEUE_SHADOW = "chiptune_state_queue_shadow_v4";
+const RECORD_QUEUE_SHADOW = "chiptune_record_queue_shadow_v4";
 const LOCAL_DB_TIMEOUT_MS = 15000;
 const CLOUD_SYNC_TIMEOUT_MS = 30000;
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
@@ -327,6 +329,67 @@ function writeShadow(key,value){
 }
 function readShadow(key){
   try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; }catch{ return null; }
+}
+
+function queueShadowKey(store){
+  return store === "recordQueue" ? RECORD_QUEUE_SHADOW : STATE_QUEUE_SHADOW;
+}
+
+function readQueueShadow(store){
+  const value = readShadow(queueShadowKey(store));
+  return Array.isArray(value) ? value : [];
+}
+
+function writeQueueShadow(store,items){
+  writeShadow(queueShadowKey(store),Array.isArray(items) ? items : []);
+}
+
+/*
+ * iPad Safari 偶尔会让 IndexedDB 整体不可用。操作队列必须先同步写入
+ * localStorage，不能只把状态快照留在那里，否则换页时云端旧状态会被误判
+ * 为“没有待上传修改”的最终状态。
+ */
+async function queuePut(store,item){
+  const shadow = readQueueShadow(store);
+  const index = shadow.findIndex(value=>String(value?.id) === String(item?.id));
+  if(index >= 0) shadow[index] = clone(item); else shadow.push(clone(item));
+  writeQueueShadow(store,shadow);
+  try{
+    await idbPut(store,item);
+  }catch(error){
+    console.warn(`${store} IndexedDB队列不可用，继续使用应急队列`,error);
+    if(store === "recordQueue") idbRecordsDegraded = true;
+    else idbStateDegraded = true;
+  }
+  return item;
+}
+
+async function queueAll(store){
+  const merged = new Map(
+    readQueueShadow(store).map(item=>[String(item?.id),clone(item)])
+  );
+  try{
+    for(const item of await idbAll(store)){
+      merged.set(String(item?.id),clone(item));
+    }
+  }catch(error){
+    console.warn(`${store} IndexedDB队列读取失败，使用应急队列`,error);
+    if(store === "recordQueue") idbRecordsDegraded = true;
+    else idbStateDegraded = true;
+  }
+  return [...merged.values()];
+}
+
+async function queueDelete(store,id){
+  writeQueueShadow(
+    store,
+    readQueueShadow(store).filter(item=>String(item?.id) !== String(id))
+  );
+  try{
+    await idbDelete(store,id);
+  }catch(error){
+    console.warn(`${store} IndexedDB队列删除失败，应急队列已完成删除`,error);
+  }
 }
 
 function getDeletedRecordIds(){
@@ -639,7 +702,7 @@ function changedKeys(local, base){
 }
 
 async function pendingKeys(){
-  const items = await idbAll("queue");
+  const items = await queueAll("queue");
   return new Set(items.flatMap(x=>x.changed || []));
 }
 
@@ -660,7 +723,7 @@ export async function reconcileCloudState(cloud){
   }
 
   const queueItems = (
-    await idbAll("queue").catch(()=>[])
+    await queueAll("queue")
   ).sort((a,b)=>
     Number(a.createdAt || 0) -
     Number(b.createdAt || 0)
@@ -1056,7 +1119,7 @@ function arrayMapById(list,prefix){
   return map;
 }
 async function pendingForEntity(type,id){
-  const items=await idbAll("queue").catch(()=>[]);
+  const items=await queueAll("queue");
   return items.filter(x=>(x.syncV4 || x.syncV3) && x.entityType===type && String(x.entityId)===String(id)).sort((a,b)=>a.createdAt-b.createdAt);
 }
 async function makeEntityOperation({type,id,index,next,base,action,deleted=false}){
@@ -1118,7 +1181,7 @@ async function enqueueEntityOperations(local,base,action){
     const operationId=crypto.randomUUID ? crypto.randomUUID() : `${getDeviceId()}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     ops.push({id:operationId,syncV4:true,entityType:"shopMeta",entityId:"main",action,command:"PATCH",patch:metaPatch,baseEntity:{},nextEntity:metaPatch,expectedVersion:stateRevision(base),createdAt:Date.now(),deviceId:getDeviceId(),retryCount:0});
   }
-  for(const op of ops) await idbPut("queue",op);
+  for(const op of ops) await queuePut("queue",op);
   return ops;
 }
 function hasPatchConflict(remote,base,patch){
@@ -1186,7 +1249,7 @@ async function flushEntityOperation({db,ref},item){
     tx.set(ref,materialized);
     tx.set(opRef,{operationId:item.id,entityType:item.entityType,entityId:item.entityId,action:item.action,deviceId:item.deviceId,expectedVersion:item.expectedVersion,committedVersion:version,status:"committed",committedAt:serverTimestamp()});
   });
-  await idbDelete("queue",item.id);
+  await queueDelete("queue",item.id);
   if(materialized){
     baseline=clone(materialized); await writeLocalState(materialized,materialized);
     writeShadow(STATE_SHADOW,{state:clone(materialized),cloudBaseline:clone(materialized),savedAt:Date.now(),deviceId:getDeviceId()});
@@ -1223,7 +1286,7 @@ async function enqueueRecordOperations(next,previous){
   const recordPatch=shallowPatch(nextMeta,prevMeta);
   if(Object.keys(recordPatch).length){
     const recordOpId=crypto.randomUUID?crypto.randomUUID():`record_${recordId}_${now}`;
-    await idbPut("recordQueue",{id:recordOpId,syncV4:true,type:"record_patch",recordId,patch:recordPatch,baseRecord:clone(prev),expectedVersion:Number(prev.version||prev?._recordSync?.version||0),createdAt:now,deviceId});
+    await queuePut("recordQueue",{id:recordOpId,syncV4:true,type:"record_patch",recordId,patch:recordPatch,baseRecord:clone(prev),expectedVersion:Number(prev.version||prev?._recordSync?.version||0),createdAt:now,deviceId});
   }
   const pm=new Map(prev.payments.map(x=>[String(x.id),x]));
   const nm=new Map(normalized.payments.map(x=>[String(x.id),x]));
@@ -1231,12 +1294,12 @@ async function enqueueRecordOperations(next,previous){
     const old=pm.get(id);
     if(same(payment,old)) continue;
     const opId=crypto.randomUUID?crypto.randomUUID():`payment_${id}_${Date.now()}`;
-    await idbPut("recordQueue",{id:opId,syncV4:true,type:"payment_upsert",recordId,paymentId:id,payment:clone(payment),basePayment:clone(old||{}),createdAt:Date.now(),deviceId});
+    await queuePut("recordQueue",{id:opId,syncV4:true,type:"payment_upsert",recordId,paymentId:id,payment:clone(payment),basePayment:clone(old||{}),createdAt:Date.now(),deviceId});
   }
   for(const [id,old] of pm){
     if(nm.has(id)) continue;
     const opId=crypto.randomUUID?crypto.randomUUID():`payment_void_${id}_${Date.now()}`;
-    await idbPut("recordQueue",{id:opId,syncV4:true,type:"payment_void",recordId,paymentId:id,basePayment:clone(old),createdAt:Date.now(),deviceId});
+    await queuePut("recordQueue",{id:opId,syncV4:true,type:"payment_void",recordId,paymentId:id,basePayment:clone(old),createdAt:Date.now(),deviceId});
   }
   return normalized;
 }
@@ -1290,7 +1353,7 @@ async function flushRecordV3({db},item){
     }
     tx.set(opRef,{operationId:item.id,type:item.type,recordId:item.recordId,paymentId:item.paymentId||null,deviceId:item.deviceId,status:"committed",committedAt:serverTimestamp()});
   });
-  await idbDelete("recordQueue",item.id);
+  await queueDelete("recordQueue",item.id);
 }
 
 async function flushRecordOne({db}, item){
@@ -1302,8 +1365,8 @@ export async function flushPending({db,ref}){
   if(!navigator.onLine) return;
 
   const run = async()=>{
-    const items = (await idbAll("queue")).sort((a,b)=>a.createdAt-b.createdAt);
-    const recordItems = (await idbAll("recordQueue")).sort((a,b)=>a.createdAt-b.createdAt);
+    const items = (await queueAll("queue")).sort((a,b)=>a.createdAt-b.createdAt);
+    const recordItems = (await queueAll("recordQueue")).sort((a,b)=>a.createdAt-b.createdAt);
     const total = items.length + recordItems.length;
     if(!total){
       if(idbStateDegraded || idbRecordsDegraded){
@@ -1347,7 +1410,7 @@ export async function flushPending({db,ref}){
       }
     }
 
-    const left = (await idbAll("queue")).length + (await idbAll("recordQueue")).length;
+    const left = (await queueAll("queue")).length + (await queueAll("recordQueue")).length;
     if(left){
       setSyncStatus("pending",`● 已保存本机 · ${left} 项等待上传`);
     }else if(idbStateDegraded || idbRecordsDegraded){
@@ -1377,11 +1440,11 @@ async function quarantineConflict(db,item,error,storeName){
     createdAt:serverTimestamp()
   };
   await setDoc(doc(db,CONFLICT_COLLECTION,String(item.id)),payload,{merge:true});
-  await idbDelete(storeName,String(item.id));
+  await queueDelete(storeName,String(item.id));
 }
 
 async function pendingCount(){
-  return (await idbAll("queue").catch(()=>[])).length + (await idbAll("recordQueue").catch(()=>[])).length;
+  return (await queueAll("queue")).length + (await queueAll("recordQueue")).length;
 }
 
 export function installConnectionGuard(){
@@ -1672,7 +1735,7 @@ export async function deleteRecordSafely({db,ref,recordId}){
     const current = await loadLocalRecords();
     const next = current.filter(r=>String(r.id)!==id);
     await writeLocalRecords(next);
-    await idbPut("recordQueue",{id:(crypto.randomUUID?crypto.randomUUID():`delete_record_${id}_${Date.now()}`),syncV4:true,type:"record_delete",recordId:id,createdAt:Date.now(),deviceId:getDeviceId()});
+    await queuePut("recordQueue",{id:(crypto.randomUUID?crypto.randomUUID():`delete_record_${id}_${Date.now()}`),syncV4:true,type:"record_delete",recordId:id,createdAt:Date.now(),deviceId:getDeviceId()});
   }catch(err){
     console.warn("账单本地删除队列写入失败，已保留删除标记",err);
   }
@@ -2158,7 +2221,7 @@ export function subscribeAllRecords({
 
         if(docs.length < BATCH_SIZE){
           // 完整扫描结束后，以云端全集为基础重建本机镜像；仅保留尚未上传的新账单。
-          const pendingItems = await idbAll("recordQueue").catch(()=>[]);
+          const pendingItems = await queueAll("recordQueue");
           const pendingRecords = pendingItems
             .filter(x=>x.type !== "delete" && x.record)
             .map(x=>x.record);
