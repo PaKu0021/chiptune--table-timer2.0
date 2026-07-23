@@ -32,6 +32,9 @@ const RECORD_HISTORY_SYNC_META = "chiptune_records_history_sync_v2";
 const RECORD_DELETES_COLLECTION = "recordDeletes";
 const STATE_QUEUE_SHADOW = "chiptune_state_queue_shadow_v4";
 const RECORD_QUEUE_SHADOW = "chiptune_record_queue_shadow_v4";
+const IDB_STATE_DEGRADED_UNTIL = "chiptune_idb_state_degraded_until_v1";
+const IDB_RECORDS_DEGRADED_UNTIL = "chiptune_idb_records_degraded_until_v1";
+const IDB_RETRY_AFTER_MS = 30 * 60 * 1000;
 const LOCAL_DB_TIMEOUT_MS = 15000;
 const CLOUD_SYNC_TIMEOUT_MS = 30000;
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
@@ -168,8 +171,18 @@ let saveQueue = Promise.resolve();
 let badge = null;
 let flushTimer = null;
 let lastSyncStatusType = "";
-let idbStateDegraded = false;
-let idbRecordsDegraded = false;
+function degradedUntil(key){
+  try{ return Number(localStorage.getItem(key) || 0); }catch{ return 0; }
+}
+function markIdbDegraded(key){
+  try{ localStorage.setItem(key,String(Date.now() + IDB_RETRY_AFTER_MS)); }catch{}
+}
+function clearIdbDegraded(key){
+  try{ localStorage.removeItem(key); }catch{}
+}
+
+let idbStateDegraded = degradedUntil(IDB_STATE_DEGRADED_UNTIL) > Date.now();
+let idbRecordsDegraded = degradedUntil(IDB_RECORDS_DEGRADED_UNTIL) > Date.now();
 
 const stateChannel =
   typeof BroadcastChannel !== "undefined"
@@ -354,12 +367,19 @@ async function queuePut(store,item){
   const index = shadow.findIndex(value=>String(value?.id) === String(item?.id));
   if(index >= 0) shadow[index] = clone(item); else shadow.push(clone(item));
   writeQueueShadow(store,shadow);
+  const degraded = store === "recordQueue" ? idbRecordsDegraded : idbStateDegraded;
+  if(degraded) return item;
   try{
     await idbPut(store,item);
   }catch(error){
     console.warn(`${store} IndexedDB队列不可用，继续使用应急队列`,error);
-    if(store === "recordQueue") idbRecordsDegraded = true;
-    else idbStateDegraded = true;
+    if(store === "recordQueue"){
+      idbRecordsDegraded = true;
+      markIdbDegraded(IDB_RECORDS_DEGRADED_UNTIL);
+    }else{
+      idbStateDegraded = true;
+      markIdbDegraded(IDB_STATE_DEGRADED_UNTIL);
+    }
   }
   return item;
 }
@@ -368,14 +388,21 @@ async function queueAll(store){
   const merged = new Map(
     readQueueShadow(store).map(item=>[String(item?.id),clone(item)])
   );
+  const degraded = store === "recordQueue" ? idbRecordsDegraded : idbStateDegraded;
+  if(degraded) return [...merged.values()];
   try{
     for(const item of await idbAll(store)){
       merged.set(String(item?.id),clone(item));
     }
   }catch(error){
     console.warn(`${store} IndexedDB队列读取失败，使用应急队列`,error);
-    if(store === "recordQueue") idbRecordsDegraded = true;
-    else idbStateDegraded = true;
+    if(store === "recordQueue"){
+      idbRecordsDegraded = true;
+      markIdbDegraded(IDB_RECORDS_DEGRADED_UNTIL);
+    }else{
+      idbStateDegraded = true;
+      markIdbDegraded(IDB_STATE_DEGRADED_UNTIL);
+    }
   }
   return [...merged.values()];
 }
@@ -385,6 +412,8 @@ async function queueDelete(store,id){
     store,
     readQueueShadow(store).filter(item=>String(item?.id) !== String(id))
   );
+  const degraded = store === "recordQueue" ? idbRecordsDegraded : idbStateDegraded;
+  if(degraded) return;
   try{
     await idbDelete(store,id);
   }catch(error){
@@ -467,11 +496,16 @@ export async function loadLocalState(){
 async function writeLocalState(state, cloudBaseline=baseline){
   const box = {state:clone(state),cloudBaseline:clone(cloudBaseline),savedAt:Date.now(),deviceId:getDeviceId()};
   writeShadow(STATE_SHADOW,box);
+  if(idbStateDegraded){
+    setSyncStatus("pending","● 本机使用应急缓存 · 正在继续同步云端");
+    return;
+  }
   let lastError = null;
   for(let attempt=1; attempt<=3; attempt++){
     try{
       await idbPut("kv",box,STATE_KEY);
       idbStateDegraded = false;
+      clearIdbDegraded(IDB_STATE_DEGRADED_UNTIL);
       return;
     }catch(error){
       lastError = error;
@@ -482,7 +516,8 @@ async function writeLocalState(state, cloudBaseline=baseline){
   // localStorage shadow 已经成功写入，因此不丢失当前状态；让调用方继续排队上传云端。
   console.warn("IndexedDB连续失败，已降级使用localStorage应急副本",lastError);
   idbStateDegraded = true;
-  setSyncStatus("pending","● IndexedDB暂不可用 · 已保存应急副本并继续同步");
+  markIdbDegraded(IDB_STATE_DEGRADED_UNTIL);
+  setSyncStatus("pending","● 本机使用应急缓存 · 正在继续同步云端");
 }
 
 export async function loadLocalRecords(){
@@ -510,14 +545,20 @@ async function writeLocalRecords(records){
   const list = clone(records || []);
   const light = list.map(stripImagesDeep);
   writeShadow(RECORDS_SHADOW,light);
+  if(idbRecordsDegraded){
+    setSyncStatus("pending","● 本机使用应急缓存 · 正在继续同步云端");
+    return;
+  }
   try{
     // 完整账单（包括收款截图）只存 IndexedDB；iPad IndexedDB 卡住时降级为轻量备份。
     await idbPut("kv",list,RECORDS_KEY);
     idbRecordsDegraded = false;
+    clearIdbDegraded(IDB_RECORDS_DEGRADED_UNTIL);
   }catch(err){
     console.warn("IndexedDB账单保存失败，已保留轻量本机备份并继续云端同步",err);
     idbRecordsDegraded = true;
-    setSyncStatus("pending","● 已保存轻量本机备份 · 正在继续同步云端");
+    markIdbDegraded(IDB_RECORDS_DEGRADED_UNTIL);
+    setSyncStatus("pending","● 本机使用应急缓存 · 正在继续同步云端");
   }
 }
 
