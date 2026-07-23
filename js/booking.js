@@ -1,9 +1,9 @@
-﻿import { db } from "./firebase.js?v=4.0.15";
-import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, atomicCheckInBooking } from "./safe-state.js?v=4.0.15";
-import { resetTable } from "./common.js?v=4.0.15";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=4.0.15";
-import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.15";
+﻿import { db } from "./firebase.js?v=4.0.16";
+import { doc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, loadLocalState, reconcileCloudState, flushPending, saveRecordSafely, atomicCheckInBooking } from "./safe-state.js?v=4.0.16";
+import { resetTable } from "./common.js?v=4.0.16";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup } from "./group-model.js?v=4.0.16";
+import { jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.16";
 
 const ref = doc(db, "shop", "main");
 let state = null;
@@ -2948,26 +2948,6 @@ async function confirmCheckInSelected(){
       bookingId:b.id,
       tableIndexes:indexes
     });
-
-    // 原子事务返回后仍直接读取服务器做最终验收，只有完整状态存在才跳页。
-    const serverSnap = await getDocFromServer(ref);
-    if(!serverSnap.exists()) throw new Error("服务器营业状态不存在");
-    const serverState = serverSnap.data();
-    const serverBooking = (serverState.bookings || []).find(
-      item=>Number(item?.id) === Number(b.id)
-    );
-    const tablesConfirmed = indexes.every(index=>{
-      const table = serverState.tables?.[index];
-      return (
-        table?.type === "booking" &&
-        Number(table?.bookingId) === Number(b.id)
-      );
-    });
-    if(!serverBooking?.arrived || !tablesConfirmed){
-      throw new Error("服务器尚未确认到店桌位，已停止跳转并保留本机待同步数据");
-    }
-
-    state = await reconcileCloudState(serverState);
     closeCheckInSelectModal();
     forceCloseBookingAction();
     renderBookingGrid();
