@@ -166,6 +166,8 @@ let saveQueue = Promise.resolve();
 let badge = null;
 let flushTimer = null;
 let lastSyncStatusType = "";
+let idbStateDegraded = false;
+let idbRecordsDegraded = false;
 
 const stateChannel =
   typeof BroadcastChannel !== "undefined"
@@ -406,6 +408,7 @@ async function writeLocalState(state, cloudBaseline=baseline){
   for(let attempt=1; attempt<=3; attempt++){
     try{
       await idbPut("kv",box,STATE_KEY);
+      idbStateDegraded = false;
       return;
     }catch(error){
       lastError = error;
@@ -415,6 +418,7 @@ async function writeLocalState(state, cloudBaseline=baseline){
   }
   // localStorage shadow 已经成功写入，因此不丢失当前状态；让调用方继续排队上传云端。
   console.warn("IndexedDB连续失败，已降级使用localStorage应急副本",lastError);
+  idbStateDegraded = true;
   setSyncStatus("pending","● IndexedDB暂不可用 · 已保存应急副本并继续同步");
 }
 
@@ -446,8 +450,10 @@ async function writeLocalRecords(records){
   try{
     // 完整账单（包括收款截图）只存 IndexedDB；iPad IndexedDB 卡住时降级为轻量备份。
     await idbPut("kv",list,RECORDS_KEY);
+    idbRecordsDegraded = false;
   }catch(err){
     console.warn("IndexedDB账单保存失败，已保留轻量本机备份并继续云端同步",err);
+    idbRecordsDegraded = true;
     setSyncStatus("pending","● 已保存轻量本机备份 · 正在继续同步云端");
   }
 }
@@ -1299,7 +1305,14 @@ export async function flushPending({db,ref}){
     const items = (await idbAll("queue")).sort((a,b)=>a.createdAt-b.createdAt);
     const recordItems = (await idbAll("recordQueue")).sort((a,b)=>a.createdAt-b.createdAt);
     const total = items.length + recordItems.length;
-    if(!total){ setSyncStatus("synced"); return; }
+    if(!total){
+      if(idbStateDegraded || idbRecordsDegraded){
+        setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+      }else{
+        setSyncStatus("synced");
+      }
+      return;
+    }
 
     setSyncStatus("syncing",`● 本机已保存 · 正在上传 ${total} 项`);
 
@@ -1335,7 +1348,13 @@ export async function flushPending({db,ref}){
     }
 
     const left = (await idbAll("queue")).length + (await idbAll("recordQueue")).length;
-    setSyncStatus(left ? "pending" : "synced", left ? `● 已保存本机 · ${left} 项等待上传` : undefined);
+    if(left){
+      setSyncStatus("pending",`● 已保存本机 · ${left} 项等待上传`);
+    }else if(idbStateDegraded || idbRecordsDegraded){
+      setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+    }else{
+      setSyncStatus("synced");
+    }
   };
 
   if(navigator.locks?.request){
@@ -1368,8 +1387,15 @@ async function pendingCount(){
 export function installConnectionGuard(){
   const update = async ()=>{
     const count = await pendingCount();
-    if(!navigator.onLine) setSyncStatus("offline",`● 已保存本机 · 离线 · ${count} 项待上传`);
-    else setSyncStatus(count ? "pending" : "synced",count ? `● 已保存本机 · ${count} 项等待上传` : undefined);
+    if(!navigator.onLine){
+      setSyncStatus("offline",`● 已保存本机 · 离线 · ${count} 项待上传`);
+    }else if(count){
+      setSyncStatus("pending",`● 已保存本机 · ${count} 项等待上传`);
+    }else if(idbStateDegraded || idbRecordsDegraded){
+      setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+    }else{
+      setSyncStatus("synced");
+    }
     window.dispatchEvent(new CustomEvent("chiptune-online-change",{detail:{online:navigator.onLine}}));
   };
   window.addEventListener("online",update);
@@ -1416,7 +1442,15 @@ export function saveStateSafely({
     await writeLocalState(local,base);
     await enqueue(local,base,action);
     const count = await pendingCount();
-    setSyncStatus(navigator.onLine ? "pending" : "offline", navigator.onLine ? `● 已保存本机 · ${count} 项等待上传` : `● 已保存本机 · 离线 · ${count} 项待上传`);
+    if(!navigator.onLine){
+      setSyncStatus("offline",`● 已保存本机 · 离线 · ${count} 项待上传`);
+    }else if(count){
+      setSyncStatus("pending",`● 已保存本机 · ${count} 项等待上传`);
+    }else if(idbStateDegraded || idbRecordsDegraded){
+      setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+    }else{
+      setSyncStatus("pending","● 已保存本机 · 正在确认云端同步");
+    }
     if(navigator.onLine){
       // 在线操作立即同步，不再等延迟计时器。这样手机、iPad 和二维码页面
       // 都能在几乎同一时间收到桌位状态更新。
@@ -1446,7 +1480,15 @@ export async function saveRecordSafely({db,ref,record}){
   await writeLocalRecords(merged);
   await enqueueRecordOperations(next,previous);
   const count=await pendingCount();
-  setSyncStatus(navigator.onLine?"pending":"offline",navigator.onLine?`● 已保存本机 · ${count} 项等待上传`:`● 已保存本机 · 离线 · ${count} 项待上传`);
+  if(!navigator.onLine){
+    setSyncStatus("offline",`● 已保存本机 · 离线 · ${count} 项待上传`);
+  }else if(count){
+    setSyncStatus("pending",`● 已保存本机 · ${count} 项等待上传`);
+  }else if(idbStateDegraded || idbRecordsDegraded){
+    setSyncStatus("cache","● 云端已同步 · iPad本机缓存暂不可用");
+  }else{
+    setSyncStatus("pending","● 已保存本机 · 正在确认云端同步");
+  }
   if(navigator.onLine){ clearTimeout(flushTimer); flushTimer=setTimeout(()=>flushPending({db,ref}).catch(err=>{ console.warn("账单同步失败，将自动重试",err); setSyncStatus("error",`● 账单同步失败：${err?.code || err?.message || err}`); }),0); }
   return next;
 }

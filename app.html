@@ -232,7 +232,7 @@
 </div>
 
 <script type="module">
-  import { renderNav } from "./js/nav.js?v=4.0.10";
+  import { renderNav } from "./js/nav.js?v=4.0.11";
 
   try {
     renderNav("app");
@@ -240,7 +240,7 @@
     console.error("导航加载失败", error);
   }
 
-  import("./js/app.js?v=4.0.10").catch(error => {
+  import("./js/app.js?v=4.0.11").catch(error => {
     alert(
       "计时系统加载失败：\n\n" +
       error.name + "\n" +
