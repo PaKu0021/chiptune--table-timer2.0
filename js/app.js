@@ -1926,8 +1926,10 @@ async function confirmCheckout(){
   const pay = document.getElementById("checkoutPay")?.value || "";
 
   const finalChargeJPY = getOriginalJPY(t);
-  const rawDiffJPY = Math.max(0, finalChargeJPY - Number(t.paidJPY || 0));
+  const paidBeforeJPY = Number(t.paidJPY || 0);
+  const rawDiffJPY = Math.max(0, finalChargeJPY - paidBeforeJPY);
   const finalJPY = useRound ? roundJPY(rawDiffJPY) : rawDiffJPY;
+  const finalSettlementJPY = paidBeforeJPY + finalJPY;
 
   if(finalJPY > 0 && !pay){
     alert("本次有续费补收，请选择付款方式");
@@ -1949,7 +1951,7 @@ async function confirmCheckout(){
 
     const note = document.getElementById("checkoutNote")?.value || "";
 
-    t.paidJPY = Number(t.paidJPY || 0) + finalJPY;
+    t.paidJPY = finalSettlementJPY;
     t.paidRMB = getRMB(t.paidJPY);
     t.paidAt = Date.now();
 
@@ -1978,7 +1980,7 @@ async function confirmCheckout(){
 
     record.payments = normalizePayments(record);
     settleRecordToFinalAmount(record,{
-      finalAmountJPY:finalChargeJPY,
+      finalAmountJPY:finalSettlementJPY,
       pay,
       reason:"续时补收",
       note:note || "离店时结清续时费用"
@@ -1994,8 +1996,10 @@ async function confirmCheckout(){
     record.packageMinutes = p.unlimited ? "不限时" : p.minutes;
     record.packagePrice = p.price;
     record.extraMinutes = Math.floor(Number(t.extra || 0) / 60000);
-    record.extensionAmount = Math.max(0, finalChargeJPY - Number(p.price || 0));
-    record.originalJPY = finalChargeJPY;
+    record.extensionAmount = Math.max(0, finalSettlementJPY - Number(p.price || 0));
+    record.originalJPY = finalSettlementJPY;
+    record.beforeRoundJPY = finalChargeJPY;
+    record.roundDiscountJPY = useRound ? Math.max(0, finalChargeJPY - finalSettlementJPY) : 0;
     record.totalJPY = paymentTotalJPY;
     record.totalRMB = sumPaymentsRMB(record.payments);
     record.paidJPY = paymentTotalJPY;

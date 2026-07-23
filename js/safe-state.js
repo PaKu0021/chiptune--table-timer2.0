@@ -2013,7 +2013,13 @@ export function subscribeAllRecords({
           15000,
           "历史账单数量读取"
         );
-        total = Math.max(0,Number(countSnap.data().count || 0)-1);
+        const rawTotal = Number(countSnap.data().count || 0);
+        const initSnap = await withTimeout(
+          getDoc(doc(db,"records","init")),
+          15000,
+          "历史账单占位文档检查"
+        );
+        total = Math.max(0,rawTotal - (initSnap.exists() ? 1 : 0));
       }catch(err){
         console.warn("无法读取历史账单总数，将仅显示已读取数量",err);
       }

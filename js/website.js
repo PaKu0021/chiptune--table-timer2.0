@@ -2,8 +2,7 @@
 
 import {
     doc,
-    getDoc,
-    updateDoc
+    runTransaction
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 const LANG = {
@@ -131,16 +130,9 @@ async function submitWebsiteBooking(){
     if(!date || !startTime || !endTime) return alert("请选择预约日期和时间");
     if(startTime >= endTime) return alert("结束时间必须晚于开始时间");
 
-    const ref = doc(db,"shop","main");
-    const snap = await getDoc(ref);
-    const data = snap.exists() ? snap.data() : {};
-
-    if(!Array.isArray(data.bookings)){
-      data.bookings = [];
-    }
-
-    data.bookings.push({
-      id: Date.now(),
+    const now = Date.now();
+    const booking = {
+      id: now * 1000 + Math.floor(Math.random() * 1000),
       date,
       name,
       phone: contact,
@@ -161,12 +153,21 @@ async function submitWebsiteBooking(){
       finishedTableIndexes: [],
       cancelled: false,
       status: "pending",
-      createdAt: Date.now(),
+      createdAt: now,
       createdTime: new Date().toLocaleString()
-    });
+    };
 
-    await updateDoc(ref,{
-      bookings:data.bookings
+    const ref = doc(db,"shop","main");
+    await runTransaction(db, async transaction=>{
+      const snap = await transaction.get(ref);
+      const data = snap.exists() ? snap.data() : {};
+      const bookings = Array.isArray(data.bookings) ? data.bookings : [];
+      const nextBookings = [...bookings, booking];
+      if(snap.exists()){
+        transaction.update(ref,{bookings:nextBookings});
+      }else{
+        transaction.set(ref,{bookings:nextBookings},{merge:true});
+      }
     });
 
     alert("预约已提交，我们会尽快确认。");

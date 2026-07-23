@@ -1095,9 +1095,12 @@ async function saveEditedRecord(){
   r.totalJPY = payments.reduce((sum,p)=>sum + Number(p.amountJPY || 0),0);
   r.totalRMB = payments.reduce((sum,p)=>sum + Number(p.amountRMB || 0),0);
   r.paidJPY = r.totalJPY;
-  r.dueJPY = 0;
+  const originalJPY = Number(r.originalJPY ?? r.packagePrice ?? r.totalJPY ?? 0);
+  r.originalJPY = originalJPY;
+  r.dueJPY = Math.max(0, originalJPY - r.paidJPY);
   r.pay = summarizePaymentMethods(payments);
   r.currency = summarizeCurrencies(payments);
+  r.paidStatus = r.dueJPY > 0 ? "未结清" : "已结清";
   r.businessDate = businessDate || getRecordBusinessDate(r);
   r.businessDateManual = Boolean(businessDate);
   r.paymentNote = note;

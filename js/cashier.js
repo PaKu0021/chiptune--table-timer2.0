@@ -590,7 +590,7 @@ function applyDateFilter(){
 
 
 async function cleanupOldReceipts(){
-  if(!confirm("确定清理90天前的收款截图吗？\n\nFirestore里的截图字段会清空，Storage里的图片文件也会删除。")) return;
+  if(!confirm("确定清理90天前的收款截图吗？\n\n会清空账单里的截图字段；如果旧数据里有 receiptPath，也只会移除字段引用，不会删除 Firebase Storage 文件。")) return;
 
   const limit = Date.now() - 90 * 24 * 60 * 60 * 1000;
   let count = 0;

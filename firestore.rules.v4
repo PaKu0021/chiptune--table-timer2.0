@@ -7,6 +7,7 @@ service cloud.firestore {
     match /bookings/{id} { allow read, create, update: if true; allow delete: if false; }
     match /groups/{id} { allow read, create, update: if true; allow delete: if false; }
     match /customers/{id} { allow read, create, update: if true; allow delete: if false; }
+    match /groupCounters/{id} { allow read, create, update: if true; allow delete: if false; }
     match /records/{recordId} {
       allow read, create, update: if true;
       allow delete: if false;
