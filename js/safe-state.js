@@ -1926,9 +1926,17 @@ export async function atomicCheckInBooking({db,ref,state,bookingId,tableIndexes}
           record?.closedAt ||
           ["已结账","已结束","已关闭"].includes(String(record?.status || ""))
         );
+        const remoteStartedAt = typeof remote?.start?.toMillis === "function"
+          ? Number(remote.start.toMillis())
+          : Number(remote?.start || 0);
+        const staleRunningSession = Boolean(
+          remoteStartedAt &&
+          Date.now() - remoteStartedAt > 18 * 60 * 60 * 1000
+        );
         // shop/main 已空闲且原账单已关闭，说明权威桌位是旧版结账遗留的幽灵状态。
+        // 旧版本账单可能漏写 closed；超过18小时的运行状态也视为跨营业日幽灵。
         // 原子到店会在同一个事务中直接覆盖并修复它。
-        if(mainTable?.start || !recordClosed){
+        if(mainTable?.start || (!recordClosed && !staleRunningSession)){
           throw new Error(`${desired.name || `${entry.index+1}号桌`} 已由其他客人开始使用`);
         }
       }
