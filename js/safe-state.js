@@ -1897,6 +1897,14 @@ export async function atomicCheckInBooking({db,ref,state,bookingId,tableIndexes}
     for(const entry of tableRefs){
       tableSnaps.push({entry,snap:await tx.get(entry.ref)});
     }
+    const recordSnaps = new Map();
+    for(const {snap} of tableSnaps){
+      const remote = snap.exists() ? snap.data() : {};
+      const recordId = String(remote?.recordId || "");
+      if(remote?.start && recordId && !recordSnaps.has(recordId)){
+        recordSnaps.set(recordId,await tx.get(recordRefV4(db,recordId)));
+      }
+    }
 
     const main = mainSnap.exists() ? clone(mainSnap.data()) : {};
     const remoteBooking = bookingSnap.exists() ? bookingSnap.data() : {};
@@ -1907,7 +1915,22 @@ export async function atomicCheckInBooking({db,ref,state,bookingId,tableIndexes}
       const desired = clone(local.tables?.[entry.index] || {});
       const remote = snap.exists() ? snap.data() : {};
       if(remote?.start && Number(remote?.bookingId) !== Number(bookingId)){
-        throw new Error(`${desired.name || `${entry.index+1}号桌`} 已由其他客人开始使用`);
+        const mainTable = main.tables?.[entry.index] || {};
+        const recordId = String(remote?.recordId || "");
+        const recordSnap = recordId ? recordSnaps.get(recordId) : null;
+        const record = recordSnap?.exists() ? recordSnap.data() : {};
+        const recordClosed = Boolean(
+          record?.closed ||
+          record?.forceClosed ||
+          record?.deleted ||
+          record?.closedAt ||
+          ["已结账","已结束","已关闭"].includes(String(record?.status || ""))
+        );
+        // shop/main 已空闲且原账单已关闭，说明权威桌位是旧版结账遗留的幽灵状态。
+        // 原子到店会在同一个事务中直接覆盖并修复它。
+        if(mainTable?.start || !recordClosed){
+          throw new Error(`${desired.name || `${entry.index+1}号桌`} 已由其他客人开始使用`);
+        }
       }
       const version = Number(remote.version || remote?._entitySync?.version || 0) + 1;
       const entity = {
@@ -1995,6 +2018,85 @@ export async function atomicCheckInBooking({db,ref,state,bookingId,tableIndexes}
     "synced",
     idbStateDegraded ? "● 云端已同步 · 本机使用应急缓存" : "● 到店状态已同步"
   );
+  return clone(committedState);
+}
+
+/*
+ * 结账/强制结束时同步释放权威 tables 文档和 shop/main 兼容视图。
+ * expectedRecordId 防止延迟到达的旧结账误清除另一位客人刚开始的新计时。
+ */
+export async function atomicReleaseTable({
+  db,
+  ref,
+  tableIndex,
+  table,
+  expectedRecordId="",
+  action="release_table"
+}){
+  if(!navigator.onLine) throw new Error("当前离线，桌位将保留在本机队列等待释放");
+  const index = Number(tableIndex);
+  const tableId = entityDocId("table",index,index);
+  const tableRef = doc(db,"tables",tableId);
+  const operationId = `${action}_${index}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  let committedState = null;
+
+  await withTimeout(runTransaction(db,async tx=>{
+    const mainSnap = await tx.get(ref);
+    const tableSnap = await tx.get(tableRef);
+    const main = mainSnap.exists() ? clone(mainSnap.data()) : {};
+    const remote = tableSnap.exists() ? tableSnap.data() : {};
+    const remoteRecordId = String(remote?.recordId || "");
+    const expected = String(expectedRecordId || "");
+
+    if(remote?.start && expected && remoteRecordId && remoteRecordId !== expected){
+      throw new Error("桌位已开始新的计时，旧结账不能清除当前客人");
+    }
+
+    const version = Number(remote.version || remote?._entitySync?.version || 0) + 1;
+    const nextTable = {
+      ...clone(table || {}),
+      id:tableId,
+      tableIndex:index,
+      version,
+      deleted:false,
+      updatedAt:serverTimestamp(),
+      updatedBy:getDeviceId(),
+      lastOperationId:operationId,
+      _entitySync:{version,deviceId:getDeviceId(),operationId}
+    };
+    tx.set(tableRef,nextTable,{merge:false});
+
+    const tables = Array.isArray(main.tables) ? clone(main.tables) : [];
+    tables[index] = {
+      ...clone(table || {}),
+      _entitySync:{version,updatedAt:Date.now(),deviceId:getDeviceId(),operationId}
+    };
+    committedState = {
+      ...main,
+      tables,
+      _sync:{
+        revision:Number(main?._sync?.revision || 0)+1,
+        updatedAt:Date.now(),
+        deviceId:getDeviceId(),
+        operationId,
+        action,
+        architecture:"entity-v4"
+      }
+    };
+    tx.set(ref,committedState,{merge:false});
+    tx.set(operationRef(db,operationId),{
+      operationId,
+      entityType:"table",
+      entityId:tableId,
+      tableIndex:index,
+      action,
+      deviceId:getDeviceId(),
+      status:"committed",
+      committedAt:serverTimestamp()
+    });
+  }),CLOUD_SYNC_TIMEOUT_MS,"释放桌位服务器事务");
+
+  baseline = clone(committedState);
   return clone(committedState);
 }
 

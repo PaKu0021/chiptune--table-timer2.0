@@ -1,11 +1,11 @@
 ﻿/*alert("app.js 已加载");*/
-import { db } from "./firebase.js?v=4.0.16";
+import { db } from "./firebase.js?v=4.0.17";
 import { doc, onSnapshot, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime } from "./safe-state.js?v=4.0.16";
-/*import { formatTime } from "./common.js?v=4.0.16";*/
-import { resetTable, formatTime } from "./common.js?v=4.0.16";
-import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=4.0.16";
-import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.16";
+import { setStateBaseline, saveStateSafely, installConnectionGuard, setSyncStatus, atomicAdjustTableExtra, loadLocalState, reconcileCloudState, flushPending, getLocalRecord, getLocalRecordSync, saveRecordSafely, emergencySaveRecord, emergencySaveState, atomicStartTable, atomicBatchStartTables, atomicAdjustStartTime, atomicReleaseTable } from "./safe-state.js?v=4.0.17";
+/*import { formatTime } from "./common.js?v=4.0.17";*/
+import { resetTable, formatTime } from "./common.js?v=4.0.17";
+import { allocateGroupId, ensureGroups, getGroup, upsertGroup, syncGroupReferences } from "./group-model.js?v=4.0.17";
+import { getBusinessDateKey, jpyToRmb, currencyForPaymentMethod } from "./business-day.js?v=4.0.17";
 const ref = doc(db, "shop", "main");
 
 const VAPID_KEY = "BN7TodJ52H-wKg54Dj-tFcm21Q5zplpmeFuXYzqtQbkb1LzpTO-pRsGV1fWpUEiDKxBbqN8l2SRtzXuiisRHEPE";
@@ -2010,6 +2010,8 @@ async function confirmCheckout(){
     record.paidStatus = record.dueJPY > 0 ? "未结清" : "已结清";
     record.checkoutMethod = t.payTiming === "postpaid" ? "后付款一次性结账" : "结账确认";
     record.recordType = t.payTiming === "postpaid" ? "postpaid" : "prepaid";
+    record.closed = true;
+    record.status = "已结账";
     record.closedAt = Date.now();
     record.closedTime = new Date(record.closedAt).toLocaleString();
     record.businessDate = record.businessDate || getBusinessDateKey(record.startAt || record.timestamp || record.closedAt);
@@ -2034,6 +2036,23 @@ async function confirmCheckout(){
     // IndexedDB 和 Firestore 都放到后台，不再让用户卡在“正在结账”。
     emergencySaveRecord({db,ref,record});
     state.tables[originalIndex] = resetTable(t.name);
+    if(navigator.onLine){
+      try{
+        const released = await atomicReleaseTable({
+          db,
+          ref,
+          tableIndex:originalIndex,
+          table:state.tables[originalIndex],
+          expectedRecordId:record.id,
+          action:"checkout_release_table"
+        });
+        if(released?.tables?.[originalIndex]){
+          state.tables[originalIndex] = released.tables[originalIndex];
+        }
+      }catch(releaseError){
+        console.warn("结账后权威桌位释放失败，保留同步队列继续重试",releaseError);
+      }
+    }
     emergencySaveState({db,ref,state,action:"checkout_complete"});
 
     closeCheckout();
@@ -2210,6 +2229,23 @@ async function confirmForceEnd(){
 
     const tableName = t.name;
     state.tables[i] = resetTable(tableName);
+    if(navigator.onLine){
+      try{
+        const released = await atomicReleaseTable({
+          db,
+          ref,
+          tableIndex:i,
+          table:state.tables[i],
+          expectedRecordId:record.id,
+          action:"force_end_release_table"
+        });
+        if(released?.tables?.[i]){
+          state.tables[i] = released.tables[i];
+        }
+      }catch(releaseError){
+        console.warn("强制结束后权威桌位释放失败，保留同步队列继续重试",releaseError);
+      }
+    }
     emergencySaveState({db,ref,state,action:"emergency_force_end_table"});
 
     const modal = document.getElementById("forceEndModalBg");
