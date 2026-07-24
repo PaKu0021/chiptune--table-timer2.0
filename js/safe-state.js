@@ -1696,10 +1696,25 @@ export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,time
   try{
     await withTimeout(runTransaction(db, async tx=>{
       const tableSnap = await tx.get(tableRef);
+      const mainSnap = await tx.get(ref);
       const remote = tableSnap.exists() ? clone(tableSnap.data()) : {};
+      const main = mainSnap.exists() ? clone(mainSnap.data()) : {};
 
       if(remote.start && !remote.deleted){
         committedTable = clone(remote);
+        const tables = Array.isArray(main.tables) ? clone(main.tables) : [];
+        tables[index] = clone(remote);
+        tx.set(ref,{
+          ...main,
+          tables,
+          _sync:{
+            revision:Number(main?._sync?.revision || 0)+1,
+            updatedAt:Date.now(),
+            deviceId:getDeviceId(),
+            action:"atomic_start_table_repair_view",
+            operationId:String(remote.lastOperationId || "")
+          }
+        },{merge:false});
         startedByThisDevice = false;
         return;
       }
@@ -1721,6 +1736,34 @@ export async function atomicStartTable({db,ref,tableIndex,tablePatch,record,time
 
       tx.set(tableRef,committedTable,{merge:false});
       tx.set(recordRef,{...clone(record),deleted:false,updatedAt:serverTimestamp(),updatedBy:getDeviceId(),lastOperationId:operationId},{merge:true});
+
+      // 桌位权威文档、进行中账单和 shop/main 兼容视图必须在同一事务提交。
+      // 否则账单会已生成，但计时页面收到旧 shop/main 后又恢复为“未开始”。
+      const tables = Array.isArray(main.tables) ? clone(main.tables) : [];
+      tables[index] = {
+        ...clone(tablePatch),
+        id:tableId,
+        tableIndex:index,
+        version,
+        deleted:false,
+        updatedAt:Date.now(),
+        updatedBy:getDeviceId(),
+        lastOperationId:operationId,
+        _entitySync:{version,updatedAt:Date.now(),deviceId:getDeviceId(),operationId}
+      };
+      tx.set(ref,{
+        ...main,
+        tables,
+        _sync:{
+          revision:Number(main?._sync?.revision || 0)+1,
+          updatedAt:Date.now(),
+          deviceId:getDeviceId(),
+          action:"atomic_start_table",
+          operationId,
+          architecture:"entity-v4"
+        }
+      },{merge:false});
+      committedTable = clone(tables[index]);
       startedByThisDevice = true;
     }),CLOUD_SYNC_TIMEOUT_MS,"服务器锁定桌位");
   }catch(error){

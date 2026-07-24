@@ -1,6 +1,6 @@
-﻿import { db } from "./firebase.js?v=4.0.18";
+﻿import { db } from "./firebase.js?v=4.0.19";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
-import { loadLocalState } from "./safe-state.js?v=4.0.18";
+import { loadLocalState } from "./safe-state.js?v=4.0.19";
 
 const ref = doc(db, "shop", "main");
 const gridEl = document.getElementById("printGrid");
