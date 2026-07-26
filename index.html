@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>正在进入桌位时间</title>
+</head>
+<body>
+  <p>正在进入新版桌位时间页面……</p>
+  <script>
+    const target = new URL(
+      "https://paku0021.github.io/chiptune--table-timer4.0/display.html"
+    );
+    const params = new URLSearchParams(location.search);
+    const table = params.get("table") || params.get("tableNo");
+    if(table) target.searchParams.set("table",table);
+    location.replace(target.href);
+  </script>
+</body>
+</html>
